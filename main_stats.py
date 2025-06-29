@@ -2,11 +2,14 @@ from robotlib.stats import BalanceProcessor, BalanceCalculator, TradeStatisticsA
 
 
 def main():
-    stats = TradeStatisticsAnalyzer.load_from_file('/Users/egor/Dev/tinvest/robot/stats.pickle')
-
-    short, full = stats.get_report(processors=[BalanceProcessor()], calculators=[BalanceCalculator()])
-
-    print(full)
+    stats = TradeStatisticsAnalyzer.load_from_file(
+        '/Users/vladimirkokhanevich/Projects/investRobot/backtest_stats.pickle'
+    )
+    short, full = stats.get_report(
+        processors=[BalanceProcessor()], 
+        calculators=[BalanceCalculator()]
+    )
+    # print(full)
     print(short)
 
 

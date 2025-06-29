@@ -10,34 +10,49 @@ from dataclasses import asdict
 
 import pandas as pd
 
-from tinkoff.invest import OrderState, Instrument, OrderDirection, Quotation, MoneyValue, OrderExecutionReportStatus, \
+from tinkoff.invest import (
+    OrderState, 
+    Instrument, 
+    OrderDirection, 
+    Quotation, 
+    MoneyValue, 
+    OrderExecutionReportStatus,
     OrderType
+)
 
-from robotlib.money import Money
+from robotlib.utils.money import Money
 
 
 class TradeStatisticsAnalyzer:
     PENDING_ORDER_STATUSES = [
             OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_NEW,
             OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_PARTIALLYFILL
-        ]
+    ]
 
     trades: dict[str, OrderState]
     positions: int
     money: float
-    instrument_info: Instrument
+    instrument: Instrument
     logger: logging.Logger
 
-    def __init__(self, positions: int, money: float, instrument_info: Instrument, logger: logging.Logger):
+    def __init__(
+            self, 
+            positions: int, 
+            money: float, 
+            instrument: Instrument, 
+            logger: logging.Logger
+    ):
         self.trades = {}
         self.positions = positions
         self.money = money
-        self.instrument_info = instrument_info
+        self.instrument = instrument
         self.logger = logger
 
     def add_trade(self, trade: OrderState) -> None:
-        self.logger.debug(f'Updating balance. Current state: [positions={self.positions} money={self.money}]. '
-                          f'trade: {trade}')
+        self.logger.debug(
+            f'Updating balance. Current state: [positions={self.positions} money={self.money}]. '
+            f'trade: {trade}'
+        )
 
         if trade.order_id in self.trades:
             trade.direction = self.trades[trade.order_id].direction
@@ -85,30 +100,34 @@ class TradeStatisticsAnalyzer:
             return
         price_money = MoneyValue('RUB', price.units, price.nano)
         zero_money = MoneyValue('RUB', 0, 0)
-        self.add_trade(OrderState(
-            order_id=str(uuid.uuid4()),
-            execution_report_status=OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_FILL,
-            lots_requested=quantity,
-            lots_executed=quantity,
-            initial_order_price=price_money,
-            executed_order_price=price_money,
-            total_order_amount=(Money(price) * quantity).to_money_value('RUB'),
-            average_position_price=price_money,
-            initial_commission=zero_money,
-            executed_commission=zero_money,
-            figi=self.instrument_info.figi,
-            direction=direction,
-            initial_security_price=price_money,
-            stages=[],
-            service_commission=zero_money,
-            currency=price_money.currency,
-            order_type=OrderType.ORDER_TYPE_MARKET,
-            order_date=datetime.datetime.now()
-        ))
+        self.add_trade(
+            OrderState(
+                order_id=str(uuid.uuid4()),
+                execution_report_status=OrderExecutionReportStatus.EXECUTION_REPORT_STATUS_FILL,
+                lots_requested=quantity,
+                lots_executed=quantity,
+                initial_order_price=price_money,
+                executed_order_price=price_money,
+                total_order_amount=(Money(price) * quantity).to_money_value('RUB'),
+                average_position_price=price_money,
+                initial_commission=zero_money,
+                executed_commission=zero_money,
+                figi=self.instrument.figi,
+                direction=direction,
+                initial_security_price=price_money,
+                stages=[],
+                service_commission=zero_money,
+                currency=price_money.currency,
+                order_type=OrderType.ORDER_TYPE_MARKET,
+                order_date=datetime.datetime.now()
+            )
+        )
 
-    def get_report(self, processors: list[TradeStatisticsProcessorBase] = None,
-                   calculators: list[TradeStatisticsCalculatorBase] = None)\
-            -> tuple[dict[str, any], pd.DataFrame]:
+    def get_report(
+            self, 
+            processors: list[TradeStatisticsProcessorBase] = None,
+            calculators: list[TradeStatisticsCalculatorBase] = None)\
+    -> tuple[dict[str, any], pd.DataFrame]:
         df = pd.DataFrame(map(asdict, self.trades.values()))  # pylint:disable=invalid-name
         df['average_position_price'] = df['average_position_price'].apply(lambda x: x['units'] + x['nano'] / (10 ** 9))
         df['total_order_amount'] = df['total_order_amount'].apply(lambda x: x['units'] + x['nano'] / (10 ** 9))
