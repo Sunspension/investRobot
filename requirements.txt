@@ -37,7 +37,7 @@ retrying==1.4.0
 setuptools==80.9.0
 six==1.17.0
 tinkoff==0.1.1
-tinkoff-investments==0.2.0b114
+tinkoff-investments==0.2.0b116
 typing_extensions==4.14.0
 tzdata==2025.2
 urllib3==2.5.0

@@ -1,15 +1,17 @@
 import plotly.graph_objs as go
+import numpy as np
 
 from plotly.graph_objects import Figure
 from pandas.core.frame import DataFrame
 from dash import Dash, dcc, html, Input, Output
+from talipp.indicators import MACD
 
 app = Dash(__name__)
 app.layout = html.Div([
     dcc.Graph(id='live-graph'),
     dcc.Interval(
         id='interval-component',
-        interval=1*1000,
+        interval=0.5*1000,
         n_intervals=0
     )
 ])
@@ -27,95 +29,109 @@ class Visualizator:
     def get_dash_app(self):
         return app
 
-    def update_chart(self, candle_df: DataFrame, signals: dict):
-        date, open, high, low, close = [
-            candle_df[col] for col in ['Date','Open', 'High', 'Low', 'Close']
-        ]
+    def update_chart(self, df: DataFrame, trades: DataFrame):
+        date = df['date']
+        open = df['open']
+        high = df['high']
+        low = df['low']
+        close = df['close']
 
-        candlestick = go.Candlestick(
+        macd = df['macd']
+        signal = df['signal']
+        histogram = df['histogram']
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Candlestick(
             x=date,
             open=open,
             high=high,
             low=low,
             close=close,
             name='Свечи'
-        )
-
-        jaw, teeth, lips = [candle_df[col] for col in ['Jaw', 'Teeth', 'Lips']]
+        ))
         
-        line_jaw = go.Scatter(
+        fig.add_trace(go.Scatter(
             x=date, 
-            y=jaw, 
+            y=macd, 
             mode='lines', 
-            line=dict(color='blue', width=2, dash='dot'), 
-            name='Jaw'
-        )
+            line=dict(color='blue', width=2), 
+            name='macd',
+            yaxis='y2'
+        ))
 
-        line_teeth = go.Scatter(
+        fig.add_trace(go.Scatter(
+            x=date,
+            y=signal, 
+            mode='lines', 
+            line=dict(color='red', width=2), 
+            name='signal',
+            yaxis='y2'
+        ))
+
+        fig.add_trace(go.Scatter(
             x=date, 
-            y=teeth, 
+            y=histogram,
             mode='lines', 
-            line=dict(color='red', width=2, dash='dot'), 
-            name='Teeth'
-        )
+            line=dict(color='green', width=2), 
+            name='histogram',
+            yaxis='y2'
+        ))
 
-        line_lips = go.Scatter(
-            x=date, 
-            y=lips, 
-            mode='lines', 
-            line=dict(color='green', width=2, dash='dot'), 
-            name='Lips'
-        )
+        # 3. Гистограмма MACD (нижняя часть, та же ось y2)
+        fig.add_trace(go.Bar(
+            x=date,
+            y=histogram,
+            name='Histogram',
+            marker_color='green',
+            yaxis='y2'
+        ))
 
-        fig = go.Figure(
-            data=[
-                candlestick, 
-                line_jaw, 
-                line_teeth, 
-                line_lips
-            ]
-        )
-
-        # Добавляем awesome ascillator
-        ao = candle_df['AO']
-
-        fig.add_trace(
-            go.Bar(
-                x=date,
-                y=ao,
-                name='Awesome Oscillator',
-                marker_color='purple',
-                yaxis='y2'
-            )
-        )
-
-        # fig.add_trace(
-        #     go.Bar(
-        #         x=date,
-        #         y=candle_df['Volume'],
-        #         name='Объём',
-        #         yaxis='y3',
-        #         marker_color='rgba(100, 100, 200, 0.5)'
-        #     )
-        # )
-
-        for key, value in signals.items():
-            if value in ('BUY', 'SELL'):
-                x_val = key
-                line_color = 'green' if value == 'BUY' else 'red'
-                fig.add_vline(
-                    x=x_val,
-                    line=dict(color=line_color, width=1)
-                    # annotation_text=,
-                    # annotation_position="top right"
+        df_buy = trades[
+            trades['type'].isin(['buy', 'short_buy', 'stop_loss_short_cover'])
+            ].sort_values(by='date')
+        fig.add_trace(go.Scatter(
+            x=df_buy['date'].to_list(),
+            y=df_buy['marker_price'].to_list(),
+            mode='markers',
+            marker=dict(
+                symbol='triangle-up',
+                color='rgb(50, 205, 50)',
+                size=12,
+                    line=dict(
+                    color='rgb(0, 150, 0)',
+                    width=1
                 )
+            ),
+            name='Покупка'
+        ))
 
-        # # Добавляем заливку фона для периодов консолидации
-        # consolidation_periods = []
-        # start = None
+        df_sell = trades[
+            trades['type'].isin(['sell', 'short_sell', 'stop_loss_sell'])
+            ].sort_values(by='date')
+        
+        fig.add_trace(go.Scatter(
+            x=df_sell['date'].to_list(),
+            y=df_sell['marker_price'].to_list(),
+            mode='markers',
+            marker=dict(
+                symbol='triangle-down',
+                color='rgb(255, 0, 0)',
+                size=12,
+                line=dict(
+                    color='rgb(150, 0, 0)',
+                    width=1
+                )
+            ),
+            name='Продажа'
+        ))
 
-        # for i in range(len(candle_df)):
-        #     if candle_df['Consolidation'].iloc[i]:
+        # Добавляем заливку фона для периодов консолидации
+        consolidation_periods = []
+        start = None
+
+        # for i in range(len(df)):
+        #     if df['Consolidation'].iloc[i]:
         #         if start is None:
         #             start = date[i]
         #         end = date[i]
@@ -138,28 +154,29 @@ class Visualizator:
         #         line_width=0,
         #     )
 
+         
         fig.update_layout(
-            template='plotly_dark',
             height=700,
-            xaxis_rangeslider_visible=False,
+            xaxis=dict(
+                domain=[0, 1],
+                rangeslider=dict(visible=False),
+                anchor='y1'
+            ),
             yaxis=dict(
+                domain=[0.3, 1],  # верхняя часть графика (свечи)
                 title='Цена',
-                domain=[0.4, 1]  # верхняя часть графика — свечи
+                anchor='x'
             ),
             yaxis2=dict(
-                title='AO',
-                domain=[0, 0.25],  # самая нижняя часть — AO
-                anchor='x',
-                side='left'
+                domain=[0, 0.3],  # нижняя часть графика (MACD)
+                title='MACD',
+                anchor='x'
             ),
-            # yaxis3=dict(
-            #     title='Объём',
-            #     domain=[0, 0.25],  # нижняя часть — объём
-            #     anchor='x'
-            # ),
-            margin=dict(l=40, r=40, t=40, b=40),
-            title="Динамический график Аллигатора"
+            title="MACD",
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1)
         )
+
+        fig.show()
         
         global current_figure
         current_figure = fig

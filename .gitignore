@@ -301,3 +301,37 @@ pyvenv.cfg
 pip-selfcheck.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python,pycharm+all,virtualenv,macos
+
+### InvestRobot Project Specific ###
+# Data files
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/optimization_results/
+data/backtest_results/
+
+# Log files
+logs/*.log
+*.log
+
+# Trading data
+trading_*.log
+backtest_stats.pickle
+
+# Environment variables
+.env
+.env.local
+.env.production
+
+# IDE specific
+.vscode/
+.idea/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*~

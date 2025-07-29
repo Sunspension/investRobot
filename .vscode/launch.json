@@ -5,12 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "stats",
+            "name": "test",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/main_stats.py",
+            "program": "${workspaceFolder}/main.py",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
         },
         {
             "name": "main",

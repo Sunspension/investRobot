@@ -45,8 +45,6 @@ class Money:
         return MoneyValue(currency, self.units, self.nano)
 
     def __add__(self, other: Money) -> Money:
-        print(self.units + other.units + (self.nano + other.nano) // self.MOD)
-        print((self.nano + other.nano) % self.MOD)
         return Money(
             self.units + other.units + (self.nano + other.nano) // self.MOD,
             (self.nano + other.nano) % self.MOD

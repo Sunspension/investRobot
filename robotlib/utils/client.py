@@ -1,5 +1,3 @@
-import enum
-
 from datetime import datetime
 from typing import Protocol, AsyncGenerator, Optional, List
 from robotlib.utils.money import Money
@@ -16,22 +14,21 @@ from tinkoff.invest import (
     OrderDirection,
     OrderType,
     InstrumentShort, 
-    InstrumentType
+    InstrumentType,
+    InstrumentResponse
 )
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
 
-
 class InvestClient(Protocol):
-
     async def current_postitions(self, instr: Instrument) -> tuple[Money, int]:
         ...
-    async def instrument(
+    async def instrument_info(
         self, 
         figi: str = None, 
         ticker: str = None, 
         class_code: str = None
-    ) -> Instrument:
+    ) -> InstrumentResponse:
         ...
     async def get_all_candles(
         self,
@@ -81,52 +78,52 @@ class AsyncInvestClient(InvestClient):
             sandbox_token,
             sandbox_mode=False
     ):
-        self.__account_id = account_id
-        self.__sandbox_mode = sandbox_mode
-        self.__app_name = app_name
-        self.__token = token
-        self.__sandbox_token = sandbox_token
+        self._account_id = account_id
+        self._sandbox_mode = sandbox_mode
+        self._app_name = app_name
+        self._token = token
+        self._sandbox_token = sandbox_token
 
     async def __aenter__(self):
-        self.__async_client = AsyncClient(
-            token=self.__token, 
-            sandbox_token=self.__sandbox_token, 
-            app_name=self.__app_name
+        self._async_client = AsyncClient(
+            token=self._token, 
+            sandbox_token=self._sandbox_token, 
+            app_name=self._app_name
         )
-        self.__services = await self.__async_client.__aenter__()
+        self._services = await self._async_client.__aenter__()
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
-        if self.__async_client:
-            await self.__async_client.__aexit__(exc_type, exc, tb)
-            self.__async_client = None
-            self.__services = None
+        if self._async_client:
+            await self._async_client.__aexit__(exc_type, exc, tb)
+            self._async_client = None
+            self._services = None
     
-    async def instrument(self, figi = None, ticker = None, class_code = None):
+    async def instrument_info(self, figi = None, ticker = None, class_code = None) -> InstrumentResponse:
         if figi is None:
             if ticker is None or class_code is None:
                     raise ValueError('figi or both ticker and class_code must be not None')
-            return await self.__services.instruments.get_instrument_by(
+            return await self._services.instruments.get_instrument_by(
                 id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_TICKER,
                 class_code=class_code, 
                 id=ticker
             )
-        return await self.__services.instruments.get_instrument_by(
+        return await self._services.instruments.get_instrument_by(
              id_type=InstrumentIdType.INSTRUMENT_ID_TYPE_FIGI, 
              id=figi
         )
     
     async def current_postitions(self, inst: Instrument) -> tuple[Money, int]:
-        if self.__sandbox_mode:
-            positions = await self.__services.sandbox.get_sandbox_positions(account_id=self.__account_id)
+        if self._sandbox_mode:
+            positions = await self._services.sandbox.get_sandbox_positions(account_id=self._account_id)
         else:
-            positions = await self.__services.operations.get_positions(account_id=self.__account_id)
+            positions = await self._services.operations.get_positions(account_id=self._account_id)
         instruments = [sec for sec in positions.securities if sec.figi == inst.figi]
 
         if len(instruments) > 0:
-            instrument = instruments[0].balance
+            balance = instruments[0].balance
         else:
-            instrument = 0
+            balance = 0
 
         currencies = [m for m in positions.money if m.currency == inst.currency]
         if len(currencies) > 0:
@@ -134,7 +131,7 @@ class AsyncInvestClient(InvestClient):
         else:
             money = Money(0, 0)
 
-        return money, instrument
+        return money, balance
     
     async def get_all_candles(
         self,
@@ -145,7 +142,7 @@ class AsyncInvestClient(InvestClient):
         figi: str = "",
         instrument_id: str = "",
     ) -> AsyncGenerator[HistoricCandle, None]:
-        return self.__services.get_all_candles(
+        return self._services.get_all_candles(
             from_=from_, 
             to=to, 
             interval=interval,
@@ -154,13 +151,13 @@ class AsyncInvestClient(InvestClient):
         )
         
     async def cancel_order(self, *, order_id = "") -> CancelOrderResponse:
-        return self.__services.orders.cancel_order(self, account_id=self.__account_id, order_id=order_id)
+        return self._services.orders.cancel_order(self, account_id=self._account_id, order_id=order_id)
     
     async def trading_status(self, *, figi = "", instrument_id = "") -> GetTradingStatusResponse:
-        return self.__services.market_data.get_trading_status(figi=figi, instrument_id=instrument_id)
+        return self._services.market_data.get_trading_status(figi=figi, instrument_id=instrument_id)
     
     async def create_market_data_stream(self):
-        return self.__services.create_market_data_stream()
+        return self._services.create_market_data_stream()
     
     async def post_order(
             self, 
@@ -172,37 +169,37 @@ class AsyncInvestClient(InvestClient):
             order_type = OrderType(0), 
             order_id = "", 
             instrument_id = ""
-    ):
-        if self.__sandbox_mode:
-            return self.__services.sandbox.post_sandbox_order(
+    ) -> PostOrderResponse:
+        if self._sandbox_mode:
+            return self._services.sandbox.post_sandbox_order(
                     figi=figi,
                     quantity=quantity,
                     price=price,
                     direction=direction,
-                    account_id=self.__account_id,
+                    account_id=self._account_id,
                     order_type=order_type,
                     order_id=order_id,
                     instrument_id=instrument_id
             )
-        return self.__services.orders.post_order(
+        return self._services.orders.post_order(
                 figi=figi,
                 quantity=quantity,
                 price=price,
                 direction=direction,
-                account_id=self.__account_id,
+                account_id=self._account_id,
                 order_type=order_type,
                 order_id=order_id,
                 instrument_id=instrument_id
         )
     
     async def order_state(self, order_id):
-        if self.__sandbox_mode:
-            return self.__services.sandbox.get_sandbox_order_state(
-                account_id=self.__account_id, 
+        if self._sandbox_mode:
+            return self._services.sandbox.get_sandbox_order_state(
+                account_id=self._account_id, 
                 order_id=order_id
             )
-        return self.__services.orders.get_order_state(
-            account_id=self.__account_id, 
+        return self._services.orders.get_order_state(
+            account_id=self._account_id, 
             order_id=order_id
         )
         
@@ -212,7 +209,7 @@ class AsyncInvestClient(InvestClient):
             query, 
             type = InstrumentType.INSTRUMENT_TYPE_UNSPECIFIED
     ) -> List[InstrumentShort]:
-        response = await self.__services.instruments.find_instrument(query=query, instrument_kind=type)
+        response = await self._services.instruments.find_instrument(query=query, instrument_kind=type)
         return response.instruments
 
     
