@@ -51,12 +51,74 @@ async def main():
         auto_close_positions=True
     )
     
-    # Создаем торговую сессию
-    session = TradingSession(
-        config=trading_config,
+    # Создаем зависимости
+    from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
+    from robotlib.trading.order_executor import OrderExecutor
+    from robotlib.trading.portfolio_manager import PortfolioManager
+    from robotlib.trading.risk_manager import RiskManager
+    from robotlib.trading.session_stats import SessionStats
+    from robotlib.trading.session_initializer import SessionInitializer
+    from robotlib.signal_manager import SignalManager
+    from robotlib.strategies.strategy_manager import StrategyManager
+    from robotlib.utils.market_data_stream import MarketDataStream
+    from robotlib.trading.interfaces import TradingDependencies
+    
+    # Создаем API клиент
+    api_client = TinkoffAPIClient(
         token=config.tcs_client.token,
         account_id=config.tcs_client.id,
         sandbox_token=getattr(config.tcs_client, 'sandbox_token', None)
+    )
+    
+    # Создаем компоненты
+    order_executor = OrderExecutor(api_client)
+    portfolio_manager = PortfolioManager(api_client)
+    risk_manager = RiskManager(portfolio_manager, risk_limits)
+    signal_manager = SignalManager(**signal_params)
+    
+    # Создаем поток данных
+    market_data_stream = MarketDataStream(
+        api_client=api_client,
+        signal_manager=signal_manager,
+        figi="FUTIMOEXF000"
+    )
+    
+    # Создаем менеджер стратегий
+    strategy_manager = StrategyManager(
+        signal_manager=signal_manager,
+        risk_manager=risk_manager,
+        portfolio_manager=portfolio_manager,
+        order_executor=order_executor
+    )
+    
+    # Создаем компоненты сессии
+    session_stats = SessionStats()
+    session_initializer = SessionInitializer(
+        api_client=api_client,
+        portfolio_manager=portfolio_manager,
+        risk_manager=risk_manager,
+        signal_manager=signal_manager,
+        strategy_manager=strategy_manager,
+        market_data_stream=market_data_stream
+    )
+    
+    # Создаем зависимости
+    dependencies = TradingDependencies(
+        api_client=api_client,
+        order_executor=order_executor,
+        portfolio_manager=portfolio_manager,
+        risk_manager=risk_manager,
+        signal_manager=signal_manager,
+        strategy_manager=strategy_manager,
+        market_data_stream=market_data_stream,
+        session_stats=session_stats,
+        session_initializer=session_initializer
+    )
+    
+    # Создаем торговую сессию
+    session = TradingSession(
+        config=trading_config,
+        dependencies=dependencies
     )
     
     try:

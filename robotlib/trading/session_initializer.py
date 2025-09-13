@@ -71,22 +71,27 @@ class SessionInitializer(SessionInitializable):
     
     async def _check_risk_limits(self) -> None:
         """Проверяет лимиты риска"""
-        self.logger.info("Проверка лимитов риска...")
+        self.logger.debug("Проверка лимитов риска...")
         
         # Получаем текущий баланс
         portfolio = await self.dependencies.portfolio_manager.get_portfolio()
-        current_balance = portfolio.total_money_balance
+        current_balance = portfolio.total_amount
         
-        # Проверяем лимиты
-        risk_check = await self.dependencies.risk_manager.check_trade_risk(
-            trade_amount=0,  # Проверяем только лимиты без конкретной сделки
-            current_balance=current_balance
-        )
-        
-        if not risk_check.success:
-            self.logger.warning(f"Предупреждение по лимитам риска: {risk_check.message}")
+        # Проверяем лимиты только если есть средства
+        if current_balance > 0:
+            risk_check = await self.dependencies.risk_manager.check_trade_risk(
+                figi=self.config.figi,
+                quantity=1,  # Минимальное количество для проверки
+                price=100.0,  # Фиктивная цена
+                direction="buy"
+            )
+            
+            if not risk_check.passed:
+                self.logger.debug(f"Предупреждение по лимитам риска: {risk_check.message}")
+            else:
+                self.logger.debug("Лимиты риска в порядке")
         else:
-            self.logger.info("Лимиты риска в порядке")
+            self.logger.debug("Портфель пуст, пропускаем проверку лимитов")
     
     async def _get_point_value(self) -> Optional[float]:
         """Получает стоимость пункта для инструмента"""

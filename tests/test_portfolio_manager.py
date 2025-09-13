@@ -3,6 +3,7 @@
 Тесты для PortfolioManager
 """
 import unittest
+import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timedelta
@@ -101,7 +102,7 @@ class TestPortfolioManager(unittest.TestCase):
 
     def test_init(self):
         """Тест инициализации"""
-        self.assertEqual(self.portfolio_manager.api_client, self.mock_api_client)
+        self.assertEqual(self.portfolio_manager._api_client, self.mock_api_client)
         self.assertEqual(self.portfolio_manager._cache_ttl, 30)
         self.assertEqual(len(self.portfolio_manager._positions_cache), 0)
         self.assertIsNone(self.portfolio_manager._cache_timestamp)
@@ -136,6 +137,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(portfolio.blocked_amount, 0.0)
         self.assertEqual(portfolio.available_amount, 0.0)
 
+    @pytest.mark.asyncio
+
+
     async def test_get_portfolio_success(self):
         """Тест успешного получения портфеля"""
         # Мокаем ответ от API
@@ -169,6 +173,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(position.current_price, 100.5)
         self.assertEqual(position.unrealized_pnl, 5.0)  # (100.5 - 100.0) * 10
 
+    @pytest.mark.asyncio
+
+
     async def test_get_portfolio_api_error(self):
         """Тест получения портфеля с ошибкой API"""
         self.mock_api_client.get_portfolio = AsyncMock(return_value=None)
@@ -179,6 +186,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(portfolio.blocked_amount, 0.0)
         self.assertEqual(portfolio.available_amount, 0.0)
         self.assertEqual(len(portfolio.positions), 0)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_portfolio_with_cache(self):
         """Тест получения портфеля с использованием кэша"""
@@ -198,6 +208,9 @@ class TestPortfolioManager(unittest.TestCase):
         # Проверяем результат из кэша
         self.assertEqual(len(portfolio.positions), 1)
         self.assertEqual(portfolio.positions[0].figi, "FUTIMOEXF000")
+
+    @pytest.mark.asyncio
+
 
     async def test_get_portfolio_force_refresh(self):
         """Тест принудительного обновления портфеля"""
@@ -224,6 +237,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(portfolio.blocked_amount, 0.0)  # В коде всегда 0.0
         self.assertEqual(portfolio.available_amount, 200000.0)  # total_amount - blocked_amount
         self.assertEqual(len(portfolio.positions), 0)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_position_success(self):
         """Тест успешного получения позиции"""
@@ -253,6 +269,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(position.current_price, 100.5)
         self.assertEqual(position.unrealized_pnl, 5.0)
 
+    @pytest.mark.asyncio
+
+
     async def test_get_position_not_found(self):
         """Тест получения несуществующей позиции"""
         # Мокаем ответ от API без позиций
@@ -267,6 +286,9 @@ class TestPortfolioManager(unittest.TestCase):
         
         self.assertIsNone(position)
 
+    @pytest.mark.asyncio
+
+
     async def test_get_position_api_error(self):
         """Тест получения позиции с ошибкой API"""
         self.mock_api_client.get_portfolio = AsyncMock(return_value=None)
@@ -274,6 +296,9 @@ class TestPortfolioManager(unittest.TestCase):
         position = await self.portfolio_manager.get_position("FUTIMOEXF000")
         
         self.assertIsNone(position)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_guarantee_deposit_success(self):
         """Тест успешного получения гарантийного обеспечения"""
@@ -296,6 +321,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(deposit, 1700.0)
         self.mock_api_client.get_futures_margin.assert_called_once_with("FUTIMOEXF000")
 
+    @pytest.mark.asyncio
+
+
     async def test_get_guarantee_deposit_api_error(self):
         """Тест получения гарантийного обеспечения с ошибкой API"""
         self.mock_api_client.get_futures_margin = AsyncMock(return_value=None)
@@ -303,6 +331,9 @@ class TestPortfolioManager(unittest.TestCase):
         deposit = await self.portfolio_manager.get_guarantee_deposit("FUTIMOEXF000")
         
         self.assertEqual(deposit, 0.0)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_deposit_success(self):
         """Тест успешного получения депозита"""
@@ -317,6 +348,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(deposit, 100000.0)
         self.mock_api_client.get_portfolio.assert_called_once()
 
+    @pytest.mark.asyncio
+
+
     async def test_get_deposit_api_error(self):
         """Тест получения депозита с ошибкой API"""
         self.mock_api_client.get_portfolio = AsyncMock(return_value=None)
@@ -324,6 +358,9 @@ class TestPortfolioManager(unittest.TestCase):
         deposit = await self.portfolio_manager.get_deposit()
         
         self.assertEqual(deposit, 0.0)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_operations_history_success(self):
         """Тест успешного получения истории операций"""
@@ -353,6 +390,9 @@ class TestPortfolioManager(unittest.TestCase):
         
         self.mock_api_client.get_operations_history.assert_called_once_with(from_date, to_date)
 
+    @pytest.mark.asyncio
+
+
     async def test_get_operations_history_api_error(self):
         """Тест получения истории операций с ошибкой API"""
         self.mock_api_client.get_operations_history = AsyncMock(side_effect=Exception("API Error"))
@@ -363,6 +403,9 @@ class TestPortfolioManager(unittest.TestCase):
         operations = await self.portfolio_manager.get_operations_history(from_date, to_date)
         
         self.assertEqual(len(operations), 0)
+
+    @pytest.mark.asyncio
+
 
     async def test_process_position_data_success(self):
         """Тест успешной обработки данных позиции"""
@@ -383,6 +426,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertEqual(position.unrealized_pnl, 5.0)  # (100.5 - 100.0) * 10
         self.assertEqual(position.realized_pnl, 0.0)
 
+    @pytest.mark.asyncio
+
+
     async def test_process_position_data_zero_quantity(self):
         """Тест обработки данных позиции с нулевым количеством"""
         # Мокаем данные позиции с нулевым количеством
@@ -397,6 +443,9 @@ class TestPortfolioManager(unittest.TestCase):
         self.assertIsNotNone(position)
         self.assertEqual(position.quantity, 0)
         self.assertEqual(position.unrealized_pnl, 0.0)  # При quantity=0 PnL=0
+
+    @pytest.mark.asyncio
+
 
     async def test_process_position_data_error(self):
         """Тест обработки данных позиции с ошибкой"""

@@ -1,18 +1,6 @@
+#!/usr/bin/env python3
 """
-Фабрики для создания компонентов системы визуализации
+Фабрики для создания компонентов визуализации
 """
-from .visualizer_params import VisualizerParams
-from .trading_dependencies_factory import TradingDependenciesFactory
-from .trading_signals_visualizer_factory import TradingSignalsVisualizerFactory
-from .trading_session_manager_factory import (
-    TradingSessionManagerFactory,
-    MockTradingSessionManager
-)
 
-__all__ = [
-    'VisualizerParams',
-    'TradingDependenciesFactory',
-    'TradingSignalsVisualizerFactory',
-    'TradingSessionManagerFactory',
-    'MockTradingSessionManager'
-]
+__all__ = []

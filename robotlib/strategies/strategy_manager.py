@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import List
+from typing import List, Dict, Any
 from dataclasses import asdict
 from pandas import DataFrame
 
@@ -29,6 +29,37 @@ class StrategyManager(StrategyManageable):
     @property
     def income(self) -> float:
         return sum(strategy.income for strategy in self._strategies)
+    
+    def get_macd_data(self) -> List[dict]:
+        """Возвращает данные MACD для анализа сигналов"""
+        try:
+            macd_data = []
+            for macd_point in self._signal_manager._macd:
+                macd_data.append({
+                    'macd': macd_point.macd,
+                    'signal': macd_point.signal,
+                    'histogram': macd_point.histogram
+                })
+            return macd_data
+        except AttributeError:
+            return []
+    
+    def has_strategies(self) -> bool:
+        """Проверяет, инициализированы ли стратегии"""
+        return len(self._strategies) > 0
+    
+    def get_strategies_count(self) -> int:
+        """Возвращает количество стратегий"""
+        return len(self._strategies)
+    
+    def get_strategies(self) -> List[Strategyable]:
+        """Возвращает список стратегий"""
+        return self._strategies.copy()
+    
+    @property
+    def signal_manager(self) -> SignalManager:
+        """Возвращает SignalManager"""
+        return self._signal_manager
 
     
     def __init__(

@@ -27,12 +27,27 @@ class ChartBuilder:
         fig = go.Figure()
         
         if not candles_data:
+            # Создаем пустой график с заголовком
+            fig.update_layout(
+                title="📊 График цен - Ожидание данных...",
+                title_x=0.5,
+                xaxis_title="Время",
+                yaxis_title="Цена (₽)",
+                height=500,
+                showlegend=True,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=12)
+            )
             fig.add_annotation(
-                text="Ожидание данных...",
+                text="🔄 Загрузка исторических данных...",
                 xref="paper", yref="paper",
                 x=0.5, y=0.5,
                 showarrow=False,
-                font=dict(size=20, color="gray")
+                font=dict(size=18, color="#666"),
+                bgcolor="rgba(255,255,255,0.8)",
+                bordercolor="#ddd",
+                borderwidth=1
             )
             return fig
         

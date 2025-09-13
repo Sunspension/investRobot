@@ -35,10 +35,24 @@ class TradingVisualizerFactory:
             return None
         
         try:
-            # Импортируем адаптер только при необходимости
+            # Импортируем компоненты только при необходимости
             from visualization.trading_visualizer_adapter import TradingVisualizerAdapter
+            from visualization.data_manager import DataManager
+            from visualization.chart_builder import ChartBuilder
+            from visualization.ui_components import UIComponents
+            from visualization.interfaces import MockStrategyDataProvider
+            
+            # Создаем зависимости
+            data_manager = DataManager()
+            chart_builder = ChartBuilder()
+            ui_components = UIComponents(config.figi)
+            strategy_data_provider = MockStrategyDataProvider()  # Пока используем мок
             
             visualizer = TradingVisualizerAdapter(
+                data_manager=data_manager,
+                chart_builder=chart_builder,
+                ui_components=ui_components,
+                strategy_data_provider=strategy_data_provider,
                 figi=config.figi,
                 host=host,
                 port=port

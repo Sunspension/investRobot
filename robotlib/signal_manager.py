@@ -114,7 +114,7 @@ class SignalManager:
         lookback_max=20,
         peak_prominence=0.2,
     ):
-        self.candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
+        self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
         
         self._macd = MACD(
             fast_period=macd_fast, 
@@ -128,6 +128,11 @@ class SignalManager:
         self._peak_prominence = peak_prominence
 
         self._hist_window = deque(maxlen=lookback_max)
+
+    @property
+    def candles(self) -> deque:
+        """Возвращает свечи для чтения"""
+        return self._candles
 
     def add_candle(self, candle: Candle | HistoricCandle) -> Signal:
         price = Money(candle.close).to_float()
@@ -149,17 +154,17 @@ class SignalManager:
             return None  # недостаточно данных
 
         item = {
-                'date': candle.time,
-                'open': Money(candle.open).to_float(),
-                'high': Money(candle.high).to_float(),
-                'low': Money(candle.low).to_float(),
-                'close': Money(candle.close).to_float(),
-                'macd': macd_value.macd,
-                'signal': macd_value.signal,
-                'histogram': macd_value.histogram
+            'date': candle.time,
+            'open': Money(candle.open).to_float(),
+            'high': Money(candle.high).to_float(),
+            'low': Money(candle.low).to_float(),
+            'close': Money(candle.close).to_float(),
+            'macd': macd_value.macd,
+            'signal': macd_value.signal,
+            'histogram': macd_value.histogram
         }
 
-        self.candles.append(item)
+        self._candles.append(item)
 
         # Добавляем текущее значение гистограммы в окно
         self._hist_window.append(macd_value.histogram)
@@ -174,7 +179,7 @@ class SignalManager:
         
         atr_mean = np.nanmean(atr_values)
         if np.isnan(atr_mean):
-            return None # пропускаем шаг, если нет валидных данных
+            return None  # пропускаем шаг, если нет валидных данных
 
         vol_norm = self._atr[-1] / (atr_mean + 1e-6)
 

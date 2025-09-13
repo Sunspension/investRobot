@@ -2,6 +2,7 @@
 Исправленные тесты для StrategyManager
 """
 import unittest
+import pytest
 from unittest.mock import Mock, AsyncMock, patch
 import asyncio
 from datetime import datetime
@@ -40,6 +41,9 @@ class TestStrategyManager(unittest.TestCase):
         self.assertIsNotNone(self.strategy_manager._orders)
         self.assertEqual(len(self.strategy_manager._orders), 0)
     
+    @pytest.mark.asyncio
+
+    
     async def test_on_candle_no_signal(self):
         """Тест обработки свечи без сигнала"""
         # Создаем мок свечи
@@ -54,6 +58,9 @@ class TestStrategyManager(unittest.TestCase):
         
         # Проверяем, что заказы не добавились (используем переменную экземпляра)
         self.assertEqual(len(self.strategy_manager._orders), 0)
+    
+    @pytest.mark.asyncio
+
     
     async def test_on_candle_with_signal(self):
         """Тест обработки свечи с сигналом"""
@@ -174,6 +181,9 @@ class TestStrategyManager(unittest.TestCase):
         self.assertEqual(self.mock_risk_manager.risk_limits.percent_from_deposit, 50.0)
         self.assertEqual(self.mock_risk_manager.risk_limits.items_per_trade, 20)
         self.assertEqual(self.mock_risk_manager.risk_limits.stop_loss_threshold, 8.0)
+    
+    @pytest.mark.asyncio
+
     
     async def test_portfolio_manager_access(self):
         """Тест доступа к портфель-менеджеру через мок"""

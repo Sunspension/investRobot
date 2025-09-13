@@ -454,7 +454,7 @@ class TinkoffAPIClient:
     async def create_market_data_stream(self):
         """Создает стрим рыночных данных"""
         try:
-            return await self.services.create_market_data_stream()
+            return self.services.create_market_data_stream()
         except Exception as e:
             self.logger.error(f"Ошибка создания стрима рыночных данных: {e}")
             return None

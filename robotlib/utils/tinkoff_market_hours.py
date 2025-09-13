@@ -4,19 +4,21 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta, time
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Union
 import pytz
 
-from tinkoff.invest import AsyncClient, TradingSchedulesRequest
+from tinkoff.invest import AsyncClient
 from config_data.config import load_config
 from robotlib.utils.logger import get_logger
 
 
+def _has_attr(obj: Any, attr_name: str) -> bool:
+    """Проверяет, есть ли у объекта атрибут (для объектов из внешних API)"""
+    return hasattr(obj, attr_name) and getattr(obj, attr_name) is not None
+
+
 class TinkoffMarketHours:
     """Класс для получения торговых часов через Tinkoff API"""
-    
-    # Московское время
-    MOSCOW_TZ = pytz.timezone('Europe/Moscow')
     
     def __init__(self, token: str, sandbox: bool = True):
         """
@@ -26,11 +28,13 @@ class TinkoffMarketHours:
             token: Токен доступа к API
             sandbox: Использовать песочницу
         """
-        self.token = token
-        self.sandbox = sandbox
-        self.logger = get_logger(__name__)
+        # Приватные атрибуты
+        self._token = token
+        self._sandbox = sandbox
+        self._logger = get_logger(__name__)
+        self._moscow_tz = pytz.timezone('Europe/Moscow')
         
-        # Кэш расписаний
+        # Приватные атрибуты для кэширования
         self._schedule_cache: Dict[str, Any] = {}
         self._cache_timestamp: Optional[datetime] = None
         self._cache_ttl = 3600  # 1 час
@@ -55,21 +59,19 @@ class TinkoffMarketHours:
             cache_key = f"{exchange}_{days_ahead}"
             if self._is_cache_valid():
                 if cache_key in self._schedule_cache:
-                    self.logger.debug("Используем кэшированное расписание")
+                    self._logger.debug("Используем кэшированное расписание")
                     return self._schedule_cache[cache_key]
             
             # Получаем расписание через API
-            async with AsyncClient(token=self.token) as services:
-                from_date = datetime.now(self.MOSCOW_TZ)
+            async with AsyncClient(token=self._token) as services:
+                from_date = datetime.now(self._moscow_tz)
                 to_date = from_date + timedelta(days=days_ahead)
                 
-                request = TradingSchedulesRequest(
+                response = await services.instruments.trading_schedules(
                     exchange=exchange,
                     from_=from_date,
                     to=to_date
                 )
-                
-                response = await services.instruments.trading_schedules(request=request)
                 
                 # Обрабатываем ответ
                 schedule_data = self._process_schedule_response(response)
@@ -81,7 +83,7 @@ class TinkoffMarketHours:
                 return schedule_data
                 
         except Exception as e:
-            self.logger.error(f"Ошибка получения торгового расписания: {e}")
+            self._logger.error(f"Ошибка получения торгового расписания: {e}")
             raise Exception(f"Не удалось получить торговое расписание через API: {e}")
     
     async def is_trading_time(
@@ -100,32 +102,72 @@ class TinkoffMarketHours:
             True если идет торговая сессия, False иначе
         """
         if dt is None:
-            dt = datetime.now(self.MOSCOW_TZ)
+            dt = datetime.now(self._moscow_tz)
         elif dt.tzinfo is None:
-            dt = self.MOSCOW_TZ.localize(dt)
+            dt = self._moscow_tz.localize(dt)
         else:
-            dt = dt.astimezone(self.MOSCOW_TZ)
+            dt = dt.astimezone(self._moscow_tz)
         
         try:
             # Получаем расписание
             schedule = await self.get_trading_schedule(exchange)
             
-            # Ищем день в расписании
-            date_str = dt.date().isoformat()
-            if date_str in schedule['days']:
-                day_info = schedule['days'][date_str]
+            # Ищем день в расписании (конвертируем в UTC для поиска)
+            dt_utc = dt.astimezone(pytz.UTC)
+            date_str = dt_utc.date().isoformat()
+            
+            # Пробуем разные форматы дат
+            search_keys = [
+                f"{date_str}T00:00:00+00:00",  # 2025-09-12T00:00:00+00:00 (основной формат API)
+                date_str,  # 2025-09-12 (резервный)
+                dt_utc.strftime("%Y-%m-%dT00:00:00+00:00")  # Альтернативный формат
+            ]
+            
+            day_info = None
+            for key in search_keys:
+                if key in schedule['days']:
+                    day_info = schedule['days'][key]
+                    break
+            
+            if day_info:
                 if day_info['is_trading_day']:
                     current_time = dt.time()
                     
                     # Проверяем торговые сессии
                     for session in day_info['sessions']:
-                        if session['start'] <= current_time <= session['end']:
+                        # Конвертируем время сессии из UTC в московское
+                        if hasattr(session['start'], 'tzinfo') and session['start'].tzinfo:
+                            session_start = session['start'].astimezone(self._moscow_tz).time()
+                            session_end = session['end'].astimezone(self._moscow_tz).time()
+                        else:
+                            # Если время без timezone, считаем его UTC
+                            session_start = pytz.UTC.localize(session['start']).astimezone(self._moscow_tz).time()
+                            session_end = pytz.UTC.localize(session['end']).astimezone(self._moscow_tz).time()
+                        
+                        if session_start <= current_time <= session_end:
+                            return True
+                    
+                    # Дополнительная проверка для вечерней сессии MOEX
+                    # Вечерняя сессия: 19:05 - 23:50 МСК (с учетом клиринга 18:50-19:05)
+                    if day_info['sessions']:
+                        main_session = day_info['sessions'][0]  # Основная сессия
+                        if hasattr(main_session['end'], 'tzinfo') and main_session['end'].tzinfo:
+                            main_end = main_session['end'].astimezone(self._moscow_tz).time()
+                        else:
+                            main_end = pytz.UTC.localize(main_session['end']).astimezone(self._moscow_tz).time()
+                        
+                        # Вечерняя сессия начинается в 19:05 (после клиринга)
+                        evening_start = time(19, 5)
+                        evening_end = time(23, 50)
+                        
+                        # Если основная сессия закончилась и время в диапазоне вечерней сессии
+                        if current_time > main_end and evening_start <= current_time <= evening_end:
                             return True
             
             return False
             
         except Exception as e:
-            self.logger.error(f"Ошибка проверки торговых часов: {e}")
+            self._logger.error(f"Ошибка проверки торговых часов: {e}")
             raise Exception(f"Не удалось получить торговые часы через API: {e}")
     
     async def get_trading_status(self, dt: Optional[datetime] = None) -> Dict[str, Any]:
@@ -139,11 +181,11 @@ class TinkoffMarketHours:
             Словарь с информацией о статусе
         """
         if dt is None:
-            dt = datetime.now(self.MOSCOW_TZ)
+            dt = datetime.now(self._moscow_tz)
         elif dt.tzinfo is None:
-            dt = self.MOSCOW_TZ.localize(dt)
+            dt = self._moscow_tz.localize(dt)
         else:
-            dt = dt.astimezone(self.MOSCOW_TZ)
+            dt = dt.astimezone(self._moscow_tz)
         
         try:
             is_trading = await self.is_trading_time(dt)
@@ -151,8 +193,9 @@ class TinkoffMarketHours:
             
             # Ищем следующую сессию
             next_session = self._find_next_session(dt, schedule)
+            self._logger.debug(f"Найдена следующая сессия: {next_session}")
             
-            return {
+            result = {
                 'is_trading': is_trading,
                 'current_time': dt,
                 'next_session': next_session,
@@ -161,8 +204,10 @@ class TinkoffMarketHours:
                 ).total_seconds() if next_session else None
             }
             
+            return result
+            
         except Exception as e:
-            self.logger.error(f"Ошибка получения статуса торгов: {e}")
+            self._logger.error(f"Ошибка получения статуса торгов: {e}")
             return {
                 'is_trading': False,
                 'current_time': dt,
@@ -200,8 +245,9 @@ class TinkoffMarketHours:
                             'end': day.end_time
                         })
                     
-                    # Вечерняя сессия
-                    if day.evening_start_time and day.evening_end_time:
+                    # Вечерняя сессия (проверяем, что время не равно 1970-01-01)
+                    if (day.evening_start_time and day.evening_end_time and 
+                        day.evening_start_time.year > 1970 and day.evening_end_time.year > 1970):
                         sessions.append({
                             'name': 'Вечерняя сессия',
                             'start': day.evening_start_time,
@@ -209,7 +255,8 @@ class TinkoffMarketHours:
                         })
                     
                     # Дополнительные сессии
-                    if hasattr(day, 'premarket_start_time') and day.premarket_start_time:
+                    if (_has_attr(day, 'premarket_start_time') and 
+                        day.premarket_start_time.year > 1970 and day.premarket_end_time.year > 1970):
                         sessions.append({
                             'name': 'Премаркет',
                             'start': day.premarket_start_time,
@@ -238,10 +285,21 @@ class TinkoffMarketHours:
         current_date = dt.date()
         current_time = dt.time()
         
+        self._logger.debug(f"Поиск следующей сессии для {current_date} {current_time}")
+        self._logger.debug(f"Доступные дни в расписании: {list(schedule['days'].keys())}")
+        
         # Проверяем текущий день
         date_str = current_date.isoformat()
+        # Также проверяем формат с timezone
+        date_str_tz = f"{date_str}T00:00:00+00:00"
+        
+        day_info = None
         if date_str in schedule['days']:
             day_info = schedule['days'][date_str]
+        elif date_str_tz in schedule['days']:
+            day_info = schedule['days'][date_str_tz]
+            
+        if day_info:
             if day_info['is_trading_day']:
                 for session in day_info['sessions']:
                     if session['start'] > current_time:
@@ -268,18 +326,25 @@ class TinkoffMarketHours:
         for days_ahead in range(1, 8):
             check_date = current_date + timedelta(days=days_ahead)
             date_str = check_date.isoformat()
+            date_str_tz = f"{date_str}T00:00:00+00:00"
             
+            day_info = None
             if date_str in schedule['days']:
                 day_info = schedule['days'][date_str]
+            elif date_str_tz in schedule['days']:
+                day_info = schedule['days'][date_str_tz]
+            
+            if day_info:
                 if day_info['is_trading_day'] and day_info['sessions']:
                     # Берем первую сессию дня
                     session = day_info['sessions'][0]
-                    session_start = self.MOSCOW_TZ.localize(
-                        datetime.combine(check_date, session['start'])
-                    )
-                    session_end = self.MOSCOW_TZ.localize(
-                        datetime.combine(check_date, session['end'])
-                    )
+                    # session['start'] уже datetime, конвертируем в московское время
+                    if hasattr(session['start'], 'tzinfo') and session['start'].tzinfo:
+                        session_start = session['start'].astimezone(self._moscow_tz)
+                        session_end = session['end'].astimezone(self._moscow_tz)
+                    else:
+                        session_start = pytz.UTC.localize(session['start']).astimezone(self._moscow_tz)
+                        session_end = pytz.UTC.localize(session['end']).astimezone(self._moscow_tz)
                     return {
                         'session': session,
                         'start': session_start,
@@ -301,10 +366,67 @@ class TinkoffMarketHours:
         
         return (datetime.now() - self._cache_timestamp).total_seconds() < self._cache_ttl
     
+    def get_cache_info(self) -> Dict[str, Any]:
+        """
+        Получает информацию о кэше (для отладки)
+        
+        Returns:
+            Словарь с информацией о кэше
+        """
+        return {
+            'cache_size': len(self._schedule_cache),
+            'cache_timestamp': self._cache_timestamp,
+            'cache_ttl': self._cache_ttl,
+            'is_valid': self._is_cache_valid()
+        }
+    
+    def clear_cache(self) -> None:
+        """Очищает кэш расписаний"""
+        self._schedule_cache.clear()
+        self._cache_timestamp = None
+    
+    @property
+    def token(self) -> str:
+        """Получает токен доступа к API"""
+        return self._token
+    
+    @property
+    def sandbox(self) -> bool:
+        """Получает флаг использования песочницы"""
+        return self._sandbox
+    
+    @property
+    def moscow_tz(self) -> pytz.timezone:
+        """Получает московскую временную зону"""
+        return self._moscow_tz
+    
 
 
-# Глобальный экземпляр для удобства
-_tinkoff_market_hours: Optional[TinkoffMarketHours] = None
+class TinkoffMarketHoursSingleton:
+    """Синглтон для TinkoffMarketHours"""
+    _instance: Optional['TinkoffMarketHours'] = None
+    _lock = asyncio.Lock()
+    
+    @classmethod
+    async def get_instance(cls) -> 'TinkoffMarketHours':
+        """
+        Получает единственный экземпляр TinkoffMarketHours
+        
+        Returns:
+            Экземпляр TinkoffMarketHours
+        """
+        if cls._instance is None:
+            async with cls._lock:
+                if cls._instance is None:
+                    config = load_config()
+                    # Определяем режим песочницы по наличию sandbox_token
+                    # Если sandbox_token есть и не пустой - используем песочницу, иначе - реальный API
+                    sandbox_mode = config.tcs_client.sandbox_token is not None and config.tcs_client.sandbox_token.strip() != ""
+                    cls._instance = TinkoffMarketHours(
+                        token=config.tcs_client.token,
+                        sandbox=sandbox_mode
+                    )
+        return cls._instance
 
 
 async def get_tinkoff_market_hours() -> TinkoffMarketHours:
@@ -314,16 +436,7 @@ async def get_tinkoff_market_hours() -> TinkoffMarketHours:
     Returns:
         Экземпляр TinkoffMarketHours
     """
-    global _tinkoff_market_hours
-    
-    if _tinkoff_market_hours is None:
-        config = load_config()
-        _tinkoff_market_hours = TinkoffMarketHours(
-            token=config.tcs_client.token,
-            sandbox=True
-        )
-    
-    return _tinkoff_market_hours
+    return await TinkoffMarketHoursSingleton.get_instance()
 
 
 async def is_trading_time_api(dt: Optional[datetime] = None) -> bool:

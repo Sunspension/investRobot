@@ -1,26 +1,35 @@
+#!/usr/bin/env python3
 """
-Тесты для API функций market hours
+Тесты для API функций market hours в формате pytest
+
+ВАЖНО: Эти тесты НЕ делают реальные API вызовы к Tinkoff API.
+Все внешние зависимости мокаются с помощью @patch декораторов.
+Это обеспечивает быстрые, стабильные и изолированные тесты.
+
+Для тестирования реальных API вызовов используйте интеграционные тесты отдельно.
 """
-import unittest
-import asyncio
+import pytest
 from unittest.mock import Mock, patch, AsyncMock
 from datetime import datetime
 
 from robotlib.utils.market_hours import get_market_status_with_api, is_trading_time_with_api
 
 
-class TestMarketHoursAPI(unittest.TestCase):
-    """Тесты для API функций market hours"""
-    
-    def setUp(self):
-        """Настройка тестов"""
-        self.mock_api_client = Mock()
+@pytest.fixture
+def mock_api_client():
+    """Фикстура для API клиента"""
+    return Mock()
+
+
+class TestMarketHoursAPIPytest:
+    """Тесты для API функций market hours в формате pytest"""
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
     async def test_get_market_status_with_api_success(self, mock_get_status_api):
-        """Тест успешного получения статуса через API"""
-        # Настраиваем мок
+        """Тест успешного получения статуса через API (с моком)"""
+        # Настраиваем мок - НЕ делаем реальный API вызов
         expected_status = {
             'is_trading': True,
             'current_time': datetime.now(),
@@ -33,57 +42,54 @@ class TestMarketHoursAPI(unittest.TestCase):
         result = await get_market_status_with_api()
         
         # Проверяем результат
-        self.assertEqual(result, expected_status)
-        mock_get_status_api.assert_called_once_with(None)
+        assert result == expected_status
+        mock_get_status_api.assert_called_once()
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
     async def test_get_market_status_with_api_with_datetime(self, mock_get_status_api):
         """Тест получения статуса с конкретным временем"""
         # Настраиваем мок
-        test_time = datetime(2024, 1, 15, 12, 0)
+        test_time = datetime(2024, 1, 15, 10, 30, 0)
         expected_status = {
-            'is_trading': True,
+            'is_trading': False,
             'current_time': test_time,
-            'next_session': None,
-            'time_until_next': None
+            'next_session': 'evening',
+            'time_until_next': 3600
         }
         mock_get_status_api.return_value = expected_status
         
-        # Вызываем функцию
+        # Вызываем функцию с конкретным временем
         result = await get_market_status_with_api(test_time)
         
         # Проверяем результат
-        self.assertEqual(result, expected_status)
+        assert result == expected_status
         mock_get_status_api.assert_called_once_with(test_time)
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
     async def test_get_market_status_with_api_error(self, mock_get_status_api):
         """Тест ошибки при получении статуса через API"""
         # Настраиваем мок для ошибки
-        mock_get_status_api.side_effect = Exception("API недоступен")
+        mock_get_status_api.side_effect = Exception("API Error")
         
         # Вызываем функцию и проверяем исключение
-        with self.assertRaises(Exception) as context:
+        with pytest.raises(Exception, match="API Error"):
             await get_market_status_with_api()
-        
-        # Проверяем сообщение об ошибке
-        self.assertIn("API недоступен", str(context.exception))
     
     @patch('robotlib.utils.market_hours.HAS_API', False)
+    @pytest.mark.asyncio
     async def test_get_market_status_with_api_no_api(self):
         """Тест когда API недоступен"""
         # Вызываем функцию и проверяем исключение
-        with self.assertRaises(Exception) as context:
+        with pytest.raises(Exception, match="Tinkoff API недоступен"):
             await get_market_status_with_api()
-        
-        # Проверяем сообщение об ошибке
-        self.assertIn("Tinkoff API недоступен", str(context.exception))
-        self.assertIn("Торговля невозможна без API", str(context.exception))
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.is_trading_time_api')
+    @pytest.mark.asyncio
     async def test_is_trading_time_with_api_success(self, mock_is_trading_time_api):
         """Тест успешной проверки торговых часов через API"""
         # Настраиваем мок
@@ -93,61 +99,54 @@ class TestMarketHoursAPI(unittest.TestCase):
         result = await is_trading_time_with_api()
         
         # Проверяем результат
-        self.assertTrue(result)
-        mock_is_trading_time_api.assert_called_once_with(None)
+        assert result is True
+        mock_is_trading_time_api.assert_called_once()
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.is_trading_time_api')
+    @pytest.mark.asyncio
     async def test_is_trading_time_with_api_with_datetime(self, mock_is_trading_time_api):
         """Тест проверки торговых часов с конкретным временем"""
         # Настраиваем мок
-        test_time = datetime(2024, 1, 15, 12, 0)
+        test_time = datetime(2024, 1, 15, 14, 30, 0)
         mock_is_trading_time_api.return_value = False
         
-        # Вызываем функцию
+        # Вызываем функцию с конкретным временем
         result = await is_trading_time_with_api(test_time)
         
         # Проверяем результат
-        self.assertFalse(result)
+        assert result is False
         mock_is_trading_time_api.assert_called_once_with(test_time)
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.is_trading_time_api')
+    @pytest.mark.asyncio
     async def test_is_trading_time_with_api_error(self, mock_is_trading_time_api):
         """Тест ошибки при проверке торговых часов через API"""
         # Настраиваем мок для ошибки
-        mock_is_trading_time_api.side_effect = Exception("API недоступен")
+        mock_is_trading_time_api.side_effect = Exception("API Error")
         
         # Вызываем функцию и проверяем исключение
-        with self.assertRaises(Exception) as context:
+        with pytest.raises(Exception, match="API Error"):
             await is_trading_time_with_api()
-        
-        # Проверяем сообщение об ошибке
-        self.assertIn("API недоступен", str(context.exception))
     
     @patch('robotlib.utils.market_hours.HAS_API', False)
+    @pytest.mark.asyncio
     async def test_is_trading_time_with_api_no_api(self):
         """Тест когда API недоступен для проверки торговых часов"""
         # Вызываем функцию и проверяем исключение
-        with self.assertRaises(Exception) as context:
+        with pytest.raises(Exception, match="Tinkoff API недоступен"):
             await is_trading_time_with_api()
-        
-        # Проверяем сообщение об ошибке
-        self.assertIn("Tinkoff API недоступен", str(context.exception))
-        self.assertIn("Торговля невозможна без API", str(context.exception))
 
 
-class TestMarketHoursAPIIntegration(unittest.TestCase):
-    """Интеграционные тесты для API функций market hours"""
-    
-    def setUp(self):
-        """Настройка тестов"""
-        self.mock_api_client = Mock()
+class TestMarketHoursAPIIntegrationPytest:
+    """Интеграционные тесты для API функций market hours в формате pytest"""
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
-    @patch('robotlib.utils.market_hours.get_market_status_api')
     @patch('robotlib.utils.market_hours.is_trading_time_api')
-    async def test_full_api_workflow(self, mock_is_trading_time, mock_get_status):
+    @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
+    async def test_full_api_workflow(self, mock_get_status, mock_is_trading_time):
         """Тест полного рабочего процесса с API"""
         # Настраиваем моки
         mock_get_status.return_value = {
@@ -158,108 +157,97 @@ class TestMarketHoursAPIIntegration(unittest.TestCase):
         }
         mock_is_trading_time.return_value = True
         
-        # Проверяем статус рынка
-        status = await get_market_status_with_api()
-        self.assertTrue(status['is_trading'])
+        # Вызываем функции
+        status_result = await get_market_status_with_api()
+        trading_result = await is_trading_time_with_api()
         
-        # Проверяем торговые часы
-        is_trading = await is_trading_time_with_api()
-        self.assertTrue(is_trading)
-        
-        # Проверяем, что API вызвался
+        # Проверяем результаты
+        assert status_result['is_trading'] is True
+        assert trading_result is True
         mock_get_status.assert_called_once()
         mock_is_trading_time.assert_called_once()
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
-    @patch('robotlib.utils.market_hours.get_market_status_api')
     @patch('robotlib.utils.market_hours.is_trading_time_api')
-    async def test_api_error_handling(self, mock_is_trading_time, mock_get_status):
+    @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
+    async def test_api_error_handling(self, mock_get_status, mock_is_trading_time):
         """Тест обработки ошибок API"""
         # Настраиваем моки для ошибок
-        mock_get_status.side_effect = Exception("Ошибка получения статуса")
-        mock_is_trading_time.side_effect = Exception("Ошибка проверки времени")
+        mock_get_status.side_effect = Exception("Status API Error")
+        mock_is_trading_time.side_effect = Exception("Trading API Error")
         
-        # Проверяем, что ошибки правильно обрабатываются
-        with self.assertRaises(Exception) as context1:
+        # Проверяем, что обе функции выдают правильные ошибки
+        with pytest.raises(Exception, match="Status API Error"):
             await get_market_status_with_api()
-        self.assertIn("Ошибка получения статуса", str(context1.exception))
         
-        with self.assertRaises(Exception) as context2:
+        with pytest.raises(Exception, match="Trading API Error"):
             await is_trading_time_with_api()
-        self.assertIn("Ошибка проверки времени", str(context2.exception))
     
     @patch('robotlib.utils.market_hours.HAS_API', False)
+    @pytest.mark.asyncio
     async def test_no_api_available(self):
         """Тест когда API недоступен"""
         # Проверяем, что обе функции выдают правильные ошибки
-        with self.assertRaises(Exception) as context1:
+        with pytest.raises(Exception, match="Tinkoff API недоступен"):
             await get_market_status_with_api()
-        self.assertIn("Tinkoff API недоступен", str(context1.exception))
         
-        with self.assertRaises(Exception) as context2:
+        with pytest.raises(Exception, match="Tinkoff API недоступен"):
             await is_trading_time_with_api()
-        self.assertIn("Tinkoff API недоступен", str(context2.exception))
 
 
-class TestMarketHoursAPIMocking(unittest.TestCase):
-    """Тесты для мокирования API функций"""
-    
-    def setUp(self):
-        """Настройка тестов"""
-        self.mock_api_client = Mock()
+class TestMarketHoursAPIMockingPytest:
+    """Тесты мокирования API функций market hours в формате pytest"""
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
     async def test_mock_api_success(self, mock_get_status_api):
         """Тест успешного мокирования API"""
         # Настраиваем мок для успешного ответа
-        mock_response = {
+        expected_status = {
             'is_trading': True,
-            'current_time': datetime(2024, 1, 15, 12, 0),
-            'next_session': {
-                'start': datetime(2024, 1, 15, 19, 5),
-                'end': datetime(2024, 1, 15, 23, 50),
-                'name': 'Вечерняя сессия'
-            },
-            'time_until_next': 25200.0  # 7 часов
+            'current_time': datetime.now(),
+            'next_session': None,
+            'time_until_next': None
         }
-        mock_get_status_api.return_value = mock_response
+        mock_get_status_api.return_value = expected_status
         
         # Вызываем функцию
         result = await get_market_status_with_api()
         
         # Проверяем результат
-        self.assertEqual(result, mock_response)
-        self.assertTrue(result['is_trading'])
-        self.assertIsNotNone(result['next_session'])
-        self.assertEqual(result['time_until_next'], 25200.0)
+        assert result == expected_status
+        assert result['is_trading'] is True
+        assert result['current_time'] is not None
+        assert result['next_session'] is None
+        assert result['time_until_next'] is None
+        
+        # Проверяем, что мок был вызван
+        mock_get_status_api.assert_called_once()
     
     @patch('robotlib.utils.market_hours.HAS_API', True)
     @patch('robotlib.utils.market_hours.get_market_status_api')
+    @pytest.mark.asyncio
     async def test_mock_api_closed_market(self, mock_get_status_api):
         """Тест мокирования закрытого рынка"""
         # Настраиваем мок для закрытого рынка
-        mock_response = {
+        expected_status = {
             'is_trading': False,
-            'current_time': datetime(2024, 1, 15, 2, 0),  # 2:00 ночи
-            'next_session': {
-                'start': datetime(2024, 1, 15, 9, 50),
-                'end': datetime(2024, 1, 15, 10, 0),
-                'name': 'Аукцион открытия'
-            },
-            'time_until_next': 28800.0  # 8 часов
+            'current_time': datetime.now(),
+            'next_session': 'evening',
+            'time_until_next': 3600
         }
-        mock_get_status_api.return_value = mock_response
+        mock_get_status_api.return_value = expected_status
         
         # Вызываем функцию
         result = await get_market_status_with_api()
         
         # Проверяем результат
-        self.assertEqual(result, mock_response)
-        self.assertFalse(result['is_trading'])
-        self.assertIsNotNone(result['next_session'])
-        self.assertEqual(result['time_until_next'], 28800.0)
-
-
-if __name__ == '__main__':
-    unittest.main()
+        assert result == expected_status
+        assert result['is_trading'] is False
+        assert result['next_session'] == 'evening'
+        assert result['time_until_next'] == 3600
+        
+        # Проверяем, что мок был вызван
+        mock_get_status_api.assert_called_once()

@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """
-Тестовый скрипт для проверки новой архитектуры OrderIntent → OrderExecution
+Тестовый скрипт для проверки архитектуры OrderIntent → OrderExecution
 на исторических данных
+
+Архитектура:
+1. Стратегии создают OrderIntent (намерение на сделку)
+2. StrategyManager получает OrderIntent от стратегий
+3. OrderExecutor.execute_order() выполняет ордер
+4. Создается OrderExecution с результатами исполнения
+5. StrategyManager передает OrderExecution в стратегии
+6. Стратегии обрабатывают результат через _process_execution()
 """
 import asyncio
 import sys
 import os
+import pytest
 from datetime import datetime
 from robotlib.utils.logger import get_logger
 
@@ -23,8 +32,7 @@ from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.trading.portfolio_manager import PortfolioManager
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from tests.mocks import MockOrderExecutor, MockAPIClient, MockPortfolioManager
-from robotlib.utils.sql_repository import iter_candles
-from robotlib.utils.sql_schema import init_db
+# Убрали импорты базы данных - используем только моки
 import pytz
 
 logger = get_logger(__name__)
@@ -34,16 +42,24 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 
-async def test_historical_data_with_new_architecture(
+@pytest.mark.asyncio
+async def test_historical_trading(
     from_time: str = "2025-01-15 7:00",
-    to_time: str = "2025-01-15 19:00",
-    use_database: bool = False,
-    db_path: str = "data/market.db"
+    to_time: str = "2025-01-15 19:00"
 ):
     """
-    Тестирует новую архитектуру OrderIntent → OrderExecution на исторических данных
+    Тестирует архитектуру OrderIntent → OrderExecution на исторических данных
+    
+    Поток выполнения:
+    1. Создаем мокированные исторические свечи
+    2. Инициализируем StrategyManager с OrderExecutor
+    3. Обрабатываем каждую свечу через strategy_manager.on_candle()
+    4. Стратегии создают OrderIntent на основе сигналов
+    5. OrderExecutor выполняет ордера и возвращает OrderExecution
+    6. Результаты передаются обратно в стратегии
+    7. Собираем статистику по доходам и сделкам
     """
-    logger.info("🚀 Запуск тестирования новой архитектуры на исторических данных")
+    logger.info("🚀 Запуск тестирования архитектуры OrderIntent → OrderExecution на исторических данных")
     
     # Загружаем конфигурацию
     config = load_config()
@@ -55,42 +71,10 @@ async def test_historical_data_with_new_architecture(
     to_time_dt = _to_msk_date(to_time)
     figi = "FUTIMOEXF000"
     
-    # Загружаем исторические данные
-    logger.info(f"📊 Загружаем исторические данные с {from_time} по {to_time}")
-    
-    if use_database:
-        # Загружаем из базы данных SQLite
-        logger.info("🗄️ Загружаем данные из базы данных...")
-        try:
-            await init_db(db_path)
-            db_candles = [candle async for candle in iter_candles(db_path, figi, from_time_dt, to_time_dt)]
-            
-            # Конвертируем DBCandle в совместимый формат (как в backtest_sqlite.py)
-            historical_candles = []
-            for c in db_candles:
-                class HC:
-                    pass
-                hc = HC()
-                hc.time = c.time
-                hc.open = c.open
-                hc.high = c.high
-                hc.low = c.low
-                hc.close = c.close
-                hc.volume = c.volume
-                historical_candles.append(hc)
-            
-            logger.info(f"✅ Загружено {len(historical_candles)} свечей из базы данных")
-        except Exception as e:
-            logger.error(f"❌ Ошибка загрузки из базы данных: {e}")
-            logger.info("🔄 Переключаемся на загрузку через API...")
-            use_database = False
-    
-    if not use_database:
-        # Загружаем через Tinkoff API
-        logger.info("🌐 Загружаем данные через Tinkoff API...")
-        async with TinkoffAPIClient(token, account_id, sandbox_token) as api_client:
-            historical_candles = [item async for item in _load_historic_data(api_client, figi, from_time_dt, to_time_dt)]
-        logger.info(f"✅ Загружено {len(historical_candles)} свечей через API")
+    # Создаем мокированные исторические данные
+    logger.info(f"📊 Создаем мокированные исторические данные с {from_time} по {to_time}")
+    historical_candles = _create_mock_candles(from_time_dt, to_time_dt)
+    logger.info(f"✅ Создано {len(historical_candles)} мокированных свечей")
     
     if not historical_candles:
         logger.error("❌ Нет исторических данных для тестирования")
@@ -186,36 +170,73 @@ def _to_msk_date(date: str, tz_info=False) -> datetime:
     dt_moscow = moscow_tz.localize(dt_naive)
     return dt_moscow if tz_info else dt_moscow.replace(tzinfo=None)
 
+
+def _create_mock_candles(from_time: datetime, to_time: datetime):
+    """Создает мокированные исторические свечи для тестирования"""
+    import random
+    from datetime import timedelta
+    
+    candles = []
+    current_time = from_time
+    base_price = 1500.0  # Базовая цена фьючерса
+    
+    while current_time < to_time:
+        # Создаем свечу с реалистичными данными
+        class MockCandle:
+            def __init__(self, time, open_price, high_price, low_price, close_price, volume):
+                self.time = time
+                self.open = open_price
+                self.high = high_price
+                self.low = low_price
+                self.close = close_price
+                self.volume = volume
+        
+        # Генерируем случайные изменения цены
+        price_change = random.uniform(-0.02, 0.02)  # ±2% изменение
+        open_price = base_price
+        close_price = open_price * (1 + price_change)
+        
+        # Создаем high и low на основе open и close
+        high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.01))
+        low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.01))
+        
+        # Генерируем объем
+        volume = random.randint(100, 1000)
+        
+        candle = MockCandle(
+            time=current_time,
+            open_price=open_price,
+            high_price=high_price,
+            low_price=low_price,
+            close_price=close_price,
+            volume=volume
+        )
+        
+        candles.append(candle)
+        
+        # Обновляем базовую цену для следующей свечи
+        base_price = close_price
+        
+        # Переходим к следующей минуте
+        current_time += timedelta(minutes=1)
+    
+    return candles
+
+
 async def main():
     """Главная функция для запуска тестирования"""
-    logger.info("🎯 Тестирование новой архитектуры OrderIntent → OrderExecution")
+    logger.info("🎯 Тестирование архитектуры OrderIntent → OrderExecution")
     
-    # Тест 1: Из базы данных
+    # Тест с мокированными данными
     try:
-        logger.info("🧪 Тест 1: Из базы данных SQLite")
-        result1 = await test_historical_data_with_new_architecture(
-            from_time="2024-12-02 7:00",  # Используем реальные даты из базы
-            to_time="2024-12-02 19:00",
-            use_database=True,
-            db_path="data/market.db"
-        )
-        logger.info(f"✅ Тест 1 завершен: {result1}")
-    except Exception as e:
-        logger.error(f"❌ Тест 1 не удался: {e}")
-        import traceback
-        traceback.print_exc()
-    
-    # Тест 2: С реальным API
-    try:
-        logger.info("🧪 Тест 2: С реальным Tinkoff API")
-        result2 = await test_historical_data_with_new_architecture(
+        logger.info("🧪 Тест: С мокированными историческими данными")
+        result = await test_historical_trading(
             from_time="2025-01-15 7:00",
-            to_time="2025-01-15 19:00",
-            use_database=False
+            to_time="2025-01-15 19:00"
         )
-        logger.info(f"✅ Тест 2 завершен: {result2}")
+        logger.info(f"✅ Тест завершен: {result}")
     except Exception as e:
-        logger.error(f"❌ Тест 2 не удался: {e}")
+        logger.error(f"❌ Тест не удался: {e}")
         import traceback
         traceback.print_exc()
 

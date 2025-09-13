@@ -4,6 +4,7 @@
 import sys
 from pathlib import Path
 import unittest
+import pytest
 from unittest.mock import Mock, AsyncMock, patch
 import asyncio
 from datetime import datetime
@@ -38,6 +39,9 @@ class TestLongStrategy(unittest.TestCase):
         self.assertEqual(self.strategy._portfolio_manager, self.mock_portfolio_manager)
         self.assertEqual(self.strategy.strategy_name, "LongStrategy")
     
+    @pytest.mark.asyncio
+
+    
     async def test_execute_no_signal(self):
         """Тест выполнения без сигнала"""
         # Создаем пустой сигнал вместо None
@@ -55,6 +59,9 @@ class TestLongStrategy(unittest.TestCase):
         result = await self.strategy.execute(mock_signal)
         
         self.assertEqual(result, [])
+    
+    @pytest.mark.asyncio
+
     
     async def test_execute_buy_signal_success(self):
         """Тест успешного выполнения сигнала на покупку"""
@@ -89,6 +96,9 @@ class TestLongStrategy(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertIsInstance(result, list)
     
+    @pytest.mark.asyncio
+
+    
     async def test_execute_sell_signal_success(self):
         """Тест успешного выполнения сигнала на продажу"""
         # Создаем мок свечи
@@ -114,6 +124,9 @@ class TestLongStrategy(unittest.TestCase):
         
         self.assertIsNotNone(result)
         self.assertIsInstance(result, list)
+    
+    @pytest.mark.asyncio
+
     
     async def test_execute_insufficient_funds(self):
         """Тест выполнения при недостатке средств"""
@@ -148,6 +161,9 @@ class TestLongStrategy(unittest.TestCase):
             # Должен вернуть пустой список при недостатке средств
             self.assertEqual(result, [])
     
+    @pytest.mark.asyncio
+
+    
     async def test_execute_no_position_to_sell(self):
         """Тест выполнения сигнала на продажу без позиции"""
         # Создаем мок свечи
@@ -173,6 +189,9 @@ class TestLongStrategy(unittest.TestCase):
         # Должен вернуть пустой список, так как нет позиции для продажи
         self.assertEqual(result, [])
     
+    @pytest.mark.asyncio
+
+    
     async def test_items_to_buy_calculation(self):
         """Тест расчета количества для покупки"""
         with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
@@ -183,6 +202,9 @@ class TestLongStrategy(unittest.TestCase):
             
             # Проверяем, что результат больше 0
             self.assertGreater(result, 0)
+    
+    @pytest.mark.asyncio
+
     
     async def test_items_to_buy_api_error(self):
         """Тест расчета количества при ошибке API"""
@@ -215,6 +237,9 @@ class TestShortStrategy(unittest.TestCase):
         self.assertEqual(self.strategy._portfolio_manager, self.mock_portfolio_manager)
         self.assertEqual(self.strategy.strategy_name, "ShortStrategy")
     
+    @pytest.mark.asyncio
+
+    
     async def test_execute_no_signal(self):
         """Тест выполнения без сигнала"""
         # Создаем пустой сигнал вместо None
@@ -232,6 +257,9 @@ class TestShortStrategy(unittest.TestCase):
         result = await self.strategy.execute(mock_signal)
         
         self.assertEqual(result, [])
+    
+    @pytest.mark.asyncio
+
     
     async def test_execute_sell_short_signal_success(self):
         """Тест успешного выполнения сигнала на продажу в шорт"""
@@ -266,6 +294,9 @@ class TestShortStrategy(unittest.TestCase):
             self.assertIsNotNone(result)
             self.assertIsInstance(result, list)
     
+    @pytest.mark.asyncio
+
+    
     async def test_execute_buy_short_signal_success(self):
         """Тест успешного выполнения сигнала на покупку для закрытия шорта"""
         # Создаем мок свечи
@@ -291,6 +322,9 @@ class TestShortStrategy(unittest.TestCase):
         
         self.assertIsNotNone(result)
         self.assertIsInstance(result, list)
+    
+    @pytest.mark.asyncio
+
     
     async def test_execute_insufficient_funds(self):
         """Тест выполнения при недостатке средств"""
@@ -325,6 +359,9 @@ class TestShortStrategy(unittest.TestCase):
             # Должен вернуть пустой список при недостатке средств
             self.assertEqual(result, [])
     
+    @pytest.mark.asyncio
+
+    
     async def test_execute_no_short_position_to_close(self):
         """Тест выполнения сигнала на закрытие шорта без позиции"""
         # Создаем мок свечи
@@ -350,6 +387,9 @@ class TestShortStrategy(unittest.TestCase):
         # Должен вернуть пустой список, так как нет позиции для закрытия
         self.assertEqual(result, [])
     
+    @pytest.mark.asyncio
+
+    
     async def test_items_to_sell_short_calculation(self):
         """Тест расчета количества для продажи в шорт"""
         with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
@@ -360,6 +400,9 @@ class TestShortStrategy(unittest.TestCase):
             
             # Проверяем, что результат больше 0
             self.assertGreater(result, 0)
+    
+    @pytest.mark.asyncio
+
     
     async def test_items_to_sell_short_api_error(self):
         """Тест расчета количества при ошибке API"""

@@ -73,6 +73,16 @@ class TradingVisualizerable(ABC):
     def is_running(self) -> bool:
         """Проверяет, запущен ли визуализатор"""
         pass
+    
+    @abstractmethod
+    def update_strategy_data_provider(self, session_controller) -> None:
+        """
+        Обновляет провайдер данных стратегий на реальный
+        
+        Args:
+            session_controller: Контроллер торговой сессии
+        """
+        pass
 
 
 class MockTradingVisualizer(TradingVisualizerable):
@@ -117,3 +127,8 @@ class MockTradingVisualizer(TradingVisualizerable):
     def is_running(self) -> bool:
         """Проверяет, запущен ли мок визуализатора"""
         return self.running
+    
+    def update_strategy_data_provider(self, session_controller) -> None:
+        """Обновляет провайдер данных стратегий в моке"""
+        # В моке ничего не делаем
+        pass

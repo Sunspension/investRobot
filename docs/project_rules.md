@@ -1,5 +1,10 @@
 # 📋 Правила проекта investRobot
 
+> **🚀 БЫСТРЫЙ ДОСТУП:**
+> - [Строгие правила](STRICT_RULES.md) - Полный список правил
+> - [Быстрый чек-лист](QUICK_CHECKLIST.md) - Проверка перед изменениями
+> - [Резюме правил](RULES_SUMMARY.md) - Краткое описание и статус
+
 ## 🚫 **Строгие правила (никогда не нарушать)**
 
 ### 1. **Импорты**
@@ -17,7 +22,96 @@
 - ✅ **Создавать интерфейсы для тестируемости**
 - ✅ **Следовать принципам SOLID**
 
-### 4. **Демо файлы и тестирование**
+### 4. **Инкапсуляция и принципы SOLID**
+- ❌ **НИКОГДА не обращаться к приватным атрибутам (начинающимся с `_`)**
+- ❌ **НИКОГДА не нарушать инкапсуляцию объектов**
+- ❌ **НИКОГДА не использовать `hasattr()` для проверки собственных атрибутов**
+- ✅ **ВСЕГДА делать внутренние атрибуты приватными (`_` префикс)**
+- ✅ **ВСЕГДА создавать публичные методы и свойства для доступа к данным**
+- ✅ **ВСЕГДА следовать принципам SOLID**
+- ✅ **ВСЕГДА использовать Dependency Injection**
+- ✅ **ВСЕГДА создавать интерфейсы для тестируемости**
+- ✅ **ВСЕГДА использовать типизацию для избежания `hasattr()`**
+
+#### Примеры правильной инкапсуляции:
+
+```python
+# ✅ ПРАВИЛЬНО - приватные атрибуты с публичными методами
+class StrategyManager:
+    def __init__(self, signal_manager):
+        self._signal_manager = signal_manager  # приватный
+        self._strategies = []  # приватный
+    
+    @property
+    def strategies_count(self) -> int:
+        return len(self._strategies)
+    
+    def get_strategies(self) -> List[Strategyable]:
+        return self._strategies.copy()
+    
+    def has_strategies(self) -> bool:
+        return len(self._strategies) > 0
+
+# ✅ ПРАВИЛЬНО - использование публичных методов
+def process_strategies(strategy_manager):
+    if strategy_manager.has_strategies():
+        count = strategy_manager.strategies_count
+        for strategy in strategy_manager.get_strategies():
+            # работаем со стратегией
+```
+
+#### Примеры НЕПРАВИЛЬНОЙ инкапсуляции:
+
+```python
+# ❌ НЕПРАВИЛЬНО - прямое обращение к приватным атрибутам
+def process_strategies(strategy_manager):
+    if len(strategy_manager._strategies) > 0:  # НАРУШЕНИЕ!
+        for strategy in strategy_manager._strategies:  # НАРУШЕНИЕ!
+            # работаем со стратегией
+
+# ❌ НЕПРАВИЛЬНО - использование hasattr для собственных атрибутов
+if hasattr(strategy_manager, '_strategies'):  # НАРУШЕНИЕ!
+    strategies = strategy_manager._strategies
+```
+
+#### Допустимые использования `hasattr`:
+- ✅ **Проверка атрибутов объектов из внешних API** (`hasattr(api_response, 'positions')`)
+- ✅ **Проверка методов интерфейсов у стратегий** (`hasattr(strategy, 'initialize')`)
+- ✅ **Проверка инициализации внутренних атрибутов** (`hasattr(self, '_prices')`)
+- ✅ **Проверка атрибутов в dependencies** (`hasattr(dependencies, 'market_data_stream')`)
+- ✅ **Проверка интерфейсов в тестах** (`hasattr(visualizer, 'add_candle')`)
+- ✅ **Проверка атрибутов объектов разных типов** (`hasattr(session['start'], 'tzinfo')`)
+- ✅ **Проверка встроенных методов Python** (`hasattr(obj, '__len__')`)
+- ✅ **Проверка атрибутов объектов с неопределенной структурой** (данные из API)
+
+#### Принципы SOLID в проекте:
+
+1. **S - Single Responsibility Principle (Принцип единственной ответственности)**
+   - Каждый класс должен иметь только одну причину для изменения
+   - `StrategyManager` отвечает только за управление стратегиями
+   - `PortfolioManager` отвечает только за управление портфелем
+
+2. **O - Open/Closed Principle (Принцип открытости/закрытости)**
+   - Классы открыты для расширения, закрыты для модификации
+   - Новые стратегии добавляются через интерфейс `Strategyable`
+   - Новые визуализаторы добавляются через интерфейс `TradingVisualizerable`
+
+3. **L - Liskov Substitution Principle (Принцип подстановки Лисков)**
+   - Объекты производных классов должны заменять объекты базовых классов
+   - Все реализации `Strategyable` взаимозаменяемы
+   - Все реализации `TradingVisualizerable` взаимозаменяемы
+
+4. **I - Interface Segregation Principle (Принцип разделения интерфейсов)**
+   - Клиенты не должны зависеть от интерфейсов, которые они не используют
+   - Создаем специализированные интерфейсы (`RiskManageable`, `PortfolioManageable`)
+   - Избегаем "толстых" интерфейсов
+
+5. **D - Dependency Inversion Principle (Принцип инверсии зависимостей)**
+   - Модули высокого уровня не должны зависеть от модулей низкого уровня
+   - Зависимости передаются через конструктор (Dependency Injection)
+   - Используем интерфейсы вместо конкретных реализаций
+
+### 5. **Демо файлы и тестирование**
 - ❌ **НЕ создавать избыточные демо файлы**
 - ❌ **НЕ создавать демо без предварительного обсуждения**
 - ✅ **Моки для тестирования - это нормально и необходимо**
@@ -25,7 +119,7 @@
 - ✅ **Демо должны показывать реальную работу с API**
 - ✅ **Тестовые файлы с моками - это часть тестирования, не демо**
 
-### 5. **Документация**
+### 6. **Документация**
 - ❌ **НЕ добавлять избыточные разделы** ("Преимущества", "Итог", "Тестирование" с деталями)
 - ❌ **НЕ использовать эмодзи в технической документации** (кроме главной страницы и правил)
 - ✅ **Содержать только полезную техническую информацию**
@@ -106,6 +200,75 @@ config = TradingConfig(end_of_day_close=True, close_time=time(18, 0))
 - ✅ **Длинные сигнатуры функций разбивать на несколько строк**
 - ✅ **Каждый параметр на отдельной строке с правильным отступом**
 - ✅ **Особенно важно для методов __init__, __aexit__ и функций с 3+ параметрами**
+
+### Доступ к атрибутам
+- ❌ **НЕ использовать `hasattr()` для проверки атрибутов**
+- ❌ **НЕ обращаться к приватным атрибутам**
+- ✅ **Создавать явные методы для проверки состояния**
+
+#### Примеры неправильного использования:
+```python
+# ❌ Плохо - использование hasattr для собственных атрибутов
+if hasattr(self, '_private_attr'):
+    value = self._private_attr
+
+# ❌ Плохо - обращение к приватному атрибуту
+if self._is_initialized:
+    do_something()
+
+# ❌ Плохо - проверка атрибутов через hasattr
+if hasattr(strategy_manager, '_signal_manager'):
+    signal_manager = strategy_manager._signal_manager
+```
+
+#### Примеры правильного использования:
+```python
+# ✅ Хорошо - публичный метод
+if obj.is_initialized():
+    value = obj.get_private_data()
+
+# ✅ Хорошо - публичное свойство
+if obj.is_ready:
+    do_something()
+
+# ✅ Хорошо - явная проверка через интерфейс
+if obj.has_data():
+    data = obj.get_data()
+
+# ✅ Хорошо - использование hasattr для внешних объектов
+if hasattr(api_response, 'positions'):
+    positions = api_response.positions
+
+# ✅ Хорошо - проверка методов интерфейса
+if hasattr(strategy, 'initialize'):
+    await strategy.initialize()
+
+# ✅ Хорошо - использование типизации вместо hasattr
+def _has_timezone(dt: Union[datetime, Any]) -> bool:
+    """Проверяет, есть ли у datetime объекта timezone"""
+    return isinstance(dt, datetime) and dt.tzinfo is not None
+
+# Вместо hasattr(obj, 'tzinfo') and obj.tzinfo:
+if _has_timezone(session_start):
+    # обрабатываем с timezone
+else:
+    # обрабатываем без timezone
+
+# ✅ Хорошо - допустимое использование hasattr
+# Проверка атрибутов объектов разных типов (datetime с timezone или без)
+if hasattr(session['start'], 'tzinfo') and session['start'].tzinfo:
+    session_start = session['start'].astimezone(tz).time()
+else:
+    session_start = pytz.UTC.localize(session['start']).astimezone(tz).time()
+
+# Проверка встроенных методов Python
+if hasattr(obj, '__len__'):
+    length = len(obj)
+
+# Проверка атрибутов объектов из внешних API
+if hasattr(api_response, 'positions'):
+    positions = api_response.positions
+```
 
 ### Тестирование
 - ✅ **Создавать моки для всех внешних зависимостей**
@@ -197,4 +360,5 @@ def __init__(
 ---
 
 *Последнее обновление: 2024-12-19*
-*Версия: 1.2*
+*Версия: 1.4*
+*Добавлено: Строгие правила инкапсуляции и принципы SOLID*

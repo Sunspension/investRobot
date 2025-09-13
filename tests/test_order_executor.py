@@ -2,6 +2,7 @@
 Тесты для OrderExecutor
 """
 import unittest
+import pytest
 from unittest.mock import Mock, AsyncMock, patch
 import asyncio
 
@@ -62,6 +63,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertEqual(self.executor.api_client, self.mock_api_client)
         self.assertIsNotNone(self.executor.logger)
     
+    @pytest.mark.asyncio
+
+    
     async def test_check_market_availability_success(self):
         """Тест успешной проверки доступности рынка"""
         self.mock_api_client.check_market_availability = AsyncMock(return_value=True)
@@ -71,6 +75,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertTrue(result)
         self.mock_api_client.check_market_availability.assert_called_once()
     
+    @pytest.mark.asyncio
+
+    
     async def test_check_market_availability_failure(self):
         """Тест неудачной проверки доступности рынка"""
         self.mock_api_client.check_market_availability = AsyncMock(return_value=False)
@@ -79,6 +86,9 @@ class TestOrderExecutor(unittest.TestCase):
         
         self.assertFalse(result)
         self.mock_api_client.check_market_availability.assert_called_once()
+    
+    @pytest.mark.asyncio
+
     
     async def test_place_order_success(self):
         """Тест успешного размещения приказа"""
@@ -106,6 +116,9 @@ class TestOrderExecutor(unittest.TestCase):
             "FUTIMOEXF000", "BUY", 1, 100.5, None
         )
     
+    @pytest.mark.asyncio
+
+    
     async def test_place_order_failure(self):
         """Тест неудачного размещения приказа"""
         mock_result = OrderResult(
@@ -131,6 +144,9 @@ class TestOrderExecutor(unittest.TestCase):
             "FUTIMOEXF000", "SELL", 1, None, None
         )
     
+    @pytest.mark.asyncio
+
+    
     async def test_get_order_status_success(self):
         """Тест успешного получения статуса приказа"""
         mock_status = {"order_id": "12345", "status": "EXECUTED"}
@@ -141,6 +157,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertEqual(result, mock_status)
         self.mock_api_client.get_order_status.assert_called_once_with("12345")
     
+    @pytest.mark.asyncio
+
+    
     async def test_get_order_status_failure(self):
         """Тест неудачного получения статуса приказа"""
         self.mock_api_client.get_order_status = AsyncMock(return_value=None)
@@ -149,6 +168,9 @@ class TestOrderExecutor(unittest.TestCase):
         
         self.assertIsNone(result)
         self.mock_api_client.get_order_status.assert_called_once_with("12345")
+    
+    @pytest.mark.asyncio
+
     
     async def test_cancel_order_success(self):
         """Тест успешной отмены приказа"""
@@ -159,6 +181,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertTrue(result)
         self.mock_api_client.cancel_order.assert_called_once_with("12345")
     
+    @pytest.mark.asyncio
+
+    
     async def test_cancel_order_failure(self):
         """Тест неудачной отмены приказа"""
         self.mock_api_client.cancel_order = AsyncMock(return_value=False)
@@ -167,6 +192,9 @@ class TestOrderExecutor(unittest.TestCase):
         
         self.assertFalse(result)
         self.mock_api_client.cancel_order.assert_called_once_with("12345")
+    
+    @pytest.mark.asyncio
+
     
     async def test_buy_market_success(self):
         """Тест успешной покупки по рынку"""
@@ -187,6 +215,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertEqual(result.order_id, "12345")
         self.mock_api_client.buy_market.assert_called_once_with("FUTIMOEXF000", 1, True)
     
+    @pytest.mark.asyncio
+
+    
     async def test_buy_market_failure(self):
         """Тест неудачной покупки по рынку"""
         mock_result = OrderResult(
@@ -205,6 +236,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error_message, "Market closed")
         self.mock_api_client.buy_market.assert_called_once_with("FUTIMOEXF000", 1, True)
+    
+    @pytest.mark.asyncio
+
     
     async def test_sell_market_success(self):
         """Тест успешной продажи по рынку"""
@@ -225,6 +259,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertEqual(result.order_id, "12345")
         self.mock_api_client.sell_market.assert_called_once_with("FUTIMOEXF000", 1, True)
     
+    @pytest.mark.asyncio
+
+    
     async def test_sell_market_failure(self):
         """Тест неудачной продажи по рынку"""
         mock_result = OrderResult(
@@ -243,6 +280,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error_message, "Insufficient funds")
         self.mock_api_client.sell_market.assert_called_once_with("FUTIMOEXF000", 1, True)
+    
+    @pytest.mark.asyncio
+
     
     async def test_buy_limit_success(self):
         """Тест успешной покупки по лимиту"""
@@ -264,6 +304,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertEqual(result.executed_price, 100.5)
         self.mock_api_client.buy_limit.assert_called_once_with("FUTIMOEXF000", 1, 100.5)
     
+    @pytest.mark.asyncio
+
+    
     async def test_buy_limit_failure(self):
         """Тест неудачной покупки по лимиту"""
         mock_result = OrderResult(
@@ -282,6 +325,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error_message, "Price too high")
         self.mock_api_client.buy_limit.assert_called_once_with("FUTIMOEXF000", 1, 100.5)
+    
+    @pytest.mark.asyncio
+
     
     async def test_sell_limit_success(self):
         """Тест успешной продажи по лимиту"""
@@ -303,6 +349,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertEqual(result.executed_price, 100.5)
         self.mock_api_client.sell_limit.assert_called_once_with("FUTIMOEXF000", 1, 100.5)
     
+    @pytest.mark.asyncio
+
+    
     async def test_sell_limit_failure(self):
         """Тест неудачной продажи по лимиту"""
         mock_result = OrderResult(
@@ -321,6 +370,9 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.error_message, "Price too low")
         self.mock_api_client.sell_limit.assert_called_once_with("FUTIMOEXF000", 1, 100.5)
+    
+    @pytest.mark.asyncio
+
     
     async def test_api_client_error_handling(self):
         """Тест обработки ошибок API клиента"""

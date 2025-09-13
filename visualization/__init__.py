@@ -4,38 +4,31 @@
 Содержит модули для управления данными, построения графиков и UI
 """
 
-
-# Прямые импорты для интерфейсов (без внешних зависимостей)
+# Основные компоненты визуализации
+from .data_manager import DataManager
+from .chart_builder import ChartBuilder
+from .ui_components import UIComponents
 from .interfaces import (
-    DependenciesProvidable,
-    DependenciesProviderFactoryable
+    StrategyDataProvider, 
+    TradingSessionDataProvider, 
+    MockStrategyDataProvider,
+    DataManagerable,
+    ChartBuilderable,
+    UIComponentsable
 )
-from .dependencies_provider import (
-    VisualizationDependenciesProvider
-)
-from .provider_factories import (
-    StandardDependenciesProviderFactory,
-    CachedDependenciesProviderFactory,
-    TestDependenciesProviderFactory
-)
-from .visualization_service_locator import (
-    VisualizationServiceLocator,
-    get_visualization_service_locator,
-    create_real_data_provider,
-    create_mock_data_provider
-)
-from .factory_types import FactoryType
+from .trading_visualizer_adapter import TradingVisualizerAdapter
+from .logging_config import disable_verbose_logging
 
 __all__ = [
-    'DependenciesProvidable',
-    'DependenciesProviderFactoryable',
-    'VisualizationDependenciesProvider',
-    'StandardDependenciesProviderFactory',
-    'CachedDependenciesProviderFactory',
-    'TestDependenciesProviderFactory',
-    'VisualizationServiceLocator',
-    'get_visualization_service_locator',
-    'create_real_data_provider',
-    'create_mock_data_provider',
-    'FactoryType'
+    'DataManager',
+    'ChartBuilder', 
+    'UIComponents',
+    'StrategyDataProvider',
+    'TradingSessionDataProvider', 
+    'MockStrategyDataProvider',
+    'DataManagerable',
+    'ChartBuilderable',
+    'UIComponentsable',
+    'TradingVisualizerAdapter',
+    'disable_verbose_logging'
 ]

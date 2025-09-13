@@ -3,6 +3,7 @@
 Тесты для TinkoffAPIClient
 """
 import unittest
+import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from datetime import datetime, timedelta
@@ -107,6 +108,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
         self.assertEqual(small.nano, 1)
 
     @patch('robotlib.trading.tinkoff_api_client.AsyncClient')
+    @pytest.mark.asyncio
+
     async def test_context_manager_enter(self, mock_async_client):
         """Тест входа в контекстный менеджер"""
         mock_client_instance = Mock()
@@ -127,6 +130,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
             )
 
     @patch('robotlib.trading.tinkoff_api_client.AsyncClient')
+    @pytest.mark.asyncio
+
     async def test_context_manager_exit(self, mock_async_client):
         """Тест выхода из контекстного менеджера"""
         mock_client_instance = Mock()
@@ -142,6 +147,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_client_instance.__aexit__.assert_called_once()
 
     @patch('robotlib.trading.tinkoff_api_client.check_market_open')
+    @pytest.mark.asyncio
+
     async def test_check_market_availability_market_closed(self, mock_check_market):
         """Тест проверки доступности рынка - рынок закрыт"""
         mock_check_market.return_value = False
@@ -155,6 +162,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_check_market.assert_called_once()
 
     @patch('robotlib.trading.tinkoff_api_client.check_market_open')
+    @pytest.mark.asyncio
+
     async def test_check_market_availability_market_open(self, mock_check_market):
         """Тест проверки доступности рынка - рынок открыт"""
         mock_check_market.return_value = True
@@ -180,6 +189,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_check_market.assert_called_once()
 
     @patch('robotlib.trading.tinkoff_api_client.check_market_open')
+    @pytest.mark.asyncio
+
     async def test_check_market_availability_no_client(self, mock_check_market):
         """Тест проверки доступности рынка - клиент не инициализирован"""
         mock_check_market.return_value = True
@@ -191,6 +202,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
 
     @patch.object(TinkoffAPIClient, 'check_market_availability', new_callable=AsyncMock)
     @patch.object(TinkoffAPIClient, 'get_order_status', new_callable=AsyncMock)
+    @pytest.mark.asyncio
+
     async def test_buy_market_success(self, mock_get_order_status, mock_check_market):
         """Тест успешной покупки по рынку"""
         mock_check_market.return_value = True
@@ -230,6 +243,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
         self.assertIsNone(result.error_message)
 
     @patch.object(TinkoffAPIClient, 'check_market_availability', new_callable=AsyncMock)
+    @pytest.mark.asyncio
+
     async def test_buy_market_api_error(self, mock_check_market):
         """Тест покупки с ошибкой API"""
         mock_check_market.return_value = True
@@ -252,6 +267,8 @@ class TestTinkoffAPIClient(unittest.TestCase):
 
     @patch.object(TinkoffAPIClient, 'check_market_availability', new_callable=AsyncMock)
     @patch.object(TinkoffAPIClient, 'get_order_status', new_callable=AsyncMock)
+    @pytest.mark.asyncio
+
     async def test_sell_market_success(self, mock_get_order_status, mock_check_market):
         """Тест успешной продажи по рынку"""
         mock_check_market.return_value = True
@@ -289,6 +306,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         self.assertEqual(result.executed_quantity, 1)
         self.assertEqual(result.commission, 0.01)  # Комиссия из мока
 
+    @pytest.mark.asyncio
+
+
     async def test_get_portfolio_success(self):
         """Тест успешного получения портфеля"""
         # Мокаем services
@@ -310,6 +330,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         self.assertEqual(result, mock_response)
         mock_sandbox.get_sandbox_portfolio.assert_called_once_with(account_id=self.account_id)
 
+    @pytest.mark.asyncio
+
+
     async def test_get_portfolio_error(self):
         """Тест получения портфеля с ошибкой"""
         # Мокаем services
@@ -325,6 +348,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         result = await self.api_client.get_portfolio()
         
         self.assertIsNone(result)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_futures_margin_success(self):
         """Тест успешного получения маржи для фьючерса"""
@@ -352,6 +378,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         self.assertEqual(result['min_price_increment'], 0.01)
         self.assertEqual(result['min_price_increment_amount'], 0.1)
 
+    @pytest.mark.asyncio
+
+
     async def test_get_futures_margin_error(self):
         """Тест получения маржи с ошибкой"""
         # Мокаем services
@@ -367,6 +396,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         result = await self.api_client.get_futures_margin("FUTIMOEXF000")
         
         self.assertIsNone(result)
+
+    @pytest.mark.asyncio
+
 
     async def test_get_operations_history_sandbox(self):
         """Тест получения истории операций в песочнице"""
@@ -392,6 +424,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
             from_=from_date,
             to=to_date
         )
+
+    @pytest.mark.asyncio
+
 
     async def test_get_operations_history_production(self):
         """Тест получения истории операций в продакшене"""
@@ -424,6 +459,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
             to=to_date
         )
 
+    @pytest.mark.asyncio
+
+
     async def test_get_candles_success(self):
         """Тест успешного получения свечей"""
         # Мокаем services
@@ -450,6 +488,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
             interval=1
         )
 
+    @pytest.mark.asyncio
+
+
     async def test_get_candles_error(self):
         """Тест получения свечей с ошибкой"""
         # Мокаем services
@@ -469,12 +510,15 @@ class TestTinkoffAPIClient(unittest.TestCase):
         
         self.assertIsNone(result)
 
+    @pytest.mark.asyncio
+
+
     async def test_create_market_data_stream(self):
         """Тест создания стрима рыночных данных"""
         # Мокаем services
         mock_services = Mock()
         mock_market_data_stream = Mock()
-        mock_services.create_market_data_stream = AsyncMock(return_value=mock_market_data_stream)
+        mock_services.create_market_data_stream = Mock(return_value=mock_market_data_stream)
         
         self.api_client.services = mock_services
         
@@ -482,6 +526,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         
         self.assertEqual(result, mock_market_data_stream)
         mock_services.create_market_data_stream.assert_called_once()
+
+    @pytest.mark.asyncio
+
 
     async def test_get_accounts_success(self):
         """Тест успешного получения аккаунтов"""
@@ -500,6 +547,9 @@ class TestTinkoffAPIClient(unittest.TestCase):
         
         self.assertEqual(result, mock_response)
         mock_users.get_accounts.assert_called_once()
+
+    @pytest.mark.asyncio
+
 
     async def test_get_user_info_success(self):
         """Тест успешного получения информации о пользователе"""
@@ -530,6 +580,8 @@ class TestTinkoffAPIClientIntegration(unittest.TestCase):
         self.sandbox_token = "test_sandbox_token"
 
     @patch('robotlib.trading.tinkoff_api_client.AsyncClient')
+    @pytest.mark.asyncio
+
     async def test_full_context_manager_flow(self, mock_async_client):
         """Тест полного цикла контекстного менеджера"""
         # Настраиваем моки

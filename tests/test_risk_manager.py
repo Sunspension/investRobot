@@ -2,6 +2,7 @@
 Упрощенные тесты для RiskManager
 """
 import unittest
+import pytest
 from unittest.mock import Mock, AsyncMock, patch
 import asyncio
 from datetime import datetime
@@ -86,6 +87,9 @@ class TestRiskManager(unittest.TestCase):
         self.assertEqual(self.risk_manager._daily_losses, {})
         self.assertEqual(self.risk_manager._trade_history, [])
     
+    @pytest.mark.asyncio
+
+    
     async def test_check_trade_risk_success(self):
         """Тест успешной проверки риска сделки"""
         # Мокаем все методы, которые могут вызываться
@@ -107,6 +111,9 @@ class TestRiskManager(unittest.TestCase):
             
             # Проверяем, что результат получен (не падает с ошибкой)
             self.assertIsInstance(result, RiskCheck)
+    
+    @pytest.mark.asyncio
+
     
     async def test_check_trade_risk_exceeds_single_trade_limit(self):
         """Тест проверки риска при превышении лимита одной сделки"""
@@ -130,6 +137,9 @@ class TestRiskManager(unittest.TestCase):
             # Проверяем, что результат получен (не падает с ошибкой)
             self.assertIsInstance(result, RiskCheck)
     
+    @pytest.mark.asyncio
+
+    
     async def test_get_risk_report_success(self):
         """Тест успешного получения отчета о рисках"""
         # Мокаем portfolio_manager
@@ -149,6 +159,9 @@ class TestRiskManager(unittest.TestCase):
             self.assertIn('daily_loss', report)
             self.assertIn('percent_from_deposit', report['risk_limits'])
             self.assertIn('risk_limits', report)
+    
+    @pytest.mark.asyncio
+
     
     async def test_get_risk_report_error(self):
         """Тест получения отчета о рисках с ошибкой"""

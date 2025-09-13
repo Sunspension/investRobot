@@ -33,6 +33,9 @@ class Portfolio:
     blocked_amount: float
     available_amount: float
     positions: List[Position]
+    variation_margin: float = 0.0  # Вариационная маржа (прибыль/убыток от позиций)
+    guarantee_deposit: float = 0.0  # Гарантийное обеспечение (ГО)
+    pnl: float = 0.0  # Общая прибыль/убыток (P&L)
 
 
 class PortfolioManager:
@@ -45,7 +48,7 @@ class PortfolioManager:
         Args:
             api_client: API клиент для работы с Tinkoff
         """
-        self.api_client = api_client
+        self._api_client = api_client
         self.logger = get_logger(__name__)
         
         # Кэш позиций
@@ -69,7 +72,7 @@ class PortfolioManager:
                 return self._build_portfolio_from_cache()
             
             # Получаем портфель через API клиент
-            response = await self.api_client.get_portfolio()
+            response = await self._api_client.get_portfolio()
             if not response:
                 return Portfolio(
                     total_amount=0.0,
@@ -103,11 +106,32 @@ class PortfolioManager:
             # Доступная сумма = общая сумма - заблокированная
             available_amount = total_amount - blocked_amount
             
+            # Рассчитываем вариационную маржу, ГО и P&L
+            variation_margin = 0.0
+            guarantee_deposit_total = 0.0
+            total_pnl = 0.0
+            
+            for position in positions:
+                # Получаем гарантийное обеспечение для каждой позиции
+                guarantee_deposit = await self.get_guarantee_deposit(position.figi)
+                # ГО = количество позиций * гарантийное обеспечение
+                position_go = abs(position.quantity) * guarantee_deposit
+                guarantee_deposit_total += position_go
+                
+                # Вариационная маржа = нереализованная прибыль/убыток
+                variation_margin += position.unrealized_pnl
+                
+                # P&L = общая прибыль/убыток (реализованная + нереализованная)
+                total_pnl += position.realized_pnl + position.unrealized_pnl
+            
             portfolio = Portfolio(
                 total_amount=total_amount,
                 blocked_amount=blocked_amount,
                 available_amount=available_amount,
-                positions=positions
+                positions=positions,
+                variation_margin=variation_margin,
+                guarantee_deposit=guarantee_deposit_total,
+                pnl=total_pnl
             )
             
             self.logger.info(
@@ -124,7 +148,10 @@ class PortfolioManager:
                 total_amount=0.0,
                 blocked_amount=0.0,
                 available_amount=0.0,
-                positions=[]
+                positions=[],
+                variation_margin=0.0,
+                guarantee_deposit=0.0,
+                pnl=0.0
             )
     
     async def get_position(self, figi: str) -> Optional[Position]:
@@ -179,7 +206,7 @@ class PortfolioManager:
         # Проверяем доступные средства
         required_amount = quantity * price
         if required_amount > portfolio.available_amount:
-            self.logger.warning(
+            self.logger.debug(
                 f"Недостаточно средств для покупки: "
                 f"требуется {required_amount:.2f}, доступно {portfolio.available_amount:.2f}"
             )
@@ -287,7 +314,7 @@ class PortfolioManager:
             Список операций
         """
         try:
-            return await self.api_client.get_operations_history(from_date, to_date)
+            return await self._api_client.get_operations_history(from_date, to_date)
             
         except Exception as e:
             self.logger.error(f"Ошибка получения истории операций: {e}")
@@ -338,7 +365,7 @@ class PortfolioManager:
             Размер гарантийного обеспечения в рублях или 0.0 при ошибке
         """
         try:
-            margin_info = await self.api_client.get_futures_margin(figi)
+            margin_info = await self._api_client.get_futures_margin(figi)
             
             if margin_info:
                 # Используем initial_margin_on_buy как базовое гарантийное обеспечение
@@ -361,7 +388,7 @@ class PortfolioManager:
             Стоимость одного пункта в рублях или 0.0 при ошибке
         """
         try:
-            margin_info = await self.api_client.get_futures_margin(figi)
+            margin_info = await self._api_client.get_futures_margin(figi)
             
             if margin_info:
                 min_price_increment = margin_info.get('min_price_increment', 0)
@@ -387,7 +414,7 @@ class PortfolioManager:
             Количество контрактов в лоте или 0 при ошибке
         """
         try:
-            instrument_info = await self.api_client.get_instrument_by_figi(figi)
+            instrument_info = await self._api_client.get_instrument_by_figi(figi)
             
             if instrument_info and hasattr(instrument_info, 'lot'):
                 return int(instrument_info.lot)
@@ -407,7 +434,7 @@ class PortfolioManager:
         """
         try:
             # Получаем портфель напрямую из API
-            response = await self.api_client.get_portfolio()
+            response = await self._api_client.get_portfolio()
             if not response:
                 return 0.0
             
@@ -443,13 +470,17 @@ class PortfolioManager:
             total_amount=0.0,  # TODO: Кэшировать общую сумму
             blocked_amount=0.0,
             available_amount=0.0,
-            positions=positions
+            positions=positions,
+            variation_margin=0.0,
+            guarantee_deposit=0.0,
+            pnl=0.0
         )
 
 
 # Пример использования
 async def main():
     """Пример использования PortfolioManager"""
+    logger = get_logger(__name__)
     config = load_config()
     
     async with TinkoffAPIClient(
@@ -462,16 +493,16 @@ async def main():
         
         # Получаем портфель
         portfolio = await portfolio_manager.get_portfolio()
-        self.logger.info(f"Портфель: {portfolio.total_amount:.2f} руб")
-        self.logger.info(f"Доступно: {portfolio.available_amount:.2f} руб")
-        self.logger.info(f"Позиций: {len(portfolio.positions)}")
+        logger.info(f"Портфель: {portfolio.total_amount:.2f} руб")
+        logger.info(f"Доступно: {portfolio.available_amount:.2f} руб")
+        logger.info(f"Позиций: {len(portfolio.positions)}")
         
         # Проверяем позицию по фьючерсу
         position = await portfolio_manager.get_position("FUTIMOEXF000")
         if position:
-            self.logger.info(f"Позиция по фьючерсу: {position.quantity} лотов")
+            logger.info(f"Позиция по фьючерсу: {position.quantity} лотов")
         else:
-            self.logger.info("Позиции по фьючерсу нет")
+            logger.info("Позиции по фьючерсу нет")
 
 
 if __name__ == "__main__":

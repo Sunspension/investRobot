@@ -12,7 +12,7 @@ from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.trading.order_executor import OrderExecutor
 from robotlib.trading.portfolio_manager import PortfolioManager
-from robotlib.trading.risk_manager import RiskManager
+from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.signal_manager import SignalManager
 from robotlib.trading.market_data_stream import MarketDataStream
 from tests.mocks import MockPortfolioManager, MockRiskManager
@@ -38,12 +38,27 @@ class TradingDependenciesFactory:
             # Создаем остальные компоненты
             order_executor = OrderExecutor(api_client)
             portfolio_manager = PortfolioManager(api_client)
-            risk_manager = RiskManager(portfolio_manager, config.risk_limits)
-            signal_manager = SignalManager(**config.signal_manager_params)
+            
+            # Создаем risk_limits по умолчанию
+            risk_limits = RiskLimits(
+                max_daily_loss=50000,
+                max_position_size=50000,
+                percent_from_deposit=50.0,
+                items_per_trade=20,
+                stop_loss_threshold=3.0
+            )
+            risk_manager = RiskManager(portfolio_manager, risk_limits)
+            
+            # Создаем signal_manager с параметрами по умолчанию
+            signal_manager_params = getattr(config, 'signal_manager_params', {})
+            signal_manager = SignalManager(**signal_manager_params)
+            # Получаем figi из параметров или используем значение по умолчанию
+            figi = getattr(config, 'figi', 'FUTIMOEXF000')
             market_data_stream = MarketDataStream(
                 api_client=api_client,
                 signal_manager=signal_manager,
-                figi=config.figi
+                figi=figi,
+                visualizer=visualizer
             )
             
             # Создаем компоненты сессии

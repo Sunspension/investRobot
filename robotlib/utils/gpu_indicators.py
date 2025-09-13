@@ -37,11 +37,11 @@ class GPUMACD:
         self.macd_line = None
         self.histogram = None
         
+        # Инициализируем список цен
+        self._prices = []
+        
     def add(self, price: float) -> Optional[dict]:
         """Добавляет новую цену и возвращает MACD значения"""
-        if not hasattr(self, '_prices'):
-            self._prices = []
-            
         self._prices.append(price)
         
         if len(self._prices) < self.slow_period:
@@ -95,11 +95,11 @@ class GPUATR:
         self.period = period
         self.device = device if torch.backends.mps.is_available() else "cpu"
         
+        # Инициализируем список OHLCV данных
+        self._ohlcv_data = []
+        
     def add(self, ohlcv: GPUOHLCV) -> Optional[float]:
         """Добавляет новые OHLCV данные и возвращает ATR"""
-        if not hasattr(self, '_ohlcv_data'):
-            self._ohlcv_data = []
-            
         self._ohlcv_data.append(ohlcv)
         
         if len(self._ohlcv_data) < self.period + 1:

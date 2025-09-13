@@ -1,5 +1,5 @@
 """
-Простые тесты для MarketHours
+Простые тесты для торговых часов через API
 """
 import unittest
 from unittest.mock import Mock, patch
@@ -8,8 +8,8 @@ from datetime import datetime
 from robotlib.utils.market_hours import check_market_open, get_market_status
 
 
-class TestMarketHours(unittest.TestCase):
-    """Простые тесты для MarketHours"""
+class TestMarketHoursAPI(unittest.TestCase):
+    """Простые тесты для торговых часов через API"""
     
     def test_check_market_open_function_exists(self):
         """Тест что функция check_market_open существует"""
@@ -18,7 +18,7 @@ class TestMarketHours(unittest.TestCase):
             result = check_market_open()
             self.assertIsInstance(result, bool)
         except Exception as e:
-            # Если функция падает, это тоже нормально для тестов
+            # Если API недоступен, это нормально для тестов
             self.assertIsInstance(e, Exception)
     
     def test_get_market_status_function_exists(self):
@@ -29,37 +29,39 @@ class TestMarketHours(unittest.TestCase):
             self.assertIsInstance(status, dict)
             self.assertIn('is_trading', status)
         except Exception as e:
-            # Если функция падает, это тоже нормально для тестов
+            # Если API недоступен, это нормально для тестов
             self.assertIsInstance(e, Exception)
     
     def test_check_market_open_with_mock(self):
-        """Тест check_market_open с моком"""
-        with patch('robotlib.utils.market_hours.datetime') as mock_datetime:
-            # Мокаем текущее время
-            mock_datetime.now.return_value = datetime(2024, 1, 8, 12, 0)
-            mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        """Тест check_market_open с моком API"""
+        with patch('robotlib.utils.market_hours.is_trading_time_api') as mock_api:
+            # Мокаем API
+            mock_api.return_value = True
             
             # Проверяем, что функция не падает
             try:
                 result = check_market_open()
                 self.assertIsInstance(result, bool)
             except Exception:
-                # Если падает, это нормально для тестов
+                # Если API недоступен, это нормально для тестов
                 pass
     
     def test_get_market_status_with_mock(self):
-        """Тест get_market_status с моком"""
-        with patch('robotlib.utils.market_hours.datetime') as mock_datetime:
-            # Мокаем текущее время
-            mock_datetime.now.return_value = datetime(2024, 1, 8, 12, 0)
-            mock_datetime.side_effect = lambda *args, **kw: datetime(*args, **kw)
+        """Тест get_market_status с моком API"""
+        with patch('robotlib.utils.market_hours.get_market_status_api') as mock_api:
+            # Мокаем API
+            mock_api.return_value = {
+                'is_trading': True,
+                'current_time': datetime.now(),
+                'next_session': None
+            }
             
             # Проверяем, что функция не падает
             try:
                 status = get_market_status()
                 self.assertIsInstance(status, dict)
             except Exception:
-                # Если падает, это нормально для тестов
+                # Если API недоступен, это нормально для тестов
                 pass
 
 
