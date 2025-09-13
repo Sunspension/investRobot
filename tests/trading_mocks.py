@@ -15,7 +15,8 @@ from robotlib.trading.interfaces import (
 from robotlib.trading.order_executor import OrderResult
 from robotlib.trading.portfolio_manager import Portfolio, Position
 from robotlib.trading.risk_manager import RiskLimits, RiskCheck
-from robotlib.signal_manager import Signal, OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
+from robotlib.signal_types import Signal
+from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from tests.mocks import MockRiskManager, MockPortfolioManager, MockTradingDependencies
 from datetime import datetime
 import uuid

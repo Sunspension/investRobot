@@ -1,6 +1,7 @@
 from typing import Optional
 from robotlib.utils.money import Money
-from robotlib.signal_manager import Signal, Order, OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
+from robotlib.signal_types import Signal, Order
+from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable
 from tinkoff.invest import Candle, HistoricCandle

@@ -191,3 +191,44 @@ class MockTinkoffAPIClient:
     def is_sandbox(self) -> bool:
         """Проверяет, используется ли песочница"""
         return self.sandbox_token is not None
+    
+    async def get_candles(self, figi: str, from_date, to_date, interval: int = 1) -> Any:
+        """Генерирует мок-свечи для демонстрации"""
+        from datetime import datetime, timedelta
+        from tinkoff.invest import Candle, Quotation
+        import random
+        
+        # Генерируем свечи за последние 2 часа
+        candles = []
+        current_time = datetime.now()
+        base_price = 2900.0
+        
+        for i in range(120):  # 120 свечей по 1 минуте = 2 часа
+            candle_time = current_time - timedelta(minutes=120-i)
+            
+            # Генерируем реалистичные цены
+            price_change = random.uniform(-5, 5)
+            open_price = base_price + price_change
+            high_price = open_price + random.uniform(0, 3)
+            low_price = open_price - random.uniform(0, 3)
+            close_price = open_price + random.uniform(-2, 2)
+            volume = random.randint(100, 1000)
+            
+            # Обновляем базовую цену для следующей свечи
+            base_price = close_price
+            
+            candle = Candle(
+                figi=figi,
+                interval=interval,
+                open=Quotation(units=int(open_price), nano=int((open_price - int(open_price)) * 1_000_000_000)),
+                high=Quotation(units=int(high_price), nano=int((high_price - int(high_price)) * 1_000_000_000)),
+                low=Quotation(units=int(low_price), nano=int((low_price - int(low_price)) * 1_000_000_000)),
+                close=Quotation(units=int(close_price), nano=int((close_price - int(close_price)) * 1_000_000_000)),
+                volume=volume,
+                time=candle_time
+            )
+            candles.append(candle)
+        
+        # Создаем мок-ответ
+        from unittest.mock import Mock
+        return Mock(candles=candles)

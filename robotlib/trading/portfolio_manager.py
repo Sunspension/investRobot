@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
+from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
 from robotlib.utils.money import Money
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
@@ -41,14 +42,16 @@ class Portfolio:
 class PortfolioManager:
     """Класс для управления портфелем и позициями"""
     
-    def __init__(self, api_client: TinkoffAPIClient):
+    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[EventBusable] = None):
         """
         Инициализация менеджера портфеля
         
         Args:
             api_client: API клиент для работы с Tinkoff
+            event_bus: Шина событий для публикации событий портфеля
         """
         self._api_client = api_client
+        self._event_bus = event_bus
         self.logger = get_logger(__name__)
         
         # Кэш позиций
@@ -139,6 +142,22 @@ class PortfolioManager:
                 f"доступно: {portfolio.available_amount:.2f} руб, "
                 f"позиций: {len(positions)}"
             )
+            
+            # Публикуем событие обновления портфеля
+            if self._event_bus:
+                event = TradingEvent(
+                    EventType.PORTFOLIO_UPDATED,
+                    {
+                        'portfolio': portfolio,
+                        'total_amount': total_amount,
+                        'available_amount': portfolio.available_amount,
+                        'positions_count': len(positions),
+                        'variation_margin': variation_margin,
+                        'guarantee_deposit': guarantee_deposit_total,
+                        'pnl': total_pnl
+                    }
+                )
+                asyncio.create_task(self._event_bus.publish(event))
             
             return portfolio
             
@@ -443,6 +462,36 @@ class PortfolioManager:
         except Exception as e:
             self.logger.warning(f"Не удалось получить депозит: {e}")
             return 0.0
+    
+    async def get_portfolio_data(self) -> Dict[str, Any]:
+        """
+        Получает данные портфеля в виде словаря (для совместимости с тестами)
+        
+        Returns:
+            Словарь с данными портфеля
+        """
+        portfolio = await self.get_portfolio()
+        
+        return {
+            'total_amount': portfolio.total_amount,
+            'blocked_amount': portfolio.blocked_amount,
+            'available_amount': portfolio.available_amount,
+            'positions': [
+                {
+                    'figi': pos.figi,
+                    'quantity': pos.quantity,
+                    'average_price': pos.average_price,
+                    'current_price': pos.current_price,
+                    'unrealized_pnl': pos.unrealized_pnl,
+                    'realized_pnl': pos.realized_pnl
+                }
+                for pos in portfolio.positions
+            ],
+            'variation_margin': portfolio.variation_margin,
+            'guarantee_deposit': portfolio.guarantee_deposit,
+            'pnl': portfolio.pnl,
+            'last_update': datetime.now().isoformat()
+        }
     
     
     def _is_cache_valid(self) -> bool:

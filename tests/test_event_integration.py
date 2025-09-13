@@ -18,8 +18,17 @@ class TestEventIntegration(unittest.TestCase):
             figi="FUTIMOEXF000",
             enable_visualization=True
         )
+        # Добавляем мок tcs_client для тестов
+        from unittest.mock import Mock
+        self.config.tcs_client = Mock()
+        self.config.tcs_client.token = "test_token"
+        self.config.tcs_client.id = "test_account_id"
+        self.config.tcs_client.sandbox_token = "test_sandbox_token"
+        
         self.container = TradingSystemContainer(self.config, enable_visualization=True)
-        self.trading_system = self.container.build_trading_system()
+        # В тестах мы не можем использовать await в setUp, поэтому создаем синхронную версию
+        import asyncio
+        self.trading_system = asyncio.run(self.container.build_trading_system(start_server=False))
     
     def test_market_data_stream_event_publishing(self):
         """Тест публикации событий MarketDataStream"""
@@ -108,7 +117,7 @@ class TestEventIntegration(unittest.TestCase):
         """Тест переключения визуализации в DI контейнере"""
         # Контейнер без визуализации
         container_no_viz = TradingSystemContainer(self.config, enable_visualization=False)
-        trading_system_no_viz = container_no_viz.build_trading_system()
+        trading_system_no_viz = asyncio.run(container_no_viz.build_trading_system(start_server=False))
         
         self.assertIsNone(trading_system_no_viz['visualizer'])
         # EventBus может быть разного типа в зависимости от настроек
@@ -117,11 +126,13 @@ class TestEventIntegration(unittest.TestCase):
         
         # Контейнер с визуализацией
         container_with_viz = TradingSystemContainer(self.config, enable_visualization=True)
-        trading_system_with_viz = container_with_viz.build_trading_system()
+        trading_system_with_viz = asyncio.run(container_with_viz.build_trading_system(start_server=False))
         
         if trading_system_with_viz['visualizer']:
             self.assertIsNotNone(trading_system_with_viz['visualizer'])
-            self.assertTrue(hasattr(trading_system_with_viz['visualizer'], 'get_adapter'))
+            # Проверяем, что это DashEventVisualizer
+            from visualization.dash_event_visualizer import DashEventVisualizer
+            self.assertIsInstance(trading_system_with_viz['visualizer'], DashEventVisualizer)
 
 
 if __name__ == '__main__':

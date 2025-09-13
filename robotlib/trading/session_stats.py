@@ -17,6 +17,8 @@ class SessionStats(SessionStatsable):
     _total_signals: int = 0
     _successful_orders: int = 0
     _failed_orders: int = 0
+    _buy_orders: int = 0
+    _sell_orders: int = 0
     _total_volume: float = 0.0
     _total_profit: float = 0.0
     _max_drawdown: float = 0.0
@@ -97,6 +99,15 @@ class SessionStats(SessionStatsable):
         """Добавляет неудачный ордер"""
         self._failed_orders += 1
     
+    def add_trade(self, price: float, volume: float, trade_type: str) -> None:
+        """Добавляет сделку (для совместимости с тестами)"""
+        if trade_type.lower() == 'buy':
+            self._buy_orders += 1
+            self.add_successful_order(volume, 0.0)  # Пока без расчета прибыли
+        elif trade_type.lower() == 'sell':
+            self._sell_orders += 1
+            self.add_successful_order(volume, 0.0)  # Пока без расчета прибыли
+    
     def get_stats_dict(self) -> Dict[str, Any]:
         """Возвращает статистику в виде словаря"""
         duration = None
@@ -120,6 +131,16 @@ class SessionStats(SessionStatsable):
             'peak_balance': self._peak_balance,
             'current_balance': self._current_balance
         }
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Возвращает статистику (алиас для get_stats_dict для совместимости с тестами)"""
+        stats = self.get_stats_dict()
+        # Добавляем поля, которые ожидают тесты
+        stats['total_trades'] = self._successful_orders + self._failed_orders
+        stats['buy_trades'] = self._buy_orders
+        stats['sell_trades'] = self._sell_orders
+        stats['total_pnl'] = self._total_profit  # Алиас для total_profit
+        return stats
     
     def print_stats(self) -> None:
         """Выводит статистику в консоль"""

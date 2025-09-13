@@ -1,6 +1,7 @@
 from typing import Optional
 from robotlib.utils.money import Money
-from robotlib.signal_manager import Signal, Order, OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
+from robotlib.signal_types import Signal, Order
+from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable
 from tinkoff.invest import Candle, HistoricCandle
@@ -156,6 +157,11 @@ class ShortStrategy(Strategyable):
         
         # Получаем гарантийное обеспечение из API
         guarantee_deposit = await self._portfolio_manager.get_guarantee_deposit(figi)
+        
+        # Проверяем, что гарантийное обеспечение больше нуля
+        if guarantee_deposit <= 0:
+            self.logger.warning(f"Гарантийное обеспечение для {figi} равно нулю или отрицательно: {guarantee_deposit}")
+            return 0
         
         # Заморожено ГО за уже открытые позиции
         frozen_guarantee = self._position * guarantee_deposit

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List
-from robotlib.signal_manager import Signal, Order, OrderIntent
+from robotlib.signal_types import Signal, Order
+from robotlib.trading.order_types import OrderIntent
 from tinkoff.invest import Candle, HistoricCandle
 
 

@@ -441,12 +441,27 @@ class TinkoffAPIClient:
     ):
         """Получает свечи"""
         try:
-            return await self.services.market_data.get_candles(
+            self.logger.info(f"🔍 Запрос свечей: FIGI={figi}, from={from_date}, to={to_date}, interval={interval}")
+            self.logger.info(f"🔍 API client ready: {self.client is not None}, services: {self.services is not None}")
+            
+            if not self.client or not self.services:
+                self.logger.error("❌ API client не инициализирован")
+                return None
+                
+            response = await self.services.market_data.get_candles(
                 figi=figi,
                 from_=from_date,
                 to=to_date,
                 interval=interval
             )
+            
+            self.logger.info(f"🔍 Получен ответ: {type(response)}")
+            if response and hasattr(response, 'candles'):
+                self.logger.info(f"🔍 Количество свечей в ответе: {len(response.candles)}")
+            else:
+                self.logger.warning(f"🔍 Ответ не содержит свечей: {response}")
+                
+            return response
         except Exception as e:
             self.logger.error(f"Ошибка получения свечей {figi}: {e}")
             return None

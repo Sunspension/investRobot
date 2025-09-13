@@ -2,7 +2,7 @@
 Расширенный модуль для проверки торговых часов с поддержкой выходных торгов
 """
 import pytz
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Optional, Dict, Any
 import asyncio
 from abc import ABC, abstractmethod
@@ -155,21 +155,22 @@ class EnhancedMarketHours:
         else:
             dt = dt.astimezone(self._moscow_tz)
         
-        # 1. Проверяем через API (основные торговые часы)
+        # 1. Сначала проверяем выходные торги (игнорируем API баг)
+        if self._is_weekend_trading_time(dt):
+            self._logger.info(f"Выходные торги активны: {dt.strftime('%Y-%m-%d %H:%M:%S')} (день недели: {dt.weekday()})")
+            return True
+        
+        # 2. Проверяем вечерние торги
+        if self._is_evening_trading_time(dt):
+            return True
+        
+        # 3. Проверяем через API (основные торговые часы)
         try:
             api_result = await self._market_hours_provider.is_trading_time(dt)
             if api_result:
                 return True
         except Exception as e:
             self._logger.warning(f"Ошибка проверки через API: {e}")
-        
-        # 2. Проверяем выходные торги
-        if self._is_weekend_trading_time(dt):
-            return True
-        
-        # 3. Проверяем вечерние торги
-        if self._is_evening_trading_time(dt):
-            return True
         
         return False
     
@@ -190,7 +191,7 @@ class EnhancedMarketHours:
         else:
             dt = dt.astimezone(self._moscow_tz)
         
-        # Проверяем торговое время
+        # Проверяем торговое время (выходные торги проверяются первыми)
         is_trading = await self.is_trading_time_enhanced(dt)
         
         # Определяем тип торговой сессии
@@ -227,6 +228,15 @@ class EnhancedMarketHours:
                 'time_until_next': base_status.get('time_until_next')
             })
         
+        # Если рынок закрыт, добавляем время до следующего открытия
+        if not is_trading:
+            next_open = self._get_next_market_open(dt)
+            time_until_open = self._format_time_until_open(dt, next_open)
+            enhanced_status.update({
+                'next_session': f"До открытия: {time_until_open}",
+                'time_until_next': time_until_open
+            })
+        
         return enhanced_status
     
     def _get_status_message(self, session_type: str, is_trading: bool) -> str:
@@ -241,6 +251,51 @@ class EnhancedMarketHours:
         }
         
         return messages.get(session_type, "Торговая сессия")
+    
+    def _get_next_market_open(self, current_time):
+        """Вычисляет время следующего открытия рынка с учетом выходных торгов"""
+        # Базовое время открытия - 10:00 по московскому времени
+        next_open = current_time.replace(hour=10, minute=0, second=0, microsecond=0)
+        
+        # Если текущее время уже после 10:00, то следующее открытие - завтра
+        if current_time.hour >= 10:
+            next_open += timedelta(days=1)
+        
+        # Если следующее открытие уже прошло, переносим на следующий день
+        if next_open <= current_time:
+            next_open += timedelta(days=1)
+        
+        # Дополнительная проверка: если следующее открытие все еще в прошлом, переносим еще на день
+        while next_open <= current_time:
+            next_open += timedelta(days=1)
+        
+        # Выходные торги есть, поэтому не переносим на понедельник
+        # Если следующее открытие попадает на выходной (суббота/воскресенье), 
+        # то это нормально - там есть торги
+        
+        # Логируем для отладки
+        self._logger.info(f"Расчет времени до открытия: текущее время={current_time.strftime('%Y-%m-%d %H:%M:%S')} (день недели: {current_time.weekday()}), следующее открытие={next_open.strftime('%Y-%m-%d %H:%M:%S')} (день недели: {next_open.weekday()})")
+        
+        return next_open
+    
+    def _format_time_until_open(self, current_time, next_open):
+        """Форматирует время до открытия в читаемый вид"""
+        time_diff = next_open - current_time
+        
+        # Подробное логирование для отладки
+        self._logger.info(f"Форматирование времени: current_time={current_time.strftime('%Y-%m-%d %H:%M:%S')}, next_open={next_open.strftime('%Y-%m-%d %H:%M:%S')}, time_diff={time_diff}, days={time_diff.days}, seconds={time_diff.seconds}")
+        
+        if time_diff.days > 0:
+            hours = time_diff.seconds // 3600
+            minutes = (time_diff.seconds % 3600) // 60
+            formatted_time = f"{time_diff.days}д {hours:02d}:{minutes:02d}"
+        else:
+            hours = time_diff.seconds // 3600
+            minutes = (time_diff.seconds % 3600) // 60
+            formatted_time = f"{hours:02d}:{minutes:02d}"
+        
+        self._logger.info(f"Результат форматирования: '{formatted_time}'")
+        return formatted_time
 
 
 def create_enhanced_market_hours() -> EnhancedMarketHours:

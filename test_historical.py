@@ -27,7 +27,8 @@ from tinkoff.invest import CandleInterval
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
-from robotlib.signal_manager import SignalManager, OrderDirection, OrderType, OrderStatus
+from robotlib.signal_manager import SignalManager
+from robotlib.trading.order_types import OrderDirection, OrderType, OrderStatus
 from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.trading.portfolio_manager import PortfolioManager
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient

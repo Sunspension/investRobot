@@ -4,7 +4,8 @@
 
 from typing import Optional
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.signal_manager import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
+from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
+from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
 from datetime import datetime
@@ -15,14 +16,16 @@ import uuid
 class OrderExecutor:
     """Класс для выполнения торговых приказов"""
     
-    def __init__(self, api_client: TinkoffAPIClient):
+    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[EventBusable] = None):
         """
         Инициализация исполнителя приказов
         
         Args:
             api_client: API клиент для работы с Tinkoff
+            event_bus: Шина событий для публикации событий ордеров
         """
         self.api_client = api_client
+        self._event_bus = event_bus
         self.logger = get_logger(__name__)
     
     async def check_market_availability(self) -> bool:
@@ -63,6 +66,34 @@ class OrderExecutor:
                 status=OrderStatus.FILLED if result.success else OrderStatus.REJECTED,
                 commission=result.commission or 0.0
             )
+            
+            # Публикуем событие размещения ордера
+            if self._event_bus:
+                placed_event = TradingEvent(
+                    EventType.ORDER_PLACED,
+                    {
+                        'order_id': order_id,
+                        'order_intent': order_intent,
+                        'execution': execution,
+                        'result': result
+                    }
+                )
+                asyncio.create_task(self._event_bus.publish(placed_event))
+            
+            # Если ордер исполнен, публикуем событие исполнения
+            if result.success and execution.status == OrderStatus.FILLED:
+                if self._event_bus:
+                    filled_event = TradingEvent(
+                        EventType.ORDER_FILLED,
+                        {
+                            'order_id': order_id,
+                            'execution': execution,
+                            'executed_price': result.executed_price,
+                            'executed_quantity': result.executed_quantity,
+                            'commission': result.commission or 0.0
+                        }
+                    )
+                    asyncio.create_task(self._event_bus.publish(filled_event))
             
             self.logger.info(f"Ордер выполнен: {execution}")
             return execution

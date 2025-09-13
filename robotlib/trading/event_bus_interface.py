@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Callable
 from enum import Enum
 import time
+import asyncio
 
 
 class EventType(Enum):
@@ -80,7 +81,13 @@ class EventBus(EventBusable):
         if event.event_type in self._subscribers:
             for handler in self._subscribers[event.event_type]:
                 try:
-                    await handler(event)
+                    if handler is None:
+                        continue
+                    
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(event)
+                    else:
+                        handler(event)
                 except Exception as e:
                     # Логируем ошибку, но не прерываем обработку других подписчиков
                     print(f"Ошибка в обработчике события {event.event_type}: {e}")
@@ -114,9 +121,17 @@ class MockEventBus(EventBusable):
         if event.event_type in self._subscribers:
             for handler in self._subscribers[event.event_type]:
                 try:
-                    await handler(event)
-                except Exception:
-                    pass
+                    if handler is None:
+                        continue
+                    
+                    if asyncio.iscoroutinefunction(handler):
+                        await handler(event)
+                    else:
+                        handler(event)
+                except Exception as e:
+                    print(f"Ошибка в обработчике события {event.event_type}: {e}")
+                    import traceback
+                    traceback.print_exc()
     
     def get_subscribers(self, event_type: EventType) -> List[Callable[[TradingEvent], None]]:
         return self._subscribers.get(event_type, [])

@@ -40,21 +40,72 @@ class DataManager:
         self.current_price: float = 0.0
         self.last_update: Optional[datetime] = None
         
-        # Статистика
+        # Статистика сигналов
         self.buy_count: int = 0
         self.sell_count: int = 0
+        
+        # Статистика ордеров
         self.orders_count: int = 0
+        self.buy_orders_count: int = 0
+        self.sell_orders_count: int = 0
+        
+        # Общий объем
         self.total_volume: float = 0.0
         
         # Потокобезопасность
         self.data_lock = threading.Lock()
     
+    def _validate_candle_data(self, candle_data: Dict[str, Any]) -> bool:
+        """Валидирует данные свечи"""
+        try:
+            # Проверяем наличие обязательных полей
+            required_fields = ['time', 'open', 'high', 'low', 'close', 'volume']
+            for field in required_fields:
+                if field not in candle_data:
+                    return False
+            
+            # Проверяем типы данных
+            open_price = float(candle_data['open'])
+            high_price = float(candle_data['high'])
+            low_price = float(candle_data['low'])
+            close_price = float(candle_data['close'])
+            volume = float(candle_data['volume'])
+            
+            # Проверяем логическую корректность
+            if high_price < low_price:
+                return False
+            if high_price < open_price:
+                return False
+            if high_price < close_price:
+                return False
+            if low_price > open_price:
+                return False
+            if low_price > close_price:
+                return False
+            if volume <= 0:
+                return False
+            if open_price <= 0:
+                return False
+            
+            return True
+            
+        except (ValueError, TypeError):
+            return False
+    
     def add_candle(self, candle_data: Dict[str, Any]) -> None:
         """Добавляет свечу в данные"""
+        # Валидация данных свечи
+        if not self._validate_candle_data(candle_data):
+            self.logger.warning(f"Некорректные данные свечи, пропускаем: {candle_data}")
+            return
+            
         with self.data_lock:
             self.candles_data.append(candle_data)
             self.current_price = candle_data['close']
             self.last_update = datetime.now()
+            
+            # Обновляем общий объем
+            self.total_volume += candle_data['volume']
             
             # Ограничиваем количество свечей
             if len(self.candles_data) > 200:
@@ -81,6 +132,13 @@ class DataManager:
             self.orders_count = len(self.orders_data)
             self.total_volume += order_data.get('quantity', 1)
             
+            # Подсчитываем ордера по типам
+            order_type = order_data.get('type', '').lower()
+            if order_type == 'buy':
+                self.buy_orders_count += 1
+            elif order_type == 'sell':
+                self.sell_orders_count += 1
+            
             # Ограничиваем количество ордеров
             if len(self.orders_data) > 100:
                 self.orders_data = self.orders_data[-50:]
@@ -91,6 +149,16 @@ class DataManager:
             self.orders_data = orders_data.copy()
             self.orders_count = len(orders_data)
             self.total_volume = sum(order.get('quantity', 1) for order in orders_data)
+            
+            # Пересчитываем ордера по типам
+            self.buy_orders_count = 0
+            self.sell_orders_count = 0
+            for order in orders_data:
+                order_type = order.get('type', '').lower()
+                if order_type == 'buy':
+                    self.buy_orders_count += 1
+                elif order_type == 'sell':
+                    self.sell_orders_count += 1
             
             # Ограничиваем количество ордеров
             if len(self.orders_data) > 100:
@@ -130,6 +198,8 @@ class DataManager:
                 'buy_count': self.buy_count,
                 'sell_count': self.sell_count,
                 'orders_count': self.orders_count,
+                'buy_orders_count': self.buy_orders_count,
+                'sell_orders_count': self.sell_orders_count,
                 'total_volume': self.total_volume
             }
     
@@ -185,6 +255,8 @@ class DataManager:
             self.buy_count = 0
             self.sell_count = 0
             self.orders_count = 0
+            self.buy_orders_count = 0
+            self.sell_orders_count = 0
             self.total_volume = 0.0
             self.current_price = 0.0
             self.last_update = None

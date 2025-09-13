@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Пакет визуализации торговых сигналов
+Пакет визуализации торговых сигналов (новая Event-Driven архитектура)
 Содержит модули для управления данными, построения графиков и UI
 """
 
@@ -8,27 +8,16 @@
 from .data_manager import DataManager
 from .chart_builder import ChartBuilder
 from .ui_components import UIComponents
-from .interfaces import (
-    StrategyDataProvider, 
-    TradingSessionDataProvider, 
-    MockStrategyDataProvider,
-    DataManagerable,
-    ChartBuilderable,
-    UIComponentsable
-)
-from .trading_visualizer_adapter import TradingVisualizerAdapter
+from .event_visualizer_interface import EventVisualizerable, MockEventVisualizer
+from .dash_event_visualizer import DashEventVisualizer
 from .logging_config import disable_verbose_logging
 
 __all__ = [
     'DataManager',
     'ChartBuilder', 
     'UIComponents',
-    'StrategyDataProvider',
-    'TradingSessionDataProvider', 
-    'MockStrategyDataProvider',
-    'DataManagerable',
-    'ChartBuilderable',
-    'UIComponentsable',
-    'TradingVisualizerAdapter',
+    'EventVisualizerable',
+    'MockEventVisualizer',
+    'DashEventVisualizer',
     'disable_verbose_logging'
 ]

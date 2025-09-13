@@ -11,13 +11,17 @@ from robotlib.utils.logger import get_logger
 class SessionInitializer(SessionInitializable):
     """Класс для инициализации компонентов торговой сессии"""
     
-    def __init__(self, config: TradingConfig, dependencies: TradingDependencies):
+    def __init__(self, config: TradingConfig, dependencies: Optional[TradingDependencies] = None):
         self.config = config
         self.dependencies = dependencies
         self.logger = get_logger(__name__)
     
     async def initialize_components(self) -> None:
         """Инициализирует все компоненты системы"""
+        if not self.dependencies:
+            self.logger.warning("Dependencies не установлены, пропускаем инициализацию")
+            return
+            
         self.logger.info("Инициализация компонентов торговой сессии...")
         
         # Инициализация стратегий

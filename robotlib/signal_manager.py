@@ -10,91 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from enum import Enum
-
-
-class OrderDirection(Enum):
-    """Направление ордера"""
-    BUY = "buy"
-    SELL = "sell"
-
-
-class OrderType(Enum):
-    """Тип ордера"""
-    MARKET = "market"
-    LIMIT = "limit"
-
-
-class OrderStatus(Enum):
-    """Статус исполнения ордера"""
-    FILLED = "filled"
-    PARTIAL = "partial"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    PENDING = "pending"
-
-
-@dataclass
-class Signal:
-    macd: float = None
-    signal: float = None
-    histogram: float = None
-    macd_prev: float = None
-    signal_prev: float = None
-    peak_detected: bool = False
-    trough_detected: bool = False
-    candle: Candle | HistoricCandle = None
-
-@dataclass
-class OrderIntent:
-    """Намерение на совершение сделки (что хотим сделать)"""
-    direction: OrderDirection
-    quantity: int
-    order_type: OrderType
-    limit_price: Optional[float] = None  # только для limit ордеров
-    figi: Optional[str] = None  # инструмент
-    created_at: datetime = field(default_factory=datetime.now)
-
-    def __str__(self):
-        if self.order_type == OrderType.MARKET:
-            return f"{self.direction.value.upper()} {self.quantity} @ MARKET"
-        else:
-            return f"{self.direction.value.upper()} {self.quantity} @ {self.limit_price}"
-
-
-@dataclass
-class OrderExecution:
-    """Результат исполнения ордера (что получилось)"""
-    order_id: str
-    intent: OrderIntent
-    executed_price: float
-    executed_quantity: int
-    executed_at: datetime
-    status: OrderStatus
-    commission: float = 0.0
-    profit: Optional[float] = None  # для закрытия позиций
-
-    def __str__(self):
-        return f"{self.intent.direction.value.upper()} {self.executed_quantity} @ {self.executed_price} [{self.status.value}]"
-
-
-@dataclass
-class Order:
-    """Старый класс Order - оставляем для обратной совместимости"""
-    type: str = None
-    price: float = None
-    marker_price: float = None
-    quantity: int = None
-    date: datetime = None
-    profit: int = None
-    commission: float = None  # Комиссия за сделку
-
-    def __str__(self):
-        if self.profit is None:
-            commission_str = f" commission: {self.commission:.2f}" if self.commission is not None else ""
-            return f"{self.date.strftime('%Y-%m-%d %H:%M')}: {self.type} at price: {self.price} quantity: {self.quantity}{commission_str}" 
-        else:
-            commission_str = f" commission: {self.commission:.2f}" if self.commission is not None else ""
-            return f"{self.date.strftime('%Y-%m-%d %H:%M')}: {self.type} at price: {self.price} quantity: {self.quantity} profit: {self.profit}{commission_str}"
+from robotlib.trading.event_bus_interface import EventType, TradingEvent
+from robotlib.signal_types import Signal, Order
 
 
 class SignalManager:
@@ -113,6 +30,7 @@ class SignalManager:
         lookback_min=6,
         lookback_max=20,
         peak_prominence=0.2,
+        event_bus=None,
     ):
         self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
         
@@ -128,11 +46,34 @@ class SignalManager:
         self._peak_prominence = peak_prominence
 
         self._hist_window = deque(maxlen=lookback_max)
+        self._event_bus = event_bus
 
     @property
     def candles(self) -> deque:
         """Возвращает свечи для чтения"""
         return self._candles
+    
+    def subscribe_to_events(self):
+        """Подписывается на события свечей"""
+        if self._event_bus:
+            self._event_bus.subscribe(EventType.CANDLE_RECEIVED, self._handle_candle_event)
+    
+    async def _handle_candle_event(self, event):
+        """Обрабатывает событие получения свечи"""
+        candle = event.data.get('candle')
+        if candle:
+            signal = self.add_candle(candle)
+            if signal and self._event_bus:
+                # Публикуем событие сигнала
+                signal_event = TradingEvent(
+                    EventType.SIGNAL_GENERATED,
+                    {
+                        'signal': signal,
+                        'figi': event.data.get('figi'),
+                        'price': event.data.get('price')
+                    }
+                )
+                await self._event_bus.publish(signal_event)
 
     def add_candle(self, candle: Candle | HistoricCandle) -> Signal:
         price = Money(candle.close).to_float()
@@ -149,22 +90,28 @@ class SignalManager:
         )
         self._atr.add(ohlcv)
 
-        macd_value = self._macd[-1]
-        if macd_value is None:
-            return None  # недостаточно данных
-
+        # Сохраняем свечу всегда
         item = {
             'date': candle.time,
             'open': Money(candle.open).to_float(),
             'high': Money(candle.high).to_float(),
             'low': Money(candle.low).to_float(),
             'close': Money(candle.close).to_float(),
-            'macd': macd_value.macd,
-            'signal': macd_value.signal,
-            'histogram': macd_value.histogram
+            'macd': None,
+            'signal': None,
+            'histogram': None
         }
 
+        macd_value = self._macd[-1]
+        if macd_value is not None:
+            item['macd'] = macd_value.macd
+            item['signal'] = macd_value.signal
+            item['histogram'] = macd_value.histogram
+
         self._candles.append(item)
+
+        if macd_value is None:
+            return None  # недостаточно данных для MACD
 
         # Добавляем текущее значение гистограммы в окно
         self._hist_window.append(macd_value.histogram)

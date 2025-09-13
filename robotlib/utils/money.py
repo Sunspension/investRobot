@@ -12,7 +12,7 @@ class Money:
     nano: int
     MOD: int = 10 ** 9
 
-    def __init__(self, value: int | float | Quotation | MoneyValue, nano: int = None):
+    def __init__(self, value: int | float | Quotation | MoneyValue | Money, nano: int = None):
         if nano:
             assert isinstance(value, int), 'if nano is present, value must be int'
             assert isinstance(nano, int), 'nano must be int'
@@ -29,6 +29,9 @@ class Money:
                 case Quotation() | MoneyValue() as value:
                     self.units = value.units
                     self.nano = value.nano
+                case Money() as value:
+                    self.units = value.units
+                    self.nano = value.nano
                 case _:
                     raise ValueError(f'{type(value)} is not supported as initial value for Money')
 
@@ -37,6 +40,11 @@ class Money:
 
     def to_float(self):
         return float(self)
+
+    @classmethod
+    def from_float(cls, value: float) -> Money:
+        """Создает Money из float значения"""
+        return cls(value)
 
     def to_quotation(self):
         return Quotation(self.units, self.nano)

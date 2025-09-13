@@ -471,8 +471,10 @@ class TestTinkoffAPIClient(unittest.TestCase):
         
         # Мокаем ответ
         mock_response = Mock()
+        mock_response.candles = []  # Добавляем атрибут candles
         mock_market_data.get_candles = AsyncMock(return_value=mock_response)
         
+        self.api_client.client = Mock()  # Добавляем client
         self.api_client.services = mock_services
         
         from_date = datetime.now() - timedelta(days=1)

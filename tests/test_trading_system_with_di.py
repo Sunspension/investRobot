@@ -17,6 +17,12 @@ class TestTradingSystemWithDI(unittest.TestCase):
             figi="FUTIMOEXF000",
             enable_visualization=False
         )
+        # Добавляем мок tcs_client для тестов
+        from unittest.mock import Mock
+        self.config.tcs_client = Mock()
+        self.config.tcs_client.token = "test_token"
+        self.config.tcs_client.id = "test_account_id"
+        self.config.tcs_client.sandbox_token = "test_sandbox_token"
     
     def test_container_creation(self):
         """Тест создания контейнера"""
@@ -28,7 +34,7 @@ class TestTradingSystemWithDI(unittest.TestCase):
     def test_trading_system_build(self):
         """Тест сборки торговой системы"""
         container = TradingSystemContainer(self.config, enable_visualization=False)
-        trading_system = container.build_trading_system()
+        trading_system = asyncio.run(container.build_trading_system())
         
         # Проверяем, что все компоненты присутствуют
         self.assertIn('config', trading_system)
@@ -44,7 +50,7 @@ class TestTradingSystemWithDI(unittest.TestCase):
     def test_trading_system_with_visualization(self):
         """Тест торговой системы с визуализацией"""
         container = TradingSystemContainer(self.config, enable_visualization=True)
-        trading_system = container.build_trading_system()
+        trading_system = asyncio.run(container.build_trading_system())
         
         # Проверяем, что event_bus - это реальный EventBus
         self.assertIsInstance(trading_system['event_bus'], EventBus)
@@ -64,13 +70,13 @@ class TestTradingSystemWithDI(unittest.TestCase):
         self.assertIs(event_bus1, event_bus2)
         
         # Проверяем, что build_trading_system возвращает те же объекты
-        trading_system = container.build_trading_system()
+        trading_system = asyncio.run(container.build_trading_system())
         self.assertIs(trading_system['event_bus'], event_bus1)
     
     def test_dependencies_injection(self):
         """Тест инжекции зависимостей"""
         container = TradingSystemContainer(self.config, enable_visualization=False)
-        trading_system = container.build_trading_system()
+        trading_system = asyncio.run(container.build_trading_system())
         
         dependencies = trading_system['dependencies']
         
@@ -87,13 +93,13 @@ class TestTradingSystemWithDI(unittest.TestCase):
         # Проверяем, что session_initializer установлен
         # session_initializer может быть None, так как устанавливается позже
         # Но мы можем проверить, что он был установлен через get_session_initializer
-        session_initializer = container.get_session_initializer()
+        session_initializer = asyncio.run(container.get_session_initializer())
         self.assertIsNotNone(session_initializer)
     
     def test_event_bus_integration(self):
         """Тест интеграции с шиной событий"""
         container = TradingSystemContainer(self.config, enable_visualization=True)
-        trading_system = container.build_trading_system()
+        trading_system = asyncio.run(container.build_trading_system())
         
         event_bus = trading_system['event_bus']
         

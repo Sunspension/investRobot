@@ -150,56 +150,17 @@ class TradingVisualizerAdapter(TradingVisualizerable):
             Output('portfolio-pnl', 'children'),
             Output('portfolio-variation-margin', 'children'),
             Output('portfolio-guarantee-deposit', 'children')],
-            [Input('interval-component', 'n_intervals'),
-             Input('start-btn', 'n_clicks'),
-             Input('stop-btn', 'n_clicks')],
+            [Input('interval-component', 'n_intervals')],
             [State('simulation-state', 'data')],
             prevent_initial_call=False  # Включаем начальное обновление
         )
-        def update_display(n, start_clicks, stop_clicks, state):
+        def update_display(n, state):
             self._logger.info("🔄 Callback update_display вызван")
             
-            # Обновляем при нажатии кнопок или каждые 60 секунд
-            ctx = callback_context
-            if not ctx.triggered:
-                self._logger.info("🔄 Нет триггеров, вызываем _update_display")
-                result = self._update_display()
-                return result
-            
-            # Проверяем, что это обновление по интервалу или кнопкам
-            trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            self._logger.info(f"🔄 Триггер: {trigger_id}")
-            
-            if trigger_id == 'interval-component':
-                # Редкие обновления каждые 60 секунд - проверяем изменения
-                self._logger.info("🔄 Обновление по интервалу")
-                result = self._update_display_if_changed()
-                return result
-            else:
-                # При нажатии кнопок обновляем сразу
-                self._logger.info("🔄 Обновление по кнопке")
-                result = self._update_display()
-                return result
-        
-        @app.callback(
-            Output('simulation-state', 'data'),
-            [Input('start-btn', 'n_clicks'),
-             Input('stop-btn', 'n_clicks')],
-            [State('simulation-state', 'data')]
-        )
-        def control_simulation(start_clicks, stop_clicks, state):
-            ctx = callback_context
-            if not ctx.triggered:
-                return state
-            
-            button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-            
-            if button_id == 'start-btn':
-                state['running'] = True
-            elif button_id == 'stop-btn':
-                state['running'] = False
-            
-            return state
+            # Обновляем каждые 60 секунд
+            self._logger.info("🔄 Обновление по интервалу")
+            result = self._update_display_if_changed()
+            return result
         
         # Дополнительный callback для принудительного обновления при загрузке страницы
         @app.callback(
@@ -805,7 +766,28 @@ class TradingVisualizerAdapter(TradingVisualizerable):
             Строка с информацией о текущей сессии
         """
         try:
-            # Если есть информация о следующей сессии и она текущая
+            # Сначала проверяем текущую сессию
+            current_session = market_data.get('current_session')
+            if current_session and current_session.get('is_current', False):
+                session = current_session.get('session', {})
+                session_name = session.get('name', 'Торговая сессия')
+                session_start = current_session.get('start')
+                session_end = current_session.get('end')
+                
+                if session_start and session_end:
+                    if hasattr(session_start, 'strftime') and hasattr(session_end, 'strftime'):
+                        return f"{session_name}: {session_start.strftime('%H:%M')} - {session_end.strftime('%H:%M')}"
+                    else:
+                        return f"{session_name}: {session_start} - {session_end}"
+                elif session_start:
+                    if hasattr(session_start, 'strftime'):
+                        return f"{session_name}: {session_start.strftime('%H:%M')}"
+                    else:
+                        return f"{session_name}: {session_start}"
+                else:
+                    return f"Активна: {session_name}"
+            
+            # Если нет текущей сессии, проверяем следующую сессию
             next_session = market_data.get('next_session')
             if next_session and next_session.get('is_current', False):
                 session = next_session.get('session', {})

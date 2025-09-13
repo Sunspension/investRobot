@@ -1,152 +1,127 @@
 """
-Пример использования торговой системы
+Пример использования торговой системы с новой Event-Driven архитектурой
 """
 import asyncio
-import logging
-from config_data.config import load_config
-from robotlib.trading import TradingSession, TradingConfig, RiskLimits
+import sys
+import os
+
+# Добавляем путь к модулю
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from robotlib.trading.di_container import TradingSystemContainer
+from robotlib.trading.trading_config import TradingConfig
+from robotlib.trading.event_bus_interface import EventType, TradingEvent
+from robotlib.utils.logger import get_logger
 
 
 async def main():
-    """Пример запуска торговой сессии"""
+    """Пример запуска торговой системы с новой архитектурой"""
     
-    # Настройка логирования
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
+    logger = get_logger(__name__)
+    logger.info("🚀 Запуск торговой системы с Event-Driven архитектурой")
     
-    # Загружаем конфигурацию
-    config = load_config()
-    
-    # Настройки риска
-    risk_limits = RiskLimits(
-        max_daily_loss=1500,      # 1.5k руб
-        max_position_size=30000,   # 30k руб
-        percent_from_deposit=30,   # 30% от депозита
-        items_per_trade=10,        # 10 лотов за сделку
-        stop_loss_threshold=5      # 5 пунктов
-    )
-    
-    # Параметры сигнального менеджера (оптимизированные)
-    signal_params = {
-        'macd_fast': 10,
-        'macd_slow': 15,
-        'macd_signal': 11,
-        'atr_period': 7,
-        'lookback_min': 8,
-        'lookback_max': 18,
-        'peak_prominence': 0.15
-    }
-    
-    # Конфигурация торговли
-    trading_config = TradingConfig(
+    # Создаем конфигурацию
+    config = TradingConfig(
         figi="FUTIMOEXF000",
-        deposit=50000,           # 50k руб
-        percent_from_deposit=40, # 40% от депозита
-        items_per_trade=3,       # 3 лота за сделку
-        signal_manager_params=signal_params,
-        risk_limits=risk_limits,
-        sandbox=True,            # Песочница
-        auto_close_positions=True
+        enable_visualization=False  # Отключаем визуализацию для простого примера
     )
     
-    # Создаем зависимости
-    from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
-    from robotlib.trading.order_executor import OrderExecutor
-    from robotlib.trading.portfolio_manager import PortfolioManager
-    from robotlib.trading.risk_manager import RiskManager
-    from robotlib.trading.session_stats import SessionStats
-    from robotlib.trading.session_initializer import SessionInitializer
-    from robotlib.signal_manager import SignalManager
-    from robotlib.strategies.strategy_manager import StrategyManager
-    from robotlib.utils.market_data_stream import MarketDataStream
-    from robotlib.trading.interfaces import TradingDependencies
+    # Создаем DI контейнер
+    container = TradingSystemContainer(config, enable_visualization=False)
+    trading_system = container.build_trading_system()
     
-    # Создаем API клиент
-    api_client = TinkoffAPIClient(
-        token=config.tcs_client.token,
-        account_id=config.tcs_client.id,
-        sandbox_token=getattr(config.tcs_client, 'sandbox_token', None)
+    logger.info("✅ Торговая система собрана через DI контейнер")
+    logger.info(f"🚌 EventBus: {type(trading_system['event_bus']).__name__}")
+    
+    # Получаем EventBus для демонстрации событий
+    event_bus = trading_system['event_bus']
+    
+    # Создаем обработчики событий для демонстрации
+    def handle_portfolio_event(event: TradingEvent):
+        logger.info(f"📊 Портфель обновлен: {event.data.get('total_amount', 0):.2f} руб")
+    
+    def handle_signal_event(event: TradingEvent):
+        signal = event.data.get('signal')
+        if signal:
+            peak_info = "пик" if signal.peak_detected else "впадина" if signal.trough_detected else "нет"
+            logger.info(f"📈 Сигнал сгенерирован: MACD={signal.macd:.3f}, {peak_info}")
+    
+    def handle_order_event(event: TradingEvent):
+        order_id = event.data.get('order_id', 'unknown')
+        logger.info(f"📋 Ордер {event.event_type.value}: {order_id}")
+    
+    # Подписываемся на события
+    event_bus.subscribe(EventType.PORTFOLIO_UPDATED, handle_portfolio_event)
+    event_bus.subscribe(EventType.SIGNAL_GENERATED, handle_signal_event)
+    event_bus.subscribe(EventType.ORDER_PLACED, handle_order_event)
+    event_bus.subscribe(EventType.ORDER_FILLED, handle_order_event)
+    
+    logger.info("👥 Подписались на события торговой системы")
+    
+    # Публикуем тестовые события для демонстрации
+    logger.info("📤 Публикуем тестовые события...")
+    
+    # Событие обновления портфеля
+    portfolio_event = TradingEvent(
+        EventType.PORTFOLIO_UPDATED,
+        {
+            'total_amount': 100000.0,
+            'available_amount': 95000.0,
+            'positions_count': 0
+        }
+    )
+    await event_bus.publish(portfolio_event)
+    
+    # Событие генерации сигнала
+    from robotlib.signal_manager import Signal
+    test_signal = Signal(
+        macd=0.5,
+        signal=0.3,
+        histogram=0.2,
+        peak_detected=True
     )
     
-    # Создаем компоненты
-    order_executor = OrderExecutor(api_client)
-    portfolio_manager = PortfolioManager(api_client)
-    risk_manager = RiskManager(portfolio_manager, risk_limits)
-    signal_manager = SignalManager(**signal_params)
-    
-    # Создаем поток данных
-    market_data_stream = MarketDataStream(
-        api_client=api_client,
-        signal_manager=signal_manager,
-        figi="FUTIMOEXF000"
+    signal_event = TradingEvent(
+        EventType.SIGNAL_GENERATED,
+        {
+            'signal': test_signal,
+            'figi': 'FUTIMOEXF000'
+        }
     )
+    await event_bus.publish(signal_event)
     
-    # Создаем менеджер стратегий
-    strategy_manager = StrategyManager(
-        signal_manager=signal_manager,
-        risk_manager=risk_manager,
-        portfolio_manager=portfolio_manager,
-        order_executor=order_executor
+    # Событие размещения ордера
+    order_event = TradingEvent(
+        EventType.ORDER_PLACED,
+        {
+            'order_id': 'test-order-123',
+            'figi': 'FUTIMOEXF000',
+            'quantity': 10
+        }
     )
+    await event_bus.publish(order_event)
     
-    # Создаем компоненты сессии
-    session_stats = SessionStats()
-    session_initializer = SessionInitializer(
-        api_client=api_client,
-        portfolio_manager=portfolio_manager,
-        risk_manager=risk_manager,
-        signal_manager=signal_manager,
-        strategy_manager=strategy_manager,
-        market_data_stream=market_data_stream
-    )
+    logger.info("✅ Тестовые события опубликованы")
     
-    # Создаем зависимости
-    dependencies = TradingDependencies(
-        api_client=api_client,
-        order_executor=order_executor,
-        portfolio_manager=portfolio_manager,
-        risk_manager=risk_manager,
-        signal_manager=signal_manager,
-        strategy_manager=strategy_manager,
-        market_data_stream=market_data_stream,
-        session_stats=session_stats,
-        session_initializer=session_initializer
-    )
+    # Получаем SessionController
+    session_controller = trading_system['session_controller']
     
-    # Создаем торговую сессию
-    session = TradingSession(
-        config=trading_config,
-        dependencies=dependencies
-    )
-    
+    logger.info("🎮 Запуск торговой сессии...")
     try:
-        print("🚀 Запуск торговой сессии...")
+        await session_controller.start()
+        logger.info("✅ Торговая сессия запущена успешно")
         
-        # Запускаем сессию
-        if await session.start():
-            print("✅ Торговая сессия запущена успешно")
-            
-            # Получаем статус
-            status = await session.get_session_status()
-            print(f"📊 Статус: {status}")
-            
-            # Запускаем основной цикл (будет работать до остановки)
-            print("🔄 Запуск основного цикла торговли...")
-            await session.run_trading_loop()
-            
-        else:
-            print("❌ Не удалось запустить торговую сессию")
-            
+        # Ждем некоторое время для демонстрации
+        await asyncio.sleep(5)
+        
     except KeyboardInterrupt:
-        print("\n⏹️ Остановка по запросу пользователя")
+        logger.info("⏹️ Остановка по запросу пользователя")
     except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        logger.error(f"❌ Ошибка в торговой сессии: {e}")
     finally:
-        print("🛑 Остановка торговой сессии...")
-        await session.stop()
-        print("✅ Торговая сессия остановлена")
+        logger.info("🛑 Остановка торговой системы...")
+        await session_controller.stop()
+        logger.info("✅ Торговая система остановлена")
 
 
 if __name__ == "__main__":

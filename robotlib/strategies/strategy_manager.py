@@ -1,13 +1,17 @@
 import pandas as pd
-from typing import List, Dict, Any
+import asyncio
+from typing import List, Dict, Any, Optional
 from dataclasses import asdict
 from pandas import DataFrame
 
-from robotlib.signal_manager import SignalManager, Signal, Order, OrderIntent, OrderExecution
+from robotlib.signal_manager import SignalManager
+from robotlib.signal_types import Signal, Order
+from robotlib.trading.order_types import OrderIntent, OrderExecution
 from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.interfaces import StrategyManageable, OrderExecutable
+from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
 from robotlib.utils.logger import get_logger
 from tinkoff.invest import Candle, HistoricCandle
 
@@ -68,12 +72,14 @@ class StrategyManager(StrategyManageable):
         risk_manager,
         portfolio_manager,
         order_executor: OrderExecutable = None,
-        strategies: List[Strategyable] = None
+        strategies: List[Strategyable] = None,
+        event_bus: Optional[EventBusable] = None
     ):
         self._signal_manager = signal_manager
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
         self._order_executor = order_executor
+        self._event_bus = event_bus
         self._orders = []
         self.logger = get_logger(__name__)
         
@@ -102,9 +108,34 @@ class StrategyManager(StrategyManageable):
                 await strategy.initialize(figi, point_value, contracts_per_lot)
 
     async def on_candle(self, candle: Candle | HistoricCandle):
+        # Публикуем событие получения свечи
+        if self._event_bus:
+            candle_event = TradingEvent(
+                EventType.CANDLE_RECEIVED,
+                {
+                    'candle': candle,
+                    'figi': getattr(candle, 'figi', 'unknown'),
+                    'timestamp': getattr(candle, 'time', None)
+                }
+            )
+            asyncio.create_task(self._event_bus.publish(candle_event))
+        
         signal: Signal = self._signal_manager.add_candle(candle)
         if not signal:
             return
+
+        # Публикуем событие генерации сигнала
+        if self._event_bus:
+            signal_event = TradingEvent(
+                EventType.SIGNAL_GENERATED,
+                {
+                    'signal': signal,
+                    'candle': candle,
+                    'figi': getattr(candle, 'figi', 'unknown'),
+                    'timestamp': getattr(candle, 'time', None)
+                }
+            )
+            asyncio.create_task(self._event_bus.publish(signal_event))
 
         # Выполняем все стратегии
         for strategy in self._strategies:

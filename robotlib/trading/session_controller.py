@@ -10,7 +10,7 @@ from robotlib.trading.session_interfaces import SessionControllable, SessionStat
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.session_stats import SessionStats
 from robotlib.trading.session_initializer import SessionInitializer
-from robotlib.trading.visualizer_interface import TradingVisualizerable
+from visualization.event_visualizer_interface import EventVisualizerable
 from robotlib.utils.market_hours import get_market_status_with_api
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.logger import get_logger
@@ -21,7 +21,7 @@ def _has_market_data_stream(dependencies: TradingDependencies) -> bool:
     return hasattr(dependencies, 'market_data_stream') and dependencies.market_data_stream is not None
 
 
-def _has_data_manager(visualizer: Optional[TradingVisualizerable]) -> bool:
+def _has_data_manager(visualizer: Optional[EventVisualizerable]) -> bool:
     """Проверяет, есть ли data_manager у visualizer"""
     return visualizer is not None and hasattr(visualizer, 'data_manager')
 
@@ -34,7 +34,7 @@ class SessionController(SessionControllable):
         config: TradingConfig, 
         dependencies: TradingDependencies, 
         force_start: bool = False,
-        visualizer: Optional[TradingVisualizerable] = None
+        visualizer: Optional[EventVisualizerable] = None
     ):
         self._config = config
         self._dependencies = dependencies
@@ -81,7 +81,7 @@ class SessionController(SessionControllable):
         return self._force_start
     
     @property
-    def visualizer(self) -> Optional[TradingVisualizerable]:
+    def visualizer(self) -> Optional[EventVisualizerable]:
         """Визуализатор"""
         return self._visualizer
     

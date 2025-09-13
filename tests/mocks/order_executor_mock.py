@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 import uuid
-from robotlib.signal_manager import OrderIntent, OrderExecution, OrderStatus
+from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderStatus
 from robotlib.trading.order_executor import OrderResult
 
 class MockOrderExecutor:

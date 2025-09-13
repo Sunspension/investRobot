@@ -5,7 +5,8 @@ from abc import ABC, abstractmethod
 from typing import Protocol, Optional, List, Dict, Any, runtime_checkable
 from dataclasses import dataclass
 
-from robotlib.signal_manager import Signal, Order, OrderIntent, OrderExecution
+from robotlib.signal_types import Signal, Order
+from robotlib.trading.order_types import OrderIntent, OrderExecution
 from robotlib.trading.order_executor import OrderResult
 from robotlib.trading.portfolio_manager import Portfolio, Position
 from robotlib.trading.session_interfaces import SessionStatsable, SessionInitializable
@@ -279,8 +280,7 @@ class TradingDependencies:
         signal_manager: SignalManageable,
         strategy_manager: StrategyManageable,
         market_data_stream: MarketDataStreamable,
-        session_stats: SessionStatsable,
-        session_initializer: SessionInitializable
+        session_stats: SessionStatsable
     ):
         self.api_client = api_client
         self.order_executor = order_executor
@@ -290,4 +290,3 @@ class TradingDependencies:
         self.strategy_manager = strategy_manager
         self.market_data_stream = market_data_stream
         self.session_stats = session_stats
-        self.session_initializer = session_initializer

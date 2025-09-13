@@ -37,7 +37,7 @@ class UIComponents:
         return app
     
     def _get_custom_html_template(self) -> str:
-        """Возвращает кастомный HTML шаблон"""
+        """Возвращает кастомный HTML шаблон с подключением CSS"""
         return '''
         <!DOCTYPE html>
         <html>
@@ -46,244 +46,14 @@ class UIComponents:
                 <title>{%title%}</title>
                 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
                 {%css%}
-                <style>
-                    body {
-                        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        margin: 0;
-                        padding: 20px;
-                        min-height: 100vh;
-                    }
-                    .container {
-                        max-width: 1400px;
-                        margin: 0 auto;
-                    }
-                    .header {
-                        text-align: center;
-                        color: white;
-                        margin-bottom: 30px;
-                    }
-                    .header h1 {
-                        font-size: 2.5em;
-                        margin: 0;
-                        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-                    }
-                    .controls {
-                        display: flex;
-                        gap: 15px;
-                        justify-content: center;
-                        margin-bottom: 30px;
-                    }
-                    .btn {
-                        padding: 12px 24px;
-                        border: none;
-                        border-radius: 25px;
-                        font-size: 16px;
-                        font-weight: bold;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        text-transform: uppercase;
-                        letter-spacing: 1px;
-                    }
-                    .btn-start {
-                        background: linear-gradient(45deg, #28a745, #20c997);
-                        color: white;
-                    }
-                    .btn-stop {
-                        background: linear-gradient(45deg, #dc3545, #e83e8c);
-                        color: white;
-                    }
-                    .btn-reset {
-                        background: linear-gradient(45deg, #ffc107, #fd7e14);
-                        color: white;
-                    }
-                    .btn-test {
-                        background: linear-gradient(45deg, #6f42c1, #e83e8c);
-                        color: white;
-                    }
-                    .btn:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-                    }
-                    .stats-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-                        gap: 24px;
-                        margin-bottom: 30px;
-                    }
-                    .stat-card {
-                        background: rgba(255,255,255,0.98);
-                        padding: 24px;
-                        border-radius: 20px;
-                        box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-                        text-align: center;
-                        border: 1px solid rgba(255,255,255,0.2);
-                        backdrop-filter: blur(10px);
-                        transition: all 0.3s ease;
-                        min-height: 180px;
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: flex-start;
-                    }
-                    .portfolio-card {
-                        min-height: 200px;
-                    }
-                    .portfolio-row {
-                        display: flex;
-                        gap: 20px;
-                        margin-bottom: 16px;
-                    }
-                    .portfolio-row:last-child {
-                        margin-bottom: 0;
-                    }
-                    .portfolio-item {
-                        text-align: center;
-                        flex: 1;
-                        padding: 8px;
-                        border-radius: 12px;
-                        background: rgba(248, 249, 250, 0.8);
-                        transition: all 0.2s ease;
-                    }
-                    .portfolio-item:hover {
-                        background: rgba(248, 249, 250, 1);
-                        transform: translateY(-2px);
-                    }
-                    .stat-card:hover {
-                        transform: translateY(-4px);
-                        box-shadow: 0 16px 50px rgba(0,0,0,0.12);
-                    }
-                    .price-display {
-                        font-size: 2.8em;
-                        font-weight: 700;
-                        color: #2E86AB;
-                        margin: 0;
-                        line-height: 1.1;
-                        text-shadow: 0 2px 4px rgba(46, 134, 171, 0.2);
-                    }
-                    .time-display {
-                        font-size: 1.1em;
-                        color: #A23B72;
-                        margin: 8px 0;
-                        font-weight: 500;
-                    }
-                    .card-title {
-                        font-size: 1.1em;
-                        font-weight: 600;
-                        color: #2E86AB;
-                        margin: 0 0 20px 0;
-                        text-align: center;
-                        letter-spacing: 0.5px;
-                        text-transform: uppercase;
-                        padding-top: 8px;
-                    }
-                    .card-value {
-                        font-size: 1.8em;
-                        font-weight: 700;
-                        margin: 8px 0;
-                        line-height: 1.2;
-                    }
-                    .card-subtitle {
-                        font-size: 0.9em;
-                        color: #666;
-                        margin: 4px 0;
-                        font-weight: 500;
-                    }
-                    .emoji-text {
-                        display: inline-flex;
-                        align-items: center;
-                        justify-content: center;
-                        gap: 6px;
-                    }
-                    .emoji-text .emoji {
-                        font-size: 1.1em;
-                        line-height: 1;
-                    }
-                    .emoji-text .text {
-                        font-size: 0.95em;
-                        line-height: 1.2;
-                    }
-                    .graph-container {
-                        background: rgba(255,255,255,0.98);
-                        padding: 24px;
-                        border-radius: 20px;
-                        box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-                        margin-bottom: 24px;
-                        border: 1px solid rgba(255,255,255,0.2);
-                        backdrop-filter: blur(10px);
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: flex-start;
-                    }
-                    .signals-container {
-                        background: rgba(255,255,255,0.98);
-                        padding: 24px;
-                        border-radius: 20px;
-                        box-shadow: 0 12px 40px rgba(0,0,0,0.08);
-                        max-height: 400px;
-                        overflow-y: auto;
-                        border: 1px solid rgba(255,255,255,0.2);
-                        backdrop-filter: blur(10px);
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: flex-start;
-                    }
-                    .signals-list {
-                        flex: 1;
-                        max-height: 300px;
-                        overflow-y: auto;
-                        padding-right: 10px;
-                    }
-                    .recent-signals {
-                        flex: 1;
-                        max-height: 300px;
-                        overflow-y: auto;
-                        padding-left: 10px;
-                    }
-                    /* Плавные переходы для уменьшения моргания при частых обновлениях */
-                    .js-plotly-plot {
-                        transition: opacity 0.3s ease-in-out;
-                    }
-                    .dash-graph {
-                        transition: all 0.3s ease-in-out;
-                    }
-                    /* Плавное обновление текста */
-                    h1, h2, h3, h4, p, div {
-                        transition: color 0.2s ease-in-out;
-                    }
-                    /* Убираем резкие изменения */
-                    * {
-                        transition: background-color 0.2s ease-in-out;
-                    }
-                    /* Специально для цен - очень плавные переходы */
-                    #current-price, #current-time, #market-status {
-                        transition: all 0.2s ease-in-out;
-                    }
-                    /* Убираем моргание при обновлении */
-                    .dash-spinner {
-                        display: none !important;
-                    }
-                    /* Отключаем все индикаторы загрузки */
-                    .dash-loading {
-                        display: none !important;
-                    }
-                    .dash-loading--children {
-                        display: none !important;
-                    }
-                    /* Убираем анимации загрузки */
-                    ._dash-loading {
-                        display: none !important;
-                    }
-                    /* Отключаем моргание favicon */
-                    link[rel="icon"] {
-                        display: none !important;
-                    }
-                    /* Плавные переходы для всех элементов */
-                    .stat-card, .graph-container, .signals-container {
-                        transition: all 0.2s ease-in-out;
-                    }
-                </style>
+                <link rel="stylesheet" href="/assets/styles.css">
             </head>
             <body>
+                <div class="container">
+                    <div id="main-content">
+                        <!-- Контент будет заменен Dash -->
+                    </div>
+                </div>
                 {%app_entry%}
                 <footer>
                     {%config%}
@@ -294,136 +64,110 @@ class UIComponents:
         </html>
         '''
     
-    def _create_layout(self) -> html.Div:
-        """Создает layout приложения"""
+    def _create_header(self) -> html.Div:
+        """Создает заголовок дашборда"""
         return html.Div([
-            html.Div([
-                html.H1("📈 Торговые сигналы от TradingSession", 
-                       style={'color': 'white', 'textAlign': 'center', 'marginBottom': '10px'}),
-                html.P(f"📊 Инструмент: {self.figi} | Фьючерс на индекс MOEX", 
-                       style={'color': '#FFD700', 'textAlign': 'center', 'marginBottom': '5px', 'fontSize': '16px', 'fontWeight': 'bold'}),
-                
-                # Управление
-                html.Div([
-                    html.Button("🟢 Запустить", id="start-btn", className="btn btn-start"),
-                    html.Button("🔴 Остановить", id="stop-btn", className="btn btn-stop")
-                ], className="controls"),
-                
-                # Интервал обновления - редкие обновления каждые 60 секунд
-                dcc.Interval(
-                    id='interval-component',
-                    interval=60000,  # 60 секунд для обновления UI (редко, без моргания)
-                    n_intervals=0,
-                    disabled=False
-                ),
-                
-                # Состояние симуляции
-                dcc.Store(id='simulation-state', data={'running': False}),
-                
-                # Основная статистика
-                self._create_stats_grid(),
-                
-                # График
-                self._create_graph_container(),
-                
-                # Сигналы
-                self._create_signals_container()
-                
-            ], className="container")
-        ])
+            html.H1(f"📊 Инструмент: {self.figi} | Фьючерс на индекс MOEX", 
+                   className="header-title")
+        ], className="header")
     
-    def _create_stats_grid(self) -> html.Div:
-        """Создает сетку статистики"""
+    def _create_market_status(self) -> html.Div:
+        """Создает блок статуса рынка"""
         return html.Div([
-            # Текущая цена
+            html.H3("📊 Статус рынка", className="market-status-title"),
             html.Div([
-                html.H3("💰 Текущая цена", className="card-title"),
-                html.H1(id="current-price", children="2923.5 ₽", 
-                       className="price-display")
-            ], className="stat-card"),
-            
-            # Статус рынка
+                html.Span(id="market-status", children="🔴 Рынок закрыт"),
+                html.Br(),
+                html.Span(id="market-time", children="До открытия: 07:52")
+            ], id="market-status-content")
+        ], className="market-status")
+    
+    def _create_statistics_cards(self) -> html.Div:
+        """Создает карточки статистики"""
+        return html.Div([
             html.Div([
-                html.H3("📊 Статус рынка", className="card-title"),
                 html.Div([
-                    html.H2(id="market-status", children="🔄 Загрузка...", 
-                           className="card-value", style={'color': '#F18F01', 'fontSize': '1.2em'})
-                ], style={'textAlign': 'center'})
-            ], className="stat-card"),
-            
-            # Статистика сигналов
-            html.Div([
-                html.H3("📈 Статистика сигналов", className="card-title"),
+                    html.H4("📈 Сигналы BUY", className="stat-title"),
+                    html.H2(id="buy-signals-count", children="0", 
+                           className="stat-value", style={'color': '#28a745'})
+                ], style={'textAlign': 'center', 'flex': '1'}),
                 html.Div([
-                    html.Div([
-                        html.H4("🟢 Покупки", className="card-subtitle"),
-                        html.H2(id="buy-count", children="0", 
-                               className="card-value", style={'color': '#28a745'})
-                    ], style={'textAlign': 'center', 'flex': '1'}),
-                    
-                    html.Div([
-                        html.H4("🔴 Продажи", className="card-subtitle"),
-                        html.H2(id="sell-count", children="0", 
-                               className="card-value", style={'color': '#dc3545'})
-                    ], style={'textAlign': 'center', 'flex': '1'})
-                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
-            ], className="stat-card"),
-            
-            # Статистика ордеров
-            html.Div([
-                html.H3("🎯 Статистика ордеров", className="card-title"),
-                html.Div([
-                    html.Div([
-                        html.H4("📋 Всего ордеров", className="card-subtitle"),
-                        html.H2(id="orders-count", children="0", 
-                               className="card-value", style={'color': '#6f42c1'})
-                    ], style={'textAlign': 'center', 'flex': '1'}),
-                    
-                    html.Div([
-                        html.H4("💰 Объем", className="card-subtitle"),
-                        html.H2(id="total-volume", children="0", 
-                               className="card-value", style={'color': '#fd7e14'})
-                    ], style={'textAlign': 'center', 'flex': '1'})
-                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
-            ], className="stat-card"),
-            
-            # Портфель
-            self._create_portfolio_card(),
-            
-            # Статус стратегий
-            html.Div([
-                html.H3("🎯 Статус стратегий", className="card-title"),
-                html.Div(id="strategy-status", children="Загрузка статуса стратегий...", 
-                        className="card-value", style={'fontSize': '1em', 'color': '#666'})
-            ], className="stat-card"),
-            
-            # Торговый статус
-            html.Div([
-                html.H3("🕐 Торговый статус", className="card-title"),
-                html.Div(id="trading-status", children="Загрузка торгового статуса...", 
-                        className="card-value", style={'fontSize': '1em', 'color': '#666'})
-            ], className="stat-card")
+                    html.H4("📉 Сигналы SELL", className="stat-title"),
+                    html.H2(id="sell-signals-count", children="0", 
+                           className="stat-value", style={'color': '#dc3545'})
+                ], style={'textAlign': 'center', 'flex': '1'})
+            ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
         ], className="stats-grid")
     
-    def _create_graph_container(self) -> html.Div:
-        """Создает контейнер для графика"""
+    def _create_chart_section(self) -> html.Div:
+        """Создает секцию с графиком"""
         return html.Div([
-            html.H3("📊 График цен", className="card-title"),
-            dcc.Graph(id='trading-graph')
-        ], className="graph-container")
+            html.H3("📈 Торговый график", className="chart-title"),
+            dcc.Graph(
+                id="trading-graph",
+                figure=self._chart_builder.create_empty_chart(),
+                config={'displayModeBar': True, 'displaylogo': False}
+            )
+        ], className="chart-container")
     
-    def _create_signals_container(self) -> html.Div:
-        """Создает контейнер для сигналов"""
+    def _create_signals_section(self) -> html.Div:
+        """Создает секцию с сигналами"""
         return html.Div([
-            html.H3("🎯 Торговые сигналы", className="card-title"),
-            html.Div([
-                html.Div(id="signals-list", className="signals-list"),
-                html.Div([
-                    html.H4("📋 Последние сигналы", className="card-subtitle", style={'marginBottom': '12px'}),
-                    html.Div(id="recent-signals", children="Ожидание сигналов...")
-                ], className="recent-signals")
-            ], style={'display': 'flex', 'gap': '24px'})
+            html.H3("📋 Последние сигналы", className="signals-title"),
+            html.Div(id="recent-signals", children=[], className="signals-list")
         ], className="signals-container")
+    
+    def _create_portfolio_section(self) -> html.Div:
+        """Создает секцию портфеля"""
+        return html.Div([
+            html.H3("💰 Портфель", className="portfolio-title"),
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.H4("💰 Баланс", className="portfolio-label"),
+                        html.H2(id="portfolio-balance", children="0", className="portfolio-value")
+                    ], className="portfolio-item"),
+                    html.Div([
+                        html.H4("📊 P&L", className="portfolio-label"),
+                        html.H2(id="portfolio-pnl", children="0", className="portfolio-value")
+                    ], className="portfolio-item")
+                ], className="portfolio-row"),
+                html.Div([
+                    html.Div([
+                        html.H4("📈 Вариационная маржа", className="portfolio-label"),
+                        html.H2(id="portfolio-variation-margin", children="0", className="portfolio-value")
+                    ], className="portfolio-item"),
+                    html.Div([
+                        html.H4("🛡️ Гарантийное обеспечение", className="portfolio-label"),
+                        html.H2(id="portfolio-guarantee-deposit", children="0", className="portfolio-value")
+                    ], className="portfolio-item")
+                ], className="portfolio-row")
+            ], className="portfolio-grid")
+        ], className="portfolio-container")
+    
+    def _create_layout(self) -> html.Div:
+        """Создает layout приложения используя Dash компоненты"""
+        return html.Div([
+            # Интервал обновления
+            dcc.Interval(
+                id='interval-component',
+                interval=60000,  # 60 секунд для обновления UI
+                n_intervals=0,
+                disabled=False
+            ),
+            
+            # Состояние симуляции
+            dcc.Store(id='simulation-state', data={'running': False}),
+            
+            # Основные компоненты
+            self._create_header(),
+            self._create_market_status(),
+            self._create_statistics_cards(),
+            self._create_chart_section(),
+            self._create_signals_section(),
+            self._create_portfolio_section()
+        ])
+    
     
     def create_signals_list(self, signals_data: List[Dict[str, Any]]) -> List[html.Div]:
         """Создает список сигналов"""
