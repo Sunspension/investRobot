@@ -74,13 +74,11 @@ class DataManager:
             # Проверяем логическую корректность
             if high_price < low_price:
                 return False
-            if high_price < open_price:
+            # High должен быть >= max(open, close)
+            if high_price < max(open_price, close_price):
                 return False
-            if high_price < close_price:
-                return False
-            if low_price > open_price:
-                return False
-            if low_price > close_price:
+            # Low должен быть <= min(open, close)  
+            if low_price > min(open_price, close_price):
                 return False
             if volume <= 0:
                 return False
@@ -110,6 +108,8 @@ class DataManager:
             # Ограничиваем количество свечей
             if len(self.candles_data) > 200:
                 self.candles_data = self.candles_data[-100:]
+            
+            self.logger.info(f"✅ Добавлена свеча: {candle_data['time']} @ {candle_data['close']:.2f} (всего: {len(self.candles_data)})")
     
     def add_signal(self, signal_data: Dict[str, Any]) -> None:
         """Добавляет сигнал в данные"""
@@ -124,6 +124,8 @@ class DataManager:
             # Ограничиваем количество сигналов
             if len(self.signals_data) > 100:
                 self.signals_data = self.signals_data[-50:]
+            
+            self.logger.info(f"✅ Добавлен сигнал: {signal_data['type']} @ {signal_data.get('price', 0):.2f} (всего: {len(self.signals_data)})")
     
     def add_order(self, order_data: Dict[str, Any]) -> None:
         """Добавляет ордер в данные"""

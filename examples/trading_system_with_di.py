@@ -24,7 +24,7 @@ async def main():
     )
     
     # Создаем DI контейнер
-    container = TradingSystemContainer(config, enable_visualization=False)  # Отключаем визуализацию для теста
+    container = TradingSystemContainer(config)  # Отключаем визуализацию для теста
     
     # Собираем торговую систему
     trading_system = container.build_trading_system()

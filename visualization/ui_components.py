@@ -13,9 +13,10 @@ from visualization.logging_config import disable_verbose_logging
 class UIComponents:
     """Компоненты пользовательского интерфейса"""
     
-    def __init__(self, figi: str = "FUTIMOEXF000"):
+    def __init__(self, figi: str = "FUTIMOEXF000", chart_builder=None):
         self.figi = figi
         self.logger = get_logger(__name__)
+        self._chart_builder = chart_builder
         
         # Отключаем избыточные логи
         self._disable_verbose_logging()
@@ -85,27 +86,79 @@ class UIComponents:
     def _create_statistics_cards(self) -> html.Div:
         """Создает карточки статистики"""
         return html.Div([
+            # Секция сигналов
             html.Div([
+                html.H3("📊 СИГНАЛЫ", className="section-title"),
                 html.Div([
-                    html.H4("📈 Сигналы BUY", className="stat-title"),
-                    html.H2(id="buy-signals-count", children="0", 
-                           className="stat-value", style={'color': '#28a745'})
-                ], style={'textAlign': 'center', 'flex': '1'}),
+                    html.Div([
+                        html.H4("📈 Сигналы BUY", className="stat-title"),
+                        html.H2(id="buy-signals-count", children="0", 
+                               className="stat-value", style={'color': '#28a745'})
+                    ], style={'textAlign': 'center', 'flex': '1'}),
+                    html.Div([
+                        html.H4("📉 Сигналы SELL", className="stat-title"),
+                        html.H2(id="sell-signals-count", children="0", 
+                               className="stat-value", style={'color': '#dc3545'})
+                    ], style={'textAlign': 'center', 'flex': '1'})
+                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
+            ], className="signals-section"),
+            
+            # Секция ордеров
+            html.Div([
+                html.H3("📋 ОРДЕРЫ", className="section-title"),
                 html.Div([
-                    html.H4("📉 Сигналы SELL", className="stat-title"),
-                    html.H2(id="sell-signals-count", children="0", 
-                           className="stat-value", style={'color': '#dc3545'})
-                ], style={'textAlign': 'center', 'flex': '1'})
-            ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
+                    html.Div([
+                        html.H4("📈 Ордеры BUY", className="stat-title"),
+                        html.H2(id="buy-orders-count", children="0", 
+                               className="stat-value", style={'color': '#28a745'})
+                    ], style={'textAlign': 'center', 'flex': '1'}),
+                    html.Div([
+                        html.H4("📉 Ордеры SELL", className="stat-title"),
+                        html.H2(id="sell-orders-count", children="0", 
+                               className="stat-value", style={'color': '#dc3545'})
+                    ], style={'textAlign': 'center', 'flex': '1'}),
+                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
+            ], className="orders-section"),
+            
+            # Секция стратегий
+            html.Div([
+                html.H3("🎯 СТРАТЕГИИ", className="section-title"),
+                html.Div([
+                    html.Div([
+                        html.H4("📊 Статус стратегий", className="stat-title"),
+                        html.H2(id="strategy-status", children="Активны", 
+                               className="stat-value", style={'color': '#28a745'})
+                    ], style={'textAlign': 'center', 'flex': '1'}),
+                    html.Div([
+                        html.H4("⚡ Торговля", className="stat-title"),
+                        html.H2(id="trading-status", children="Включена", 
+                               className="stat-value", style={'color': '#28a745'})
+                    ], style={'textAlign': 'center', 'flex': '1'})
+                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
+            ], className="strategies-section")
         ], className="stats-grid")
     
     def _create_chart_section(self) -> html.Div:
         """Создает секцию с графиком"""
+        # Создаем пустой график если chart_builder не передан
+        if self._chart_builder:
+            figure = self._chart_builder.create_trading_chart([], [], [], 0.0)
+        else:
+            # Создаем пустой график вручную
+            import plotly.graph_objects as go
+            figure = go.Figure()
+            figure.update_layout(
+                title="Торговый график",
+                xaxis_title="Время",
+                yaxis_title="Цена",
+                template="plotly_white"
+            )
+        
         return html.Div([
             html.H3("📈 Торговый график", className="chart-title"),
             dcc.Graph(
                 id="trading-graph",
-                figure=self._chart_builder.create_empty_chart(),
+                figure=figure,
                 config={'displayModeBar': True, 'displaylogo': False}
             )
         ], className="chart-container")
@@ -180,7 +233,7 @@ class UIComponents:
                         html.Span(signal['time'].strftime("%H:%M:%S"), 
                                  style={'color': '#666', 'fontSize': '0.9em'}),
                         html.Br(),
-                        html.Span(f"{signal['price']:.2f} ₽", 
+                        html.Span(f"{signal.get('price', 0):.2f} ₽", 
                                  style={'color': '#2E86AB', 'fontWeight': 'bold'}),
                         html.Span(f" {signal['type'].upper()}", 
                                  style={'color': signal_color, 'fontWeight': 'bold', 'marginLeft': '10px'}),
@@ -211,7 +264,7 @@ class UIComponents:
                         ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
                         
                         html.Div([
-                            html.Span(f"Цена: {signal['price']:.2f} ₽", 
+                            html.Span(f"Цена: {signal.get('price', 0):.2f} ₽", 
                                      style={'color': '#2E86AB', 'fontSize': '0.8em'}),
                             html.Br(),
                             html.Span(f"Время: {signal['time'].strftime('%H:%M:%S')}", 

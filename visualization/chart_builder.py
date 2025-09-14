@@ -24,6 +24,7 @@ class ChartBuilder:
         current_price: float = 0.0
     ) -> Figure:
         """Создает график для торговли"""
+        self.logger.info(f"📊 ChartBuilder: создаем график с {len(candles_data)} свечами, {len(signals_data)} сигналами, {len(orders_data)} ордерами")
         fig = go.Figure()
         
         if not candles_data:
@@ -52,20 +53,33 @@ class ChartBuilder:
             return fig
         
         df = pd.DataFrame(candles_data)
+        self.logger.info(f"📊 DataFrame создан: {len(df)} строк, колонки: {list(df.columns)}")
         
         # Свечи
-        fig.add_trace(go.Candlestick(
-            x=df['time'],
-            open=df['open'],
-            high=df['high'],
-            low=df['low'],
-            close=df['close'],
-            name='Свечи',
-            increasing_line_color='#26a69a',
-            decreasing_line_color='#ef5350',
-            increasing_fillcolor='#26a69a',
-            decreasing_fillcolor='#ef5350'
-        ))
+        try:
+            fig.add_trace(go.Candlestick(
+                x=df['time'],
+                open=df['open'],
+                high=df['high'],
+                low=df['low'],
+                close=df['close'],
+                name='Свечи',
+                increasing_line_color='#26a69a',
+                decreasing_line_color='#ef5350',
+                increasing_fillcolor='#26a69a',
+                decreasing_fillcolor='#ef5350'
+            ))
+            self.logger.info("✅ Свечи добавлены в график")
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка добавления свечей: {e}")
+            # Создаем простой линейный график как fallback
+            fig.add_trace(go.Scatter(
+                x=df['time'],
+                y=df['close'],
+                mode='lines',
+                name='Цена',
+                line=dict(color='#26a69a', width=2)
+            ))
         
         # Добавляем горизонтальную линию текущей цены
         if not df.empty and current_price > 0:
@@ -89,10 +103,16 @@ class ChartBuilder:
         # Настройка макета
         self._configure_chart_layout(fig)
         
+        self.logger.info("✅ График создан успешно")
         return fig
     
     def _add_signals_to_chart(self, fig: Figure, signals_data: List[Dict[str, Any]]) -> None:
         """Добавляет сигналы на график"""
+        if not signals_data:
+            self.logger.info("📊 Нет сигналов для добавления на график")
+            return
+            
+        self.logger.info(f"📊 Добавляем {len(signals_data)} сигналов на график")
         for signal in signals_data[-20:]:  # Последние 20 сигналов
             color = '#00ff88' if signal['type'] == 'buy' else '#ff4444'
             symbol = 'triangle-up' if signal['type'] == 'buy' else 'triangle-down'
@@ -133,7 +153,10 @@ class ChartBuilder:
     def _add_orders_to_chart(self, fig: Figure, orders_data: List[Dict[str, Any]]) -> None:
         """Добавляет ордера на график"""
         if not orders_data:
+            self.logger.info("📊 Нет ордеров для добавления на график")
             return
+            
+        self.logger.info(f"📊 Добавляем {len(orders_data)} ордеров на график")
         
         # Покупки (зеленые треугольники вверх)
         buy_orders = [order for order in orders_data if order['type'] in ['buy', 'short_buy', 'stop_loss_short_cover']]
@@ -189,6 +212,7 @@ class ChartBuilder:
     
     def _configure_chart_layout(self, fig: Figure) -> None:
         """Настраивает макет графика"""
+        self.logger.info("📊 Настраиваем макет графика")
         fig.update_layout(
             xaxis_title="Время",
             yaxis_title="Цена (₽)",
@@ -204,6 +228,8 @@ class ChartBuilder:
             type='date',
             tickformat='%H:%M:%S'
         )
+        
+        self.logger.info("✅ Макет графика настроен")
     
     def create_macd_chart(
         self, 

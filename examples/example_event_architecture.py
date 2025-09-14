@@ -19,14 +19,16 @@ async def test_event_architecture():
     logger = get_logger(__name__)
     
     # Создаем конфигурацию
+    from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
     config = TradingConfig(
         figi="FUTIMOEXF000",
         enable_visualization=True
     )
+    config.tcs_client = TinkoffAPIClient('test_token', 'test_account_id')
     
     # Создаем DI контейнер с визуализацией
-    container = TradingSystemContainer(config, enable_visualization=True)
-    trading_system = container.build_trading_system()
+    container = TradingSystemContainer(config)
+    trading_system = await container.build_trading_system()
     
     logger.info("✅ Торговая система собрана через DI контейнер")
     logger.info(f"📊 Визуализация: {'включена' if trading_system['visualizer'] else 'отключена'}")
@@ -86,14 +88,19 @@ async def test_without_visualization():
     logger = get_logger(__name__)
     
     # Создаем конфигурацию
+    from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
     config = TradingConfig(
         figi="FUTIMOEXF000",
         enable_visualization=False
     )
+    config.tcs_client = TinkoffAPIClient('test_token', 'test_account_id')
     
     # Создаем DI контейнер без визуализации
-    container = TradingSystemContainer(config, enable_visualization=False)
-    trading_system = container.build_trading_system()
+    # Создаем конфигурацию без визуализации
+    config_no_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=False)
+    config_no_viz.tcs_client = config.tcs_client
+    container = TradingSystemContainer(config_no_viz)
+    trading_system = await container.build_trading_system()
     
     logger.info("✅ Торговая система собрана БЕЗ визуализации")
     logger.info(f"📊 Визуализация: {'включена' if trading_system['visualizer'] else 'отключена'}")

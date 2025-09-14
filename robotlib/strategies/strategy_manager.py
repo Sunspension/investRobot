@@ -108,7 +108,7 @@ class StrategyManager(StrategyManageable):
                 await strategy.initialize(figi, point_value, contracts_per_lot)
 
     async def on_candle(self, candle: Candle | HistoricCandle):
-        # Публикуем событие получения свечи
+        # Публикуем событие получения свечи (для визуализации)
         if self._event_bus:
             candle_event = TradingEvent(
                 EventType.CANDLE_RECEIVED,
@@ -118,13 +118,19 @@ class StrategyManager(StrategyManageable):
                     'timestamp': getattr(candle, 'time', None)
                 }
             )
-            asyncio.create_task(self._event_bus.publish(candle_event))
+            try:
+                asyncio.create_task(self._event_bus.publish(candle_event))
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._event_bus.publish(candle_event))
+                loop.close()
         
         signal: Signal = self._signal_manager.add_candle(candle)
         if not signal:
             return
 
-        # Публикуем событие генерации сигнала
+        # Публикуем событие генерации сигнала (для визуализации)
         if self._event_bus:
             signal_event = TradingEvent(
                 EventType.SIGNAL_GENERATED,
@@ -135,7 +141,13 @@ class StrategyManager(StrategyManageable):
                     'timestamp': getattr(candle, 'time', None)
                 }
             )
-            asyncio.create_task(self._event_bus.publish(signal_event))
+            try:
+                asyncio.create_task(self._event_bus.publish(signal_event))
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._event_bus.publish(signal_event))
+                loop.close()
 
         # Выполняем все стратегии
         for strategy in self._strategies:

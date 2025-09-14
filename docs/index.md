@@ -40,6 +40,7 @@ python scripts/main.py
 
 ## 📚 Документация
 
+### Основная документация
 - [📋 Правила разработки](project_rules.md) - **ОБЯЗАТЕЛЬНО К ПРОЧТЕНИЮ**
 - [Быстрый старт торговой системы](trading_quick_start.md)
 - [Полная документация торговли](trading.md)
@@ -47,6 +48,10 @@ python scripts/main.py
 - [Документация стратегий](strategy_interface.md)
 - [Управление аккаунтами](account.md)
 - [Использование TinkoffAPIClientable](tinkoff_api_interface_usage.md)
+
+### История изменений
+- [📝 Changelog](CHANGELOG.md) - **ИСТОРИЯ ИЗМЕНЕНИЙ**
+- [🔧 Исправления ошибок (14.09.2025)](bugfixes_2025_09_14.md) - **ПОСЛЕДНИЕ ИСПРАВЛЕНИЯ**
 
 
 ## 🏗️ Архитектура проекта

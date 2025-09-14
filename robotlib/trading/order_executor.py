@@ -22,7 +22,7 @@ class OrderExecutor:
         
         Args:
             api_client: API клиент для работы с Tinkoff
-            event_bus: Шина событий для публикации событий ордеров
+            event_bus: Шина событий для публикации событий (только для визуализации)
         """
         self.api_client = api_client
         self._event_bus = event_bus
@@ -67,7 +67,7 @@ class OrderExecutor:
                 commission=result.commission or 0.0
             )
             
-            # Публикуем событие размещения ордера
+            # Публикуем событие размещения ордера (для визуализации)
             if self._event_bus:
                 placed_event = TradingEvent(
                     EventType.ORDER_PLACED,
@@ -78,7 +78,13 @@ class OrderExecutor:
                         'result': result
                     }
                 )
-                asyncio.create_task(self._event_bus.publish(placed_event))
+                try:
+                    asyncio.create_task(self._event_bus.publish(placed_event))
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._event_bus.publish(placed_event))
+                    loop.close()
             
             # Если ордер исполнен, публикуем событие исполнения
             if result.success and execution.status == OrderStatus.FILLED:
@@ -93,7 +99,13 @@ class OrderExecutor:
                             'commission': result.commission or 0.0
                         }
                     )
-                    asyncio.create_task(self._event_bus.publish(filled_event))
+                    try:
+                        asyncio.create_task(self._event_bus.publish(filled_event))
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self._event_bus.publish(filled_event))
+                        loop.close()
             
             self.logger.info(f"Ордер выполнен: {execution}")
             return execution

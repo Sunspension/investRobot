@@ -26,7 +26,7 @@ async def run_trading_system_with_mocks(
     # Создаем мок-конфигурацию для API клиента
     mock_tcs_client = type('MockTCSClient', (), {
         'token': 'mock_token',
-        'id': 'mock_account',
+        'account_id': 'mock_account',
         'sandbox_token': 'mock_sandbox_token'
     })()
     
@@ -37,7 +37,7 @@ async def run_trading_system_with_mocks(
     mock_api_client = MockTinkoffAPIClient()
     
     # Создаем DI контейнер
-    container = TradingSystemContainer(config, enable_visualization=enable_visualization)
+    container = TradingSystemContainer(config)
     
     # Переопределяем API клиенты на моки ПЕРЕД созданием компонентов
     # Монkey patching для DI контейнера
@@ -46,7 +46,7 @@ async def run_trading_system_with_mocks(
     original_get_market_data_stream = container.get_market_data_stream
     original_get_trading_dependencies = container.get_trading_dependencies
     
-    def get_portfolio_manager_with_mock():
+    async def get_portfolio_manager_with_mock():
         if 'portfolio_manager' not in container._instances:
             from robotlib.trading.portfolio_manager import PortfolioManager
             container._instances['portfolio_manager'] = PortfolioManager(
@@ -55,7 +55,7 @@ async def run_trading_system_with_mocks(
             )
         return container._instances['portfolio_manager']
     
-    def get_order_executor_with_mock():
+    async def get_order_executor_with_mock():
         if 'order_executor' not in container._instances:
             from robotlib.trading.order_executor import OrderExecutor
             container._instances['order_executor'] = OrderExecutor(
@@ -64,51 +64,57 @@ async def run_trading_system_with_mocks(
             )
         return container._instances['order_executor']
     
-    def get_market_data_stream_with_mock():
+    async def get_market_data_stream_with_mock():
         if 'market_data_stream' not in container._instances:
             from robotlib.trading.market_data_stream import MarketDataStream
             container._instances['market_data_stream'] = MarketDataStream(
                 api_client=mock_api_client,
+                event_bus=container.get_event_bus(),
                 figi=config.figi,
-                signal_manager=container.get_signal_manager(),
-                visualizer=None,
-                cache_size=1000,
-                event_bus=container.get_event_bus()
+                cache_size=1000
             )
         return container._instances['market_data_stream']
     
-    def get_trading_dependencies_with_mock():
+    async def get_trading_dependencies_with_mock():
         if 'trading_dependencies' not in container._instances:
             from robotlib.trading.interfaces import TradingDependencies
             container._instances['trading_dependencies'] = TradingDependencies(
                 api_client=mock_api_client,
-                session_stats=container.get_session_stats(),
-                session_initializer=None,
-                portfolio_manager=container.get_portfolio_manager(),
-                risk_manager=container.get_risk_manager(),
-                order_executor=container.get_order_executor(),
-                market_data_stream=container.get_market_data_stream(),
+                order_executor=await get_order_executor_with_mock(),
+                portfolio_manager=await get_portfolio_manager_with_mock(),
+                risk_manager=await container.get_risk_manager(),
                 signal_manager=container.get_signal_manager(),
-                strategy_manager=container.get_strategy_manager()
+                strategy_manager=await container.get_strategy_manager(),
+                market_data_stream=await get_market_data_stream_with_mock(),
+                session_stats=container.get_session_stats()
             )
         return container._instances['trading_dependencies']
+    
+    def get_visualizer_with_mock(host="127.0.0.1", port=8050, start_server=True):
+        if 'visualizer' not in container._instances:
+            from tests.mocks.visualizer_mock import MockEventVisualizer
+            container._instances['visualizer'] = MockEventVisualizer(
+                host=host,
+                port=port,
+                start_server=start_server
+            )
+        return container._instances['visualizer']
     
     # Заменяем методы в контейнере
     container.get_portfolio_manager = get_portfolio_manager_with_mock
     container.get_order_executor = get_order_executor_with_mock
     container.get_market_data_stream = get_market_data_stream_with_mock
     container.get_trading_dependencies = get_trading_dependencies_with_mock
+    container.get_visualizer = get_visualizer_with_mock
     
     # Собираем торговую систему
-    trading_system = container.build_trading_system(host=host, port=port)
+    trading_system = await container.build_trading_system(host=host, port=port, start_server=True)
     
     logger.info("✅ Торговая система собрана с мок-данными")
     logger.info(f"🚌 EventBus: {type(trading_system['event_bus']).__name__}")
     
-    # Запускаем визуализатор (если включен)
-    if trading_system['visualizer']:
-        await trading_system['visualizer'].start()
-        logger.info("✅ Dash визуализатор событий запущен")
+    # Визуализатор будет запущен автоматически в SessionController
+    logger.info("✅ Dash визуализатор будет запущен в SessionController")
     
     # Получаем EventBus для настройки обработчиков
     event_bus = trading_system['event_bus']

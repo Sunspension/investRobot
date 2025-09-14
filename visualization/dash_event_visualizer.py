@@ -45,10 +45,20 @@ class DashEventVisualizer(EventVisualizerable):
         # Создаем компоненты визуализатора
         self._data_manager = DataManager()
         self._chart_builder = ChartBuilder()
-        self._ui_components = UIComponents(figi)
+        self._ui_components = UIComponents(figi, self._chart_builder)
         
-        # Добавляем мок-данные для демонстрации
-        self._add_demo_data()
+        # Загружаем исторические данные
+        self._load_historical_data()
+        
+        # Добавляем мок-данные для демонстрации (отключено)
+        # self._add_demo_data()
+        
+        # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
+        self._init_portfolio()
+        
+        # Проверяем, что данные загружены
+        data_snapshot = self._data_manager.get_data_snapshot()
+        self._logger.info(f"🔍 После инициализации: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
         
         # Dash приложение
         self._app = None
@@ -58,6 +68,23 @@ class DashEventVisualizer(EventVisualizerable):
         self._market_status_cache = None
         self._last_cache_update = None
         self._cache_ttl = 5  # Кэш на 5 секунд для отладки
+    
+    def _load_historical_data(self) -> None:
+        """Загружает исторические данные из базы"""
+        try:
+            import os
+            db_path = os.path.join(os.getcwd(), "data", "candles.db")
+            if os.path.exists(db_path):
+                self._logger.info(f"🔄 Загружаем исторические данные из {db_path}")
+                self._data_manager.load_historical_candles(db_path, self._figi, limit=200)
+                self._logger.info(f"✅ Загружено {len(self._data_manager.candles_data)} свечей")
+                self._logger.info(f"📊 Сигналы: BUY={self._data_manager.buy_count}, SELL={self._data_manager.sell_count}")
+            else:
+                self._logger.warning(f"⚠️ База данных не найдена: {db_path}")
+        except Exception as e:
+            self._logger.error(f"❌ Ошибка загрузки исторических данных: {e}")
+            import traceback
+            self._logger.error(f"Traceback: {traceback.format_exc()}")
         
         # Отключаем избыточные логи
         self._disable_verbose_logging()
@@ -65,6 +92,71 @@ class DashEventVisualizer(EventVisualizerable):
         # Настраиваем обработчики событий
         self._setup_event_handlers()
     
+    def _init_portfolio(self) -> None:
+        """Инициализирует портфель с нулевыми значениями"""
+        try:
+            portfolio_data = {
+                'total_amount': 0.0,
+                'positions': [],
+                'pnl': 0.0,
+                'margin': 0.0,
+                'free_margin': 0.0,
+                'variation_margin': 0.0,
+                'guarantee_deposit': 0.0,
+                'last_update': datetime.now()
+            }
+            self._data_manager.update_portfolio(portfolio_data)
+            self._logger.info("Портфель инициализирован с нулевыми значениями")
+            
+        except Exception as e:
+            self._logger.error(f"Ошибка инициализации портфеля: {e}")
+
+    async def _load_portfolio_from_api(self) -> None:
+        """Загружает данные портфеля от API"""
+        try:
+            from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
+            from robotlib.trading.portfolio_manager import PortfolioManager
+            from config_data.config import load_config
+            
+            config = load_config()
+            
+            async with TinkoffAPIClient(
+                token=config.tcs_client.token,
+                account_id=config.tcs_client.id,
+                sandbox_token=config.tcs_client.sandbox_token
+            ) as api_client:
+                portfolio_manager = PortfolioManager(api_client)
+                portfolio = await portfolio_manager.get_portfolio()
+                
+                # Конвертируем данные портфеля в формат для визуализатора
+                portfolio_data = {
+                    'total_amount': portfolio.total_amount,
+                    'positions': [
+                        {
+                            'figi': pos.figi,
+                            'quantity': pos.quantity,
+                            'average_price': pos.average_price,
+                            'current_price': pos.current_price,
+                            'unrealized_pnl': pos.unrealized_pnl,
+                            'realized_pnl': pos.realized_pnl
+                        }
+                        for pos in portfolio.positions
+                    ],
+                    'pnl': portfolio.pnl,
+                    'margin': portfolio.blocked_amount,
+                    'free_margin': portfolio.available_amount,
+                    'variation_margin': 0.0,  # Пока не реализовано в API
+                    'guarantee_deposit': 0.0,  # Пока не реализовано в API
+                    'last_update': datetime.now()
+                }
+                
+                self._data_manager.update_portfolio(portfolio_data)
+                self._logger.info(f"Портфель загружен от API: {portfolio.total_amount:.2f} ₽, {len(portfolio.positions)} позиций")
+                
+        except Exception as e:
+            self._logger.error(f"Ошибка загрузки портфеля от API: {e}")
+            # В случае ошибки оставляем нулевые значения
+
     def _add_demo_data(self) -> None:
         """Добавляет демонстрационные данные"""
         try:
@@ -102,7 +194,11 @@ class DashEventVisualizer(EventVisualizerable):
                     'strength': random.uniform(0.5, 2.0),
                     'macd': random.uniform(-5, 5),
                     'signal_line': random.uniform(-3, 3),
-                    'histogram': random.uniform(-2, 2)
+                    'histogram': random.uniform(-2, 2),
+                    'price': base_price + random.uniform(-10, 10),  # Добавляем цену
+                    'reason': f'MACD сигнал #{i+1}',
+                    'quantity': random.randint(1, 10),
+                    'strategy': 'LongStrategy' if i % 2 == 0 else 'ShortStrategy'
                 }
                 self._data_manager.add_signal(signal_data)
             
@@ -113,6 +209,8 @@ class DashEventVisualizer(EventVisualizerable):
                 'pnl': 1250.50,
                 'margin': 5000.0,
                 'free_margin': 95000.0,
+                'variation_margin': 2500.0,  # Добавляем вариационную маржу
+                'guarantee_deposit': 10000.0,  # Добавляем гарантийное обеспечение
                 'last_update': datetime.now()
             }
             self._data_manager.update_portfolio(portfolio_data)
@@ -270,6 +368,10 @@ class DashEventVisualizer(EventVisualizerable):
     def _disable_verbose_logging(self) -> None:
         """Отключает избыточные логи"""
         disable_verbose_logging(enable_debug_logs=True)
+        # Включаем логи для callback'ов
+        import logging
+        logging.getLogger('dash').setLevel(logging.INFO)
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
     
     async def start(self) -> None:
         """Запускает визуализатор"""
@@ -280,6 +382,9 @@ class DashEventVisualizer(EventVisualizerable):
         try:
             # Устанавливаем флаг запуска сразу, чтобы события обрабатывались
             self._running = True
+            
+            # Загружаем данные портфеля от API
+            await self._load_portfolio_from_api()
             
             # Создаем Dash приложение
             self._app = self._create_dash_app()
@@ -361,6 +466,28 @@ class DashEventVisualizer(EventVisualizerable):
         # Настраиваем callbacks
         self._setup_callbacks(app)
         
+        # Принудительно вызываем callback при создании приложения
+        self._logger.info("🔄 Принудительно вызываем callback при создании приложения")
+        try:
+            # Получаем данные и создаем график
+            data_snapshot = self._data_manager.get_data_snapshot()
+            self._logger.info(f"📊 При создании приложения: {len(data_snapshot['candles_data'])} свечей")
+            
+            # Создаем график
+            fig = self._chart_builder.create_trading_chart(
+                candles_data=data_snapshot['candles_data'],
+                signals_data=data_snapshot['signals_data'],
+                orders_data=data_snapshot['orders_data'],
+                current_price=data_snapshot['current_price']
+            )
+            self._logger.info("✅ График создан при инициализации")
+        except Exception as e:
+            self._logger.error(f"❌ Ошибка при создании графика: {e}")
+        
+        # Убираем принудительный вызов callback'а - исправим основной callback
+        
+        # Убираем принудительный вызов callback'а - исправим основной callback
+        
         return app
     
     def _create_layout(self) -> html.Div:
@@ -389,17 +516,34 @@ class DashEventVisualizer(EventVisualizerable):
              Output('portfolio-guarantee-deposit', 'children')],
             [Input('interval-component', 'n_intervals')],
             [State('simulation-state', 'data')],
-            prevent_initial_call=False
+            prevent_initial_call=True
         )
         def update_display(n, state):
             """Обновляет отображение данных с богатым UI"""
             try:
+                self._logger.info(f"🔄 CALLBACK ВЫЗВАН: n={n}, state={state}")
+                
                 # Принудительно обновляем данные при загрузке
                 if n is None or n == 0:
                     self._logger.info("Принудительное обновление при загрузке страницы")
+                    # Принудительно добавляем демо-данные если их нет
+                    data_snapshot = self._data_manager.get_data_snapshot()
+                    if len(data_snapshot['candles_data']) == 0:
+                        self._logger.info("🔄 Данных нет, демо-данные отключены")
+                        # self._add_demo_data()  # Отключено
                 
                 # Получаем снимок данных
                 data_snapshot = self._data_manager.get_data_snapshot()
+                self._logger.info(f"📊 DataManager содержит: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
+                self._logger.info(f"📊 Портфель: {data_snapshot['portfolio_data']}")
+                self._logger.info(f"📊 Стратегии: {data_snapshot['strategies_data']}")
+                
+                # Проверяем, что данные действительно есть
+                if len(data_snapshot['candles_data']) == 0:
+                    self._logger.warning("⚠️ НЕТ СВЕЧЕЙ В DATAMANAGER! Демо-данные отключены")
+                    # self._add_demo_data()  # Отключено
+                    # data_snapshot = self._data_manager.get_data_snapshot()
+                    # self._logger.info(f"📊 После принудительного добавления: {len(data_snapshot['candles_data'])} свечей")
                 
                 # Создаем график
                 fig = self._chart_builder.create_trading_chart(
@@ -447,6 +591,7 @@ class DashEventVisualizer(EventVisualizerable):
                 
                 # Получаем данные портфеля
                 portfolio_data = data_snapshot.get('portfolio_data', {})
+                self._logger.info(f"📊 Portfolio data в callback: {portfolio_data}")
                 portfolio_balance = f"{portfolio_data.get('total_amount', 0):.2f} ₽"
                 
                 # P&L с динамическим цветом
@@ -505,7 +650,20 @@ class DashEventVisualizer(EventVisualizerable):
         )
         def trigger_initial_update(interval):
             """Принудительно запускает обновление при загрузке страницы"""
+            self._logger.info("🔄 Trigger callback вызван")
+            
+            # Принудительно вызываем основной callback для обновления UI
+            self._logger.info("🔄 Принудительно вызываем основной callback для обновления UI")
+            try:
+                # Вызываем основной callback напрямую
+                result = update_display(0, None)
+                self._logger.info("✅ Основной callback вызван принудительно")
+            except Exception as e:
+                self._logger.error(f"Ошибка принудительного вызова callback: {e}")
+            
             return 0
+        
+        # Убираем Force callback - используем только основной callback
         
         # Callback для динамического цвета P&L
         @app.callback(

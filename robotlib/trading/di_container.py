@@ -25,16 +25,34 @@ from visualization.dash_event_visualizer import DashEventVisualizer
 class TradingSystemContainer:
     """DI контейнер для торговой системы"""
     
-    def __init__(self, config: TradingConfig, enable_visualization: bool = False):
+    def __init__(self, config: TradingConfig):
         self._config = config
-        self._enable_visualization = enable_visualization
         self._logger = get_logger(__name__)
         self._instances: Dict[str, Any] = {}
+        
+        # Валидация конфигурации
+        self._validate_config()
+    
+    def _validate_config(self) -> None:
+        """Валидирует конфигурацию торговой системы"""
+        if not self._config.figi:
+            raise ValueError("FIGI не может быть пустым")
+        
+        if not hasattr(self._config, 'tcs_client') or not self._config.tcs_client:
+            raise ValueError("TCS клиент не настроен")
+        
+        if not hasattr(self._config.tcs_client, 'token') or not self._config.tcs_client.token:
+            raise ValueError("Токен TCS клиента не настроен")
+        
+        if not hasattr(self._config.tcs_client, 'account_id') or not self._config.tcs_client.account_id:
+            raise ValueError("ID аккаунта TCS клиента не настроен")
+        
+        self._logger.info("✅ Конфигурация торговой системы валидна")
     
     def get_event_bus(self) -> EventBusable:
-        """Получает шину событий"""
+        """Получает шину событий (только для визуализации)"""
         if 'event_bus' not in self._instances:
-            if self._enable_visualization:
+            if self._config.enable_visualization:
                 self._instances['event_bus'] = EventBus()
             else:
                 self._instances['event_bus'] = MockEventBus()
@@ -52,20 +70,16 @@ class TradingSystemContainer:
             # Создаем и инициализируем API клиент через фабрику
             self._instances['api_client'] = await APIClientFactory.create_initialized_tinkoff_client(
                 token=self._config.tcs_client.token,
-                account_id=self._config.tcs_client.id,
+                account_id=self._config.tcs_client.account_id,
                 sandbox_token=self._config.tcs_client.sandbox_token
             )
         return self._instances['api_client']
     
-    def get_portfolio_manager(self) -> PortfolioManager:
+    async def get_portfolio_manager(self) -> PortfolioManager:
         """Получает менеджер портфеля"""
         if 'portfolio_manager' not in self._instances:
-            # API клиент будет инициализирован при первом обращении
-            api_client = TinkoffAPIClient(
-                token=self._config.tcs_client.token,
-                account_id=self._config.tcs_client.id,
-                sandbox_token=self._config.tcs_client.sandbox_token
-            )
+            # Используем единый API клиент
+            api_client = await self.get_api_client()
             
             self._instances['portfolio_manager'] = PortfolioManager(
                 api_client=api_client,
@@ -73,11 +87,11 @@ class TradingSystemContainer:
             )
         return self._instances['portfolio_manager']
     
-    def get_risk_manager(self) -> RiskManager:
+    async def get_risk_manager(self) -> RiskManager:
         """Получает менеджер рисков"""
         if 'risk_manager' not in self._instances:
             self._instances['risk_manager'] = RiskManager(
-                portfolio_manager=self.get_portfolio_manager(),
+                portfolio_manager=await self.get_portfolio_manager(),
                 risk_limits=RiskLimits(
                     max_daily_loss=50000.0,  # Дефолтное значение
                     max_position_size=100000.0  # Дефолтное значение
@@ -85,14 +99,11 @@ class TradingSystemContainer:
             )
         return self._instances['risk_manager']
     
-    def get_order_executor(self) -> OrderExecutor:
+    async def get_order_executor(self) -> OrderExecutor:
         """Получает исполнитель ордеров"""
         if 'order_executor' not in self._instances:
-            api_client = TinkoffAPIClient(
-                token=self._config.tcs_client.token,
-                account_id=self._config.tcs_client.id,
-                sandbox_token=self._config.tcs_client.sandbox_token
-            )
+            # Используем единый API клиент
+            api_client = await self.get_api_client()
             
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
@@ -108,15 +119,15 @@ class TradingSystemContainer:
             )
         return self._instances['signal_manager']
     
-    def get_strategy_manager(self) -> StrategyManager:
+    async def get_strategy_manager(self) -> StrategyManager:
         """Получает менеджер стратегий"""
         if 'strategy_manager' not in self._instances:
             strategy_manager = StrategyManager(
                 signal_manager=self.get_signal_manager(),
-                risk_manager=self.get_risk_manager(),
-                portfolio_manager=self.get_portfolio_manager(),
-                order_executor=self.get_order_executor(),
-                event_bus=self.get_event_bus()  # Передаем EventBus
+                risk_manager=await self.get_risk_manager(),
+                portfolio_manager=await self.get_portfolio_manager(),
+                order_executor=await self.get_order_executor(),
+                event_bus=self.get_event_bus()
             )
             
             # Стратегии добавляются автоматически в StrategyManager
@@ -140,22 +151,19 @@ class TradingSystemContainer:
     async def get_trading_dependencies(self) -> TradingDependencies:
         """Получает зависимости торговой системы"""
         if 'trading_dependencies' not in self._instances:
-            api_client = TinkoffAPIClient(
-                token=self._config.tcs_client.token,
-                account_id=self._config.tcs_client.id,
-                sandbox_token=self._config.tcs_client.sandbox_token
-            )
+            # Используем единый API клиент
+            api_client = await self.get_api_client()
             
             # Создаем TradingDependencies (без session_initializer)
             self._instances['trading_dependencies'] = TradingDependencies(
                 api_client=api_client,
                 session_stats=self.get_session_stats(),
-                portfolio_manager=self.get_portfolio_manager(),
-                risk_manager=self.get_risk_manager(),
-                order_executor=self.get_order_executor(),
+                portfolio_manager=await self.get_portfolio_manager(),
+                risk_manager=await self.get_risk_manager(),
+                order_executor=await self.get_order_executor(),
                 market_data_stream=await self.get_market_data_stream(),
                 signal_manager=self.get_signal_manager(),
-                strategy_manager=self.get_strategy_manager()
+                strategy_manager=await self.get_strategy_manager()
             )
         return self._instances['trading_dependencies']
     
@@ -196,13 +204,13 @@ class TradingSystemContainer:
                 config=self._config,
                 dependencies=controller_dependencies,
                 force_start=False,
-                visualizer=None  # Больше не нужен
+                visualizer=self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             )
         return self._instances['session_controller']
     
     def get_visualizer(self, host: str = "127.0.0.1", port: int = 8050, start_server: bool = True) -> Optional[Any]:
         """Получает визуализатор (если включен)"""
-        if not self._enable_visualization:
+        if not self._config.enable_visualization:
             return None
         
         if 'visualizer' not in self._instances:
@@ -221,11 +229,11 @@ class TradingSystemContainer:
         return self._instances['visualizer']
     
     async def build_trading_system(self, host: str = "127.0.0.1", port: int = 8050, start_server: bool = True) -> Dict[str, Any]:
-        """Собирает полную торговую системы"""
+        """Собирает полную торговой системы"""
         return {
             'config': self._config,
             'event_bus': self.get_event_bus(),
             'session_controller': await self.get_session_controller(),
             'dependencies': await self.get_trading_dependencies(),
-            'visualizer': self.get_visualizer(host, port, start_server)
+            'visualizer': self.get_visualizer(host=host, port=port, start_server=start_server)
         }

@@ -48,7 +48,7 @@ class PortfolioManager:
         
         Args:
             api_client: API клиент для работы с Tinkoff
-            event_bus: Шина событий для публикации событий портфеля
+            event_bus: Шина событий для публикации событий (только для визуализации)
         """
         self._api_client = api_client
         self._event_bus = event_bus
@@ -143,7 +143,7 @@ class PortfolioManager:
                 f"позиций: {len(positions)}"
             )
             
-            # Публикуем событие обновления портфеля
+            # Публикуем событие обновления портфеля (для визуализации)
             if self._event_bus:
                 event = TradingEvent(
                     EventType.PORTFOLIO_UPDATED,
@@ -157,7 +157,14 @@ class PortfolioManager:
                         'pnl': total_pnl
                     }
                 )
-                asyncio.create_task(self._event_bus.publish(event))
+                try:
+                    asyncio.create_task(self._event_bus.publish(event))
+                except RuntimeError:
+                    # Если event loop не активен, публикуем синхронно
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._event_bus.publish(event))
+                    loop.close()
             
             return portfolio
             

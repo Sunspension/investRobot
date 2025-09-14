@@ -25,7 +25,7 @@ class TestEventIntegration(unittest.TestCase):
         self.config.tcs_client.id = "test_account_id"
         self.config.tcs_client.sandbox_token = "test_sandbox_token"
         
-        self.container = TradingSystemContainer(self.config, enable_visualization=True)
+        self.container = TradingSystemContainer(self.config)
         # В тестах мы не можем использовать await в setUp, поэтому создаем синхронную версию
         import asyncio
         self.trading_system = asyncio.run(self.container.build_trading_system(start_server=False))
@@ -116,7 +116,10 @@ class TestEventIntegration(unittest.TestCase):
     def test_di_container_visualization_toggle(self):
         """Тест переключения визуализации в DI контейнере"""
         # Контейнер без визуализации
-        container_no_viz = TradingSystemContainer(self.config, enable_visualization=False)
+        # Создаем конфигурацию без визуализации
+        config_no_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=False)
+        config_no_viz.tcs_client = self.config.tcs_client
+        container_no_viz = TradingSystemContainer(config_no_viz)
         trading_system_no_viz = asyncio.run(container_no_viz.build_trading_system(start_server=False))
         
         self.assertIsNone(trading_system_no_viz['visualizer'])
@@ -125,7 +128,10 @@ class TestEventIntegration(unittest.TestCase):
         self.assertIsInstance(trading_system_no_viz['event_bus'], EventBusable)
         
         # Контейнер с визуализацией
-        container_with_viz = TradingSystemContainer(self.config, enable_visualization=True)
+        # Создаем конфигурацию с визуализацией
+        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+        config_with_viz.tcs_client = self.config.tcs_client
+        container_with_viz = TradingSystemContainer(config_with_viz)
         trading_system_with_viz = asyncio.run(container_with_viz.build_trading_system(start_server=False))
         
         if trading_system_with_viz['visualizer']:

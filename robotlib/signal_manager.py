@@ -12,6 +12,7 @@ from typing import Optional
 from enum import Enum
 from robotlib.trading.event_bus_interface import EventType, TradingEvent
 from robotlib.signal_types import Signal, Order
+import asyncio
 
 
 class SignalManager:
@@ -54,26 +55,17 @@ class SignalManager:
         return self._candles
     
     def subscribe_to_events(self):
-        """Подписывается на события свечей"""
-        if self._event_bus:
-            self._event_bus.subscribe(EventType.CANDLE_RECEIVED, self._handle_candle_event)
+        """Подписывается на события свечей (для совместимости с тестами)"""
+        # Метод оставлен для совместимости, но подписка не нужна
+        # так как SignalManager теперь работает напрямую
+        pass
     
     async def _handle_candle_event(self, event):
-        """Обрабатывает событие получения свечи"""
+        """Обрабатывает событие получения свечи (для совместимости с тестами)"""
         candle = event.data.get('candle')
         if candle:
-            signal = self.add_candle(candle)
-            if signal and self._event_bus:
-                # Публикуем событие сигнала
-                signal_event = TradingEvent(
-                    EventType.SIGNAL_GENERATED,
-                    {
-                        'signal': signal,
-                        'figi': event.data.get('figi'),
-                        'price': event.data.get('price')
-                    }
-                )
-                await self._event_bus.publish(signal_event)
+            return self.add_candle(candle)
+        return None
 
     def add_candle(self, candle: Candle | HistoricCandle) -> Signal:
         price = Money(candle.close).to_float()
@@ -151,7 +143,7 @@ class SignalManager:
         recent_indices = [current_idx - i for i in range(check_last_n) if current_idx - i >= 0]
 
         # Сигналы на основе пиков и впадин
-        return Signal(
+        signal = Signal(
             macd=macd_value.macd,
             signal=macd_value.signal,
             histogram=macd_value.histogram,
@@ -161,3 +153,25 @@ class SignalManager:
             trough_detected=any(idx in troughs for idx in recent_indices),
             candle=candle
         )
+        
+        # Публикуем событие генерации сигнала (для визуализации)
+        if self._event_bus:
+            signal_event = TradingEvent(
+                EventType.SIGNAL_GENERATED,
+                {
+                    'signal': signal,
+                    'figi': getattr(candle, 'figi', 'unknown'),
+                    'price': price
+                }
+            )
+            try:
+                # Пытаемся создать задачу, если event loop активен
+                asyncio.create_task(self._event_bus.publish(signal_event))
+            except RuntimeError:
+                # Если event loop не активен, публикуем синхронно
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._event_bus.publish(signal_event))
+                loop.close()
+        
+        return signal

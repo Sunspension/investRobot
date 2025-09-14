@@ -10,7 +10,10 @@ from robotlib.trading.session_interfaces import SessionControllable, SessionStat
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.session_stats import SessionStats
 from robotlib.trading.session_initializer import SessionInitializer
-from visualization.event_visualizer_interface import EventVisualizerable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from visualization.event_visualizer_interface import EventVisualizerable
 from robotlib.utils.market_hours import get_market_status_with_api
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.logger import get_logger
@@ -21,7 +24,7 @@ def _has_market_data_stream(dependencies: TradingDependencies) -> bool:
     return hasattr(dependencies, 'market_data_stream') and dependencies.market_data_stream is not None
 
 
-def _has_data_manager(visualizer: Optional[EventVisualizerable]) -> bool:
+def _has_data_manager(visualizer: Optional['EventVisualizerable']) -> bool:
     """Проверяет, есть ли data_manager у visualizer"""
     return visualizer is not None and hasattr(visualizer, 'data_manager')
 
@@ -34,7 +37,7 @@ class SessionController(SessionControllable):
         config: TradingConfig, 
         dependencies: TradingDependencies, 
         force_start: bool = False,
-        visualizer: Optional[EventVisualizerable] = None
+        visualizer: Optional['EventVisualizerable'] = None
     ):
         self._config = config
         self._dependencies = dependencies
@@ -81,7 +84,7 @@ class SessionController(SessionControllable):
         return self._force_start
     
     @property
-    def visualizer(self) -> Optional[EventVisualizerable]:
+    def visualizer(self) -> Optional['EventVisualizerable']:
         """Визуализатор"""
         return self._visualizer
     
@@ -101,7 +104,7 @@ class SessionController(SessionControllable):
             # Запускаем визуализатор
             if self._visualizer:
                 await self._visualizer.start()
-                self.logger.info("Визуализатор запущен")
+                self.logger.info("✅ Dash визуализатор событий запущен")
             
             # Логируем информацию о сессии
             await self._log_session_info()
@@ -166,7 +169,6 @@ class SessionController(SessionControllable):
                             # Время закрыть позиции
                             self.logger.info("Конец торгового дня, закрываем позиции")
                             await self._close_all_positions()
-                            await self.stop()
                             break
                         else:
                             # Проверяем предупреждения
@@ -195,7 +197,7 @@ class SessionController(SessionControllable):
                         
                         # Перезапускаем стрим
                         if _has_market_data_stream(self._dependencies):
-                            await self._dependencies.market_data_stream.stop()
+                            self._dependencies.market_data_stream.reset()
                             await asyncio.sleep(2)
                             await self._dependencies.market_data_stream.start()
                     else:
@@ -208,9 +210,9 @@ class SessionController(SessionControllable):
                 
         except KeyboardInterrupt:
             self.logger.info("Получен сигнал остановки")
+            await self.stop()
         except Exception as e:
             self.logger.error(f"Критическая ошибка в торговом цикле: {e}")
-        finally:
             await self.stop()
     
     async def _check_market_status(self) -> bool:

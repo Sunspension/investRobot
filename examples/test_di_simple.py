@@ -20,7 +20,7 @@ try:
     print("✅ Конфигурация создана успешно")
     
     # Создаем DI контейнер
-    container = TradingSystemContainer(config, enable_visualization=False)
+    container = TradingSystemContainer(config)
     print("✅ DI контейнер создан успешно")
     
     # Собираем торговую систему

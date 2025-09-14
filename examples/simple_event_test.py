@@ -21,7 +21,7 @@ try:
     print("✅ Конфигурация создана")
     
     # Создаем DI контейнер
-    container = TradingSystemContainer(config, enable_visualization=True)
+    container = TradingSystemContainer(config)
     print("✅ DI контейнер создан")
     
     # Собираем торговую систему

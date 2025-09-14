@@ -5,7 +5,7 @@ from environs import Env
 @dataclass
 class TCSClient:
     token: str
-    id: str
+    account_id: str
     sandbox_token: str
 
 
@@ -20,7 +20,7 @@ def load_config(path: str = None) -> Config:
 
     client = TCSClient(
         token=env('TINKOFF_TOKEN'), 
-        id=env('TINKOFF_ACCOUNT'), 
+        account_id=env('TINKOFF_ACCOUNT'), 
         sandbox_token=env('SANDBOX_TOKEN')
     )
     return Config(tcs_client=client)

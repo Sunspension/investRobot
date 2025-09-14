@@ -26,14 +26,14 @@ class TestTradingSystemWithDI(unittest.TestCase):
     
     def test_container_creation(self):
         """Тест создания контейнера"""
-        container = TradingSystemContainer(self.config, enable_visualization=False)
+        container = TradingSystemContainer(self.config)
         self.assertIsInstance(container, TradingSystemContainer)
         self.assertEqual(container._config, self.config)
-        self.assertFalse(container._enable_visualization)
+        self.assertFalse(container._config.enable_visualization)
     
     def test_trading_system_build(self):
         """Тест сборки торговой системы"""
-        container = TradingSystemContainer(self.config, enable_visualization=False)
+        container = TradingSystemContainer(self.config)
         trading_system = asyncio.run(container.build_trading_system())
         
         # Проверяем, что все компоненты присутствуют
@@ -49,7 +49,10 @@ class TestTradingSystemWithDI(unittest.TestCase):
     
     def test_trading_system_with_visualization(self):
         """Тест торговой системы с визуализацией"""
-        container = TradingSystemContainer(self.config, enable_visualization=True)
+        # Создаем конфигурацию с визуализацией
+        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+        config_with_viz.tcs_client = self.config.tcs_client
+        container = TradingSystemContainer(config_with_viz)
         trading_system = asyncio.run(container.build_trading_system())
         
         # Проверяем, что event_bus - это реальный EventBus
@@ -60,7 +63,7 @@ class TestTradingSystemWithDI(unittest.TestCase):
     
     def test_singleton_behavior(self):
         """Тест синглтон поведения"""
-        container = TradingSystemContainer(self.config, enable_visualization=False)
+        container = TradingSystemContainer(self.config)
         
         # Получаем компоненты дважды
         event_bus1 = container.get_event_bus()
@@ -75,7 +78,7 @@ class TestTradingSystemWithDI(unittest.TestCase):
     
     def test_dependencies_injection(self):
         """Тест инжекции зависимостей"""
-        container = TradingSystemContainer(self.config, enable_visualization=False)
+        container = TradingSystemContainer(self.config)
         trading_system = asyncio.run(container.build_trading_system())
         
         dependencies = trading_system['dependencies']
@@ -98,7 +101,10 @@ class TestTradingSystemWithDI(unittest.TestCase):
     
     def test_event_bus_integration(self):
         """Тест интеграции с шиной событий"""
-        container = TradingSystemContainer(self.config, enable_visualization=True)
+        # Создаем конфигурацию с визуализацией
+        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+        config_with_viz.tcs_client = self.config.tcs_client
+        container = TradingSystemContainer(config_with_viz)
         trading_system = asyncio.run(container.build_trading_system())
         
         event_bus = trading_system['event_bus']

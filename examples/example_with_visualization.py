@@ -19,15 +19,17 @@ async def test_with_visualization():
         print("✅ Модули импортированы успешно")
         
         # Создаем конфигурацию
+        from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
         config = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+        config.tcs_client = TinkoffAPIClient('test_token', 'test_account_id')
         print("✅ Конфигурация создана успешно")
         
         # Создаем DI контейнер с визуализацией
-        container = TradingSystemContainer(config, enable_visualization=True)
+        container = TradingSystemContainer(config)
         print("✅ DI контейнер создан успешно")
         
         # Собираем торговую систему
-        trading_system = container.build_trading_system()
+        trading_system = await container.build_trading_system()
         print("✅ Торговая система собрана успешно")
         
         # Проверяем компоненты

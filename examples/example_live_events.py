@@ -23,11 +23,13 @@ async def test_live_events():
     logger.info("🚀 Запуск теста живых событий...")
     
     # Создаем конфигурацию
+    from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
     config = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+    config.tcs_client = TinkoffAPIClient('test_token', 'test_account_id')
     
     # Создаем DI контейнер с визуализацией
-    container = TradingSystemContainer(config, enable_visualization=True)
-    trading_system = container.build_trading_system()
+    container = TradingSystemContainer(config)
+    trading_system = await container.build_trading_system()
     
     logger.info("✅ Торговая система собрана")
     

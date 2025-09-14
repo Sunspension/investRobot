@@ -23,7 +23,7 @@ class TestTradingSystemContainer(unittest.TestCase):
         self.config.tcs_client.id = "test_account_id"
         self.config.tcs_client.sandbox_token = "test_sandbox_token"
         
-        self.container = TradingSystemContainer(self.config, enable_visualization=False)
+        self.container = TradingSystemContainer(self.config)
     
     def test_event_bus_creation(self):
         """Тест создания шины событий"""
@@ -81,7 +81,10 @@ class TestTradingSystemContainer(unittest.TestCase):
     
     def test_visualization_enabled(self):
         """Тест с включенной визуализацией"""
-        container_with_viz = TradingSystemContainer(self.config, enable_visualization=True)
+        # Создаем конфигурацию с визуализацией
+        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+        config_with_viz.tcs_client = self.config.tcs_client
+        container_with_viz = TradingSystemContainer(config_with_viz)
         import asyncio
         trading_system = asyncio.run(container_with_viz.build_trading_system())
         
@@ -91,6 +94,35 @@ class TestTradingSystemContainer(unittest.TestCase):
         # Проверяем, что это не MockEventBus
         from robotlib.trading.event_bus_interface import EventBus
         self.assertIsInstance(trading_system['event_bus'], EventBus)
+    
+    def test_config_validation(self):
+        """Тест валидации конфигурации"""
+        # Тест с пустым FIGI
+        config_empty_figi = TradingConfig(figi="")
+        config_empty_figi.tcs_client = self.config.tcs_client
+        
+        with self.assertRaises(ValueError) as context:
+            TradingSystemContainer(config_empty_figi)
+        self.assertIn("FIGI не может быть пустым", str(context.exception))
+        
+        # Тест без TCS клиента
+        config_no_tcs = TradingConfig(figi="FUTIMOEXF000")
+        
+        with self.assertRaises(ValueError) as context:
+            TradingSystemContainer(config_no_tcs)
+        self.assertIn("TCS клиент не настроен", str(context.exception))
+        
+        # Тест с неполным TCS клиентом
+        config_incomplete_tcs = TradingConfig(figi="FUTIMOEXF000")
+        config_incomplete_tcs.tcs_client = type('MockTCSClient', (), {
+            'token': '',  # Пустой токен
+            'id': 'test_account_id',
+            'sandbox_token': 'test_sandbox_token'
+        })()
+        
+        with self.assertRaises(ValueError) as context:
+            TradingSystemContainer(config_incomplete_tcs)
+        self.assertIn("Токен TCS клиента не настроен", str(context.exception))
 
 
 if __name__ == '__main__':

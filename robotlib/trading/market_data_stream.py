@@ -89,7 +89,8 @@ class MarketDataStream(MarketDataStreamable):
             # Создаем стрим менеджер
             self._stream_manager = await self._api_client.create_market_data_stream()
             
-            if not self._stream_manager:
+            # Проверяем, что стрим менеджер создан
+            if self._stream_manager is None:
                 self._logger.error("Не удалось создать стрим менеджер")
                 return False
             
@@ -120,14 +121,18 @@ class MarketDataStream(MarketDataStreamable):
     
     async def stop(self) -> None:
         """Останавливает стрим рыночных данных"""
+        if not self._is_running:
+            return
+            
         try:
             self._logger.info("Остановка стрима рыночных данных")
             
             self._is_running = False
             
-            if self._stream_manager:
+            if self._stream_manager is not None:
                 try:
-                    await self._stream_manager.stop()
+                    # Просто вызываем stop() синхронно
+                    self._stream_manager.stop()
                 except Exception as e:
                     self._logger.warning(f"Ошибка остановки стрим менеджера: {e}")
                 finally:
@@ -137,6 +142,10 @@ class MarketDataStream(MarketDataStreamable):
             
         except Exception as e:
             self._logger.error(f"Ошибка остановки стрима: {e}")
+    
+    def reset(self) -> None:
+        """Сбрасывает флаг остановки для возможности перезапуска"""
+        self._is_running = False
     
     async def _process_stream(self) -> None:
         """Обрабатывает данные из стрима"""
@@ -200,7 +209,7 @@ class MarketDataStream(MarketDataStreamable):
             figi_info = getattr(candle, 'figi', self._figi)
             self._logger.debug(f"Получена свеча: {candle.time} - {self._current_price} (FIGI: {figi_info})")
             
-            # Публикуем событие свечи
+            # Публикуем событие свечи (для визуализации)
             if self._event_bus:
                 self._logger.info(f"📡 Публикуем событие CANDLE_RECEIVED для {self._figi} @ {self._current_price}")
                 event = TradingEvent(
@@ -211,9 +220,13 @@ class MarketDataStream(MarketDataStreamable):
                         'figi': self._figi
                     }
                 )
-                asyncio.create_task(self._event_bus.publish(event))
-            else:
-                self._logger.warning("❌ EventBus не установлен в MarketDataStream")
+                try:
+                    asyncio.create_task(self._event_bus.publish(event))
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._event_bus.publish(event))
+                    loop.close()
             
             # Вызываем колбэки для свечей
             for callback in self._candle_callbacks:

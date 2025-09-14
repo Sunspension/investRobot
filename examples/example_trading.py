@@ -27,7 +27,7 @@ async def main():
     )
     
     # Создаем DI контейнер
-    container = TradingSystemContainer(config, enable_visualization=False)
+    container = TradingSystemContainer(config)
     trading_system = container.build_trading_system()
     
     logger.info("✅ Торговая система собрана через DI контейнер")

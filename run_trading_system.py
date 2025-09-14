@@ -6,6 +6,8 @@ import asyncio
 import sys
 import os
 import argparse
+import subprocess
+import signal
 from typing import Optional
 
 # Добавляем путь к модулю
@@ -13,15 +15,84 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from robotlib.trading.di_container import TradingSystemContainer
 from robotlib.trading.trading_config import TradingConfig
-from robotlib.trading.event_bus_interface import EventType, TradingEvent
+# EventBus убран из основной системы - используется только для визуализации
 from robotlib.utils.logger import get_logger
+
+
+def stop_previous_processes(port: int = 8050):
+    """Останавливает предыдущие процессы на указанном порту"""
+    logger = get_logger(__name__)
+    
+    try:
+        # Находим все процессы Python
+        result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+        
+        if result.returncode == 0:
+            lines = result.stdout.split('\n')
+            python_pids = []
+            
+            for line in lines:
+                if 'python' in line and 'run_trading_system.py' in line and 'grep' not in line:
+                    parts = line.split()
+                    if len(parts) > 1:
+                        pid = parts[1]
+                        python_pids.append(pid)
+            
+            if python_pids:
+                logger.info(f"🛑 Найдены процессы Python: {python_pids}")
+                
+                for pid in python_pids:
+                    try:
+                        # Отправляем SIGTERM
+                        os.kill(int(pid), signal.SIGTERM)
+                        logger.info(f"✅ Отправлен SIGTERM процессу {pid}")
+                    except ProcessLookupError:
+                        logger.info(f"⚠️ Процесс {pid} уже завершен")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Не удалось остановить процесс {pid}: {e}")
+                
+                # Ждем немного
+                import time
+                time.sleep(2)
+                
+                # Проверяем, остались ли процессы
+                result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    lines = result.stdout.split('\n')
+                    remaining_pids = []
+                    
+                    for line in lines:
+                        if 'python' in line and 'run_trading_system.py' in line and 'grep' not in line:
+                            parts = line.split()
+                            if len(parts) > 1:
+                                pid = parts[1]
+                                remaining_pids.append(pid)
+                    
+                    if remaining_pids:
+                        logger.info(f"💀 Остались процессы: {remaining_pids}, отправляем SIGKILL")
+                        for pid in remaining_pids:
+                            try:
+                                os.kill(int(pid), signal.SIGKILL)
+                                logger.info(f"💀 Отправлен SIGKILL процессу {pid}")
+                            except Exception as e:
+                                logger.warning(f"⚠️ Не удалось убить процесс {pid}: {e}")
+                    else:
+                        logger.info("✅ Все процессы остановлены")
+            else:
+                logger.info("✅ Процессы Python не найдены")
+        else:
+            logger.warning("⚠️ Не удалось получить список процессов")
+            
+    except Exception as e:
+        logger.warning(f"⚠️ Ошибка при остановке процессов: {e}")
 
 
 async def run_trading_system(
     figi: str = "FUTIMOEXF000",
     enable_visualization: bool = True,
     host: str = "127.0.0.1",
-    port: int = 8050
+    port: int = 8050,
+    start_server: bool = True
 ):
     """Запускает торговую систему с указанными параметрами"""
     
@@ -29,9 +100,13 @@ async def run_trading_system(
     logger.info("🚀 Запуск торговой системы")
     logger.info(f"📊 FIGI: {figi}")
     logger.info(f"📈 Визуализация: {'включена' if enable_visualization else 'отключена'}")
+    if enable_visualization:
+        logger.info(f"🌐 Веб-сервер: {'включен' if start_server else 'отключен'}")
     
+    # Останавливаем предыдущие процессы
     if enable_visualization:
         logger.info(f"🌐 Визуализатор будет доступен по адресу: http://{host}:{port}")
+        stop_previous_processes(port)
     
     # Загружаем конфигурацию
     from config_data.config import load_config
@@ -47,57 +122,23 @@ async def run_trading_system(
     trading_config.tcs_client = config.tcs_client
     
     # Создаем DI контейнер
-    container = TradingSystemContainer(trading_config, enable_visualization=enable_visualization)
-    trading_system = await container.build_trading_system(host=host, port=port)
+    container = TradingSystemContainer(trading_config)
+    trading_system = await container.build_trading_system(host=host, port=port, start_server=start_server)
     
     logger.info("✅ Торговая система собрана через DI контейнер")
     logger.info(f"🚌 EventBus: {type(trading_system['event_bus']).__name__}")
     
-    # Запускаем визуализатор (если включен)
-    if trading_system['visualizer']:
+    # Запускаем визуализатор (если включен и сервер нужен)
+    if trading_system['visualizer'] and start_server:
         await trading_system['visualizer'].start()
         logger.info("✅ Dash визуализатор событий запущен")
+    elif trading_system['visualizer']:
+        logger.info("✅ Dash визуализатор готов к запуску (сервер отключен)")
     
-    # Получаем EventBus для настройки обработчиков
-    event_bus = trading_system['event_bus']
+    # EventBus убран из основной системы - используется только для визуализации
+    # Логирование событий теперь происходит напрямую в компонентах
     
-    # Создаем обработчики событий
-    def handle_portfolio_event(event: TradingEvent):
-        total_amount = event.data.get('total_amount', 0)
-        positions_count = event.data.get('positions_count', 0)
-        logger.info(f"📊 Портфель обновлен: {total_amount:.2f} руб, позиций: {positions_count}")
-    
-    def handle_signal_event(event: TradingEvent):
-        signal = event.data.get('signal')
-        if signal:
-            # Определяем тип сигнала по MACD
-            signal_type = "BUY" if signal.histogram > 0 else "SELL" if signal.histogram < 0 else "NEUTRAL"
-            strength = abs(signal.histogram) if signal.histogram else 0
-            logger.info(f"📈 Сигнал сгенерирован: {signal_type} (сила: {strength:.4f})")
-    
-    def handle_order_event(event: TradingEvent):
-        order_id = event.data.get('order_id', 'unknown')
-        event_type = event.event_type.value
-        logger.info(f"📋 Ордер {event_type}: {order_id}")
-    
-    def handle_candle_event(event: TradingEvent):
-        price = event.data.get('price', 0)
-        figi = event.data.get('figi', 'unknown')
-        logger.info(f"🕯️ Получена свеча: {figi} @ {price}")
-    
-    # Подписываемся на события
-    event_bus.subscribe(EventType.PORTFOLIO_UPDATED, handle_portfolio_event)
-    event_bus.subscribe(EventType.SIGNAL_GENERATED, handle_signal_event)
-    event_bus.subscribe(EventType.ORDER_PLACED, handle_order_event)
-    event_bus.subscribe(EventType.ORDER_FILLED, handle_order_event)
-    event_bus.subscribe(EventType.CANDLE_RECEIVED, handle_candle_event)
-    
-    logger.info("👥 Подписались на события торговой системы")
-    
-    # Подписываем SignalManager на события свечей
-    signal_manager = trading_system['dependencies'].signal_manager
-    signal_manager.subscribe_to_events()
-    logger.info("📊 SignalManager подписан на события свечей")
+    # SignalManager больше не подписывается на события - работает напрямую
     
     # Получаем SessionController
     session_controller = trading_system['session_controller']
@@ -152,6 +193,11 @@ def main():
         default=8050, 
         help="Порт для визуализатора (по умолчанию: 8050)"
     )
+    parser.add_argument(
+        "--no-server", 
+        action="store_true", 
+        help="Не запускать веб-сервер визуализатора (только для тестирования)"
+    )
     
     args = parser.parse_args()
     
@@ -160,7 +206,8 @@ def main():
         figi=args.figi,
         enable_visualization=not args.no_visualization,
         host=args.host,
-        port=args.port
+        port=args.port,
+        start_server=not args.no_server
     ))
 
 

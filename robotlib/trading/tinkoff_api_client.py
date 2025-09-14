@@ -472,7 +472,8 @@ class TinkoffAPIClient:
             return self.services.create_market_data_stream()
         except Exception as e:
             self.logger.error(f"Ошибка создания стрима рыночных данных: {e}")
-            return None
+            # Не возвращаем None - это ошибка на уровне сборки
+            raise RuntimeError(f"Не удалось создать стрим рыночных данных: {e}")
     
     async def get_futures_margin(self, figi: str) -> Optional[dict]:
         """
