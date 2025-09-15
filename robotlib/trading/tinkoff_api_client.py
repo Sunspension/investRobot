@@ -442,7 +442,7 @@ class TinkoffAPIClient:
         """Получает свечи"""
         try:
             self.logger.info(f"🔍 Запрос свечей: FIGI={figi}, from={from_date}, to={to_date}, interval={interval}")
-            self.logger.info(f"🔍 API client ready: {self.client is not None}, services: {self.services is not None}")
+            self.logger.info(f"🔍 API клиент готов: client={self.client is not None}, services={self.services is not None}")
             
             if not self.client or not self.services:
                 self.logger.error("❌ API client не инициализирован")

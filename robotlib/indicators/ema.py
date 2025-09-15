@@ -17,7 +17,7 @@ class IncrementalEMA:
         period: int,
     ) -> None:
         if period <= 0:
-            raise ValueError("period must be positive")
+            raise ValueError("период должен быть положительным")
         self._period = period
         self._alpha = 2.0 / (period + 1.0)
         self._ema: Optional[float] = None

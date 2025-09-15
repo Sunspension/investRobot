@@ -19,10 +19,10 @@ class IncrementalMACD:
         signal_period: int = 9,
     ) -> None:
         if fast_period <= 0 or slow_period <= 0 or signal_period <= 0:
-            raise ValueError("periods must be positive")
+            raise ValueError("периоды должны быть положительными")
         if fast_period >= slow_period:
-            # Conventional MACD requires fast < slow
-            raise ValueError("fast_period must be less than slow_period")
+            # Классический MACD требует fast < slow
+            raise ValueError("fast_period должен быть меньше slow_period")
         self._ema_fast = IncrementalEMA(fast_period)
         self._ema_slow = IncrementalEMA(slow_period)
         self._ema_signal = IncrementalEMA(signal_period)

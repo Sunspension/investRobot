@@ -15,7 +15,7 @@ class IncrementalATR:
         period: int = 14,
     ) -> None:
         if period <= 0:
-            raise ValueError("period must be positive")
+            raise ValueError("период должен быть положительным")
         self._period = period
         self._prev_close: Optional[float] = None
         self._atr: Optional[float] = None
