@@ -7,16 +7,16 @@ from tinkoff.invest import Candle, HistoricCandle
 
 from robotlib.utils.logger import get_logger
 from robotlib.utils.sql_schema import init_db
-from robotlib.utils.sql_repository import DBCandle, upsert_candles
+from robotlib.utils.sql_repository import DBCandle, upsert_candles, insert_orders
 from visualization.event_visualizer_interface import VisualizationSinkable
 
 
 class DBIngestionSink(VisualizationSinkable):
-    """Visualization sink that persists candles into SQLite in the background.
+    """Приёмник визуализации, сохраняющий свечи в SQLite в фоне.
 
-    Designed to be injected into `MarketDataStream` so that both historical
-    warm-up candles and live stream candles are stored independently of the
-    trading system/strategies.
+    Предполагается инжектировать в `MarketDataStream`, чтобы исторические
+    (разогревочные) и живые свечи сохранялись независимо от торговой
+    логики/стратегий.
     """
 
     def __init__(
@@ -41,12 +41,12 @@ class DBIngestionSink(VisualizationSinkable):
     async def _ensure_started(self) -> None:
         if self._started:
             return
-        # Initialize DB schema and start background worker once
+        # Инициализируем схему БД и запускаем фонового рабочего один раз
         await init_db(self._db_path)
         self._worker_task = asyncio.create_task(self._worker(), name="db_ingestion_sink_worker")
         self._started = True
         self._logger.info(
-            f"DBIngestionSink started: db_path={self._db_path}, figi={self._figi}, "
+            f"DBIngestionSink запущен: db_path={self._db_path}, figi={self._figi}, "
             f"batch_size={self._batch_size}, flush_interval_sec={self._flush_interval_sec}"
         )
 
@@ -61,46 +61,55 @@ class DBIngestionSink(VisualizationSinkable):
                     buffer.append(item)
                     if len(buffer) >= self._batch_size:
                         await upsert_candles(self._db_path, buffer)
-                        self._logger.debug(f"Flushed {len(buffer)} candles to DB")
+                        self._logger.debug(f"Сброшено {len(buffer)} свечей в БД")
                         buffer.clear()
                 except asyncio.TimeoutError:
                     if buffer:
                         await upsert_candles(self._db_path, buffer)
-                        self._logger.debug(f"Flushed {len(buffer)} candles to DB (timeout)")
+                        self._logger.debug(f"Сброшено {len(buffer)} свечей в БД (таймаут)")
                         buffer.clear()
                     continue
                 except Exception as e:
-                    self._logger.error(f"DBIngestionSink worker error: {e}")
+                    self._logger.error(f"Ошибка фонового сохранения в DBIngestionSink: {e}")
         finally:
             if buffer:
                 try:
                     await upsert_candles(self._db_path, buffer)
-                    self._logger.debug(f"Flushed {len(buffer)} candles to DB (final)")
+                    self._logger.debug(f"Сброшено {len(buffer)} свечей в БД (финальный сброс)")
                 except Exception as e:
-                    self._logger.error(f"DBIngestionSink final flush error: {e}")
-            self._logger.info("DBIngestionSink worker stopped")
+                    self._logger.error(f"Ошибка финального сброса DBIngestionSink: {e}")
+            self._logger.info("Фоновый рабочий DBIngestionSink остановлен")
 
     async def on_candle(self, candle: Any, price: float, figi: str) -> None:
-        # Lazily start background worker and DB initialization
+        # Ленивый запуск фонового рабочего и инициализация БД
         await self._ensure_started()
 
-        # Only store candles for the configured FIGI (ignore others if any)
+        # Сохраняем свечи только для сконфигурированного FIGI (если приходит другой — игнорируем)
         figi_to_store = figi or self._figi
 
         try:
             db_candle = DBCandle.from_candle(figi_to_store, candle)  # type: ignore[arg-type]
-            # Non-blocking put with backpressure if queue grows
+            # Неблокирующая постановка в очередь; при росте очереди работает backpressure
             await self._queue.put(db_candle)
         except Exception as e:
-            self._logger.warning(f"Failed to enqueue candle for DB write: {e}")
+            self._logger.warning(f"Не удалось поставить свечу в очередь для записи в БД: {e}")
 
     async def on_signal(self, signal: Any, figi: str, price: float) -> None:
-        # Signals are not persisted by this sink
+        # Сигналы этим приёмником не сохраняются
         return
 
     async def on_market_status(self, status: dict) -> None:
-        # Market status is not persisted by this sink (could be added later)
+        # Статус рынка этим приёмником не сохраняется (можно добавить позже)
         return
+
+    async def on_order(self, order: dict) -> None:
+        """Опционально сохранить исполненные ордера, если переданы."""
+        try:
+            # Гарантируем наличие схемы даже если рабочий со свечами ещё не стартовал
+            await init_db(self._db_path)
+            await insert_orders(self._db_path, [order])
+        except Exception as e:
+            self._logger.warning(f"Не удалось сохранить ордер: {e}")
 
     async def close(self) -> None:
         if self._closed:

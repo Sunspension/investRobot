@@ -1,6 +1,7 @@
-"""Incremental indicator interfaces.
+"""Интерфейсы инкрементальных индикаторов.
 
-Designed for O(1) per-tick updates and minimal state, to be portable to Go.
+Ориентированы на O(1) обновление на тик и минимальное состояние; легко
+переносимы на Go.
 """
 
 from __future__ import annotations
@@ -11,13 +12,13 @@ from typing import Any, Optional, Protocol, runtime_checkable
 
 @runtime_checkable
 class Indicator(Protocol):
-    """Common protocol for incremental indicators.
+    """Общий протокол для инкрементальных индикаторов.
 
-    Implementations should keep minimal internal state and provide:
-    - update(...): process a new tick and optionally return the current value
-    - current(): return the last computed value (or None if not warmed up)
-    - is_warm(): whether the indicator has enough data for stable output
-    - reset(): clear internal state
+    Реализации держат минимальное состояние и предоставляют методы:
+    - update(...): обработка тика и возврат текущего значения (или None до разогрева)
+    - current(): последнее значение (или None)
+    - is_warm(): индикатор разогрет и стабилен
+    - reset(): очистка состояния
     """
 
     def update(self, *args: Any, **kwargs: Any) -> Optional[Any]:

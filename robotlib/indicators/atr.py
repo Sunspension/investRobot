@@ -4,10 +4,10 @@ from typing import Optional
 
 
 class IncrementalATR:
-    """Incremental ATR using Wilder's smoothing.
+    """Инкрементальный ATR с сглаживанием Уайлдера.
 
-    Warm-up: accumulate TR for 'period' bars to seed ATR with SMA(TR).
-    Thereafter: ATR_t = (ATR_{t-1} * (period - 1) + TR_t) / period
+    Разогрев: аккумулирует TR за 'period' баров для начального ATR как SMA(TR).
+    Далее: ATR_t = (ATR_{t-1} * (period - 1) + TR_t) / period
     """
 
     def __init__(

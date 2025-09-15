@@ -4,6 +4,7 @@
 
 from typing import Optional
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
+from robotlib.ingestion.db_sink import DBIngestionSink
 from robotlib.trading.events import EventType, TradingEvent
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
@@ -16,7 +17,7 @@ import uuid
 class OrderExecutor:
     """Класс для выполнения торговых приказов"""
     
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[object] = None):
+    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[object] = None, order_sink: Optional[DBIngestionSink] = None):
         """
         Инициализация исполнителя приказов
         
@@ -26,6 +27,7 @@ class OrderExecutor:
         """
         self.api_client = api_client
         self._event_bus = None
+        self._order_sink = order_sink
         self.logger = get_logger(__name__)
     
     async def check_market_availability(self) -> bool:
@@ -70,10 +72,22 @@ class OrderExecutor:
             # Публикуем событие размещения ордера (для визуализации)
             
             
-            # Если ордер исполнен, публикуем событие исполнения
-            if result.success and execution.status == OrderStatus.FILLED:
-                
-                pass
+            # Если ордер исполнен, записываем в БД (если sink задан)
+            if result.success and execution.status == OrderStatus.FILLED and self._order_sink is not None:
+                try:
+                    order_record = {
+                        'order_id': execution.order_id,
+                        'figi': order_intent.figi,
+                        'time': execution.timestamp,
+                        'type': 'buy' if order_intent.direction.name.lower() == 'buy' else 'sell',
+                        'price': execution.price or 0.0,
+                        'quantity': execution.filled_quantity or order_intent.quantity,
+                        'status': 'filled',
+                        'strategy': getattr(order_intent, 'strategy', None),
+                    }
+                    await self._order_sink.on_order(order_record)
+                except Exception as persist_err:
+                    self.logger.warning(f"Не удалось сохранить исполненный ордер: {persist_err}")
             
             self.logger.info(f"Ордер выполнен: {execution}")
             return execution

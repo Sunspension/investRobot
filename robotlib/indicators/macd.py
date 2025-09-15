@@ -7,9 +7,9 @@ from .ema import IncrementalEMA
 
 
 class IncrementalMACD:
-    """Incremental MACD with signal EMA and histogram.
+    """Инкрементальный MACD с сигнальной EMA и гистограммой.
 
-    Returns None until both price EMAs and the signal EMA are warmed up.
+    Возвращает None до разогрева обеих EMA цены и сигнальной EMA.
     """
 
     def __init__(

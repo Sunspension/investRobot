@@ -45,7 +45,7 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
 
         started = await stream.start()
         if not started:
-            logger.error("Failed to start MarketDataStream for ingestor")
+            logger.error("Не удалось запустить MarketDataStream для инжестора")
             return
 
         # Optional timeout for controlled runs

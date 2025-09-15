@@ -46,6 +46,7 @@ from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from visualization.dash_event_visualizer import DashEventVisualizer
 from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.ingestion.db_sink import DBIngestionSink
 
 
 class TradingSystemContainer:
@@ -127,10 +128,22 @@ class TradingSystemContainer:
         if 'order_executor' not in self._instances:
             # Используем единый API клиент
             api_client = await self.get_api_client()
+            # Создаём sink для сохранения ордеров (в ту же БД, что и свечи визуализатора при желании)
+            order_sink: DBIngestionSink | None = None
+            try:
+                order_sink = DBIngestionSink(
+                    db_path="data/market.db",
+                    figi=self._config.figi,
+                    batch_size=200,
+                    flush_interval_sec=1.0,
+                )
+            except Exception:
+                order_sink = None
             
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
-                event_bus=None
+                event_bus=None,
+                order_sink=order_sink
             )
         return self._instances['order_executor']
     

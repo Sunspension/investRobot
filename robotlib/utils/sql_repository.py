@@ -3,7 +3,7 @@ from __future__ import annotations
 import aiosqlite
 from dataclasses import dataclass
 from datetime import datetime
-from typing import AsyncIterator, Iterable
+from typing import AsyncIterator, Iterable, List, Dict, Any
 
 from tinkoff.invest import Candle, HistoricCandle
 from robotlib.utils.money import Money
@@ -58,6 +58,69 @@ async def upsert_candles(db_path: str, candles: Iterable[DBCandle]) -> None:
         )
         await conn.commit()
 
+
+async def insert_orders(db_path: str, orders: List[Dict[str, Any]]) -> None:
+    """Вставляет список исполненных ордеров.
+    Ожидаемые поля: order_id (optional), figi, time (datetime), type, price, quantity, status, strategy(optional)
+    """
+    if not orders:
+        return
+    sql = (
+        "INSERT OR IGNORE INTO orders (order_id, figi, time, type, price, quantity, status, strategy) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.executemany(
+            sql,
+            [
+                (
+                    o.get("order_id"),
+                    o["figi"],
+                    (o["time"].isoformat() if isinstance(o["time"], datetime) else str(o["time"])),
+                    o["type"],
+                    float(o["price"]),
+                    int(o.get("quantity", 1)),
+                    o.get("status", "filled"),
+                    o.get("strategy"),
+                )
+                for o in orders
+            ],
+        )
+        await conn.commit()
+
+
+async def load_orders(
+    db_path: str,
+    figi: str,
+    from_time: datetime,
+    to_time: datetime | None = None,
+) -> List[Dict[str, Any]]:
+    to_clause = ""
+    params: list = [figi, from_time.isoformat()]
+    if to_time is not None:
+        to_clause = " AND time < ?"
+        params.append(to_time.isoformat())
+
+    sql = (
+        "SELECT order_id, figi, time, type, price, quantity, status, strategy "
+        "FROM orders WHERE figi = ? AND time >= ?" + to_clause + " ORDER BY time ASC"
+    )
+    rows: List[Dict[str, Any]] = []
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        async with conn.execute(sql, params) as cursor:
+            async for row in cursor:
+                rows.append({
+                    "order_id": row["order_id"],
+                    "figi": row["figi"],
+                    "time": datetime.fromisoformat(row["time"]),
+                    "type": row["type"],
+                    "price": row["price"],
+                    "quantity": row["quantity"],
+                    "status": row["status"],
+                    "strategy": row["strategy"],
+                })
+    return rows
 
 async def iter_candles(
     db_path: str,

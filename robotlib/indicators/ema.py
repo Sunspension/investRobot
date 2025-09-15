@@ -4,12 +4,12 @@ from typing import Optional
 
 
 class IncrementalEMA:
-    """Incremental EMA with SMA seeding.
+    """Инкрементальная EMA с инициализацией через SMA.
 
-    - period: lookback length n
+    - period: длина окна n
     - alpha: 2/(n+1)
-    - Warm-up: returns None until n samples are collected; initial EMA is
-      seeded by SMA(n), then classic EMA recurrence is applied.
+    - Разогрев: возвращает None до накопления n значений; начальная EMA
+      инициализируется SMA(n), далее используется стандартная рекуррентная формула EMA.
     """
 
     def __init__(
