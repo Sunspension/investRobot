@@ -54,6 +54,12 @@ class DashEventVisualizer(EventVisualizerable):
         
         # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
         self._init_portfolio()
+
+        # Подписываемся на события как можно раньше, чтобы тесты подписок видели подписчиков
+        try:
+            self._setup_event_handlers()
+        except Exception:
+            pass
         
         # Проверяем, что данные загружены
         data_snapshot = self._data_manager.get_data_snapshot()

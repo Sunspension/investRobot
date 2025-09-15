@@ -17,6 +17,38 @@ from robotlib.trading.event_bus_interface import EventBusable, EventType, Tradin
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
 
 
+class TinkoffStreamAdapter:
+    """
+    Адаптер для AsyncMarketDataStreamManager - убирает путаницу с названиями
+    
+    Проблема: AsyncMarketDataStreamManager из библиотеки Tinkoff имеет вводящее в заблуждение
+    название - не все его методы асинхронные. Например, stop() и subscribe() - синхронные.
+    
+    Решение: Создаем адаптер с понятными названиями методов, которые четко указывают
+    на их синхронную/асинхронную природу.
+    """
+    
+    def __init__(self, stream_manager: AsyncMarketDataStreamManager):
+        self._stream_manager = stream_manager
+        self._logger = get_logger(__name__)
+    
+    def subscribe(self, request) -> None:
+        """Подписывается на данные (синхронный метод)"""
+        self._stream_manager.subscribe(request)
+    
+    def stop(self) -> None:
+        """Останавливает стрим (синхронный метод)"""
+        self._stream_manager.stop()
+    
+    def __aiter__(self):
+        """Асинхронный итератор для получения данных"""
+        return self._stream_manager.__aiter__()
+    
+    def __iter__(self):
+        """Синхронный итератор для получения данных"""
+        return self._stream_manager.__iter__()
+
+
 class MarketDataStream(MarketDataStreamable):
     """Класс для управления стримом рыночных данных"""
     
@@ -47,7 +79,7 @@ class MarketDataStream(MarketDataStreamable):
         self._candle_callbacks: List[Callable[[Candle], None]] = []
         self._signal_callbacks: List[Callable] = []
         
-        self._stream_manager: Optional[AsyncMarketDataStreamManager] = None
+        self._stream_adapter: Optional[TinkoffStreamAdapter] = None
         self._is_running = False
         self._current_price: Optional[float] = None
     
@@ -87,12 +119,15 @@ class MarketDataStream(MarketDataStreamable):
                 return False
             
             # Создаем стрим менеджер
-            self._stream_manager = await self._api_client.create_market_data_stream()
+            raw_stream_manager = await self._api_client.create_market_data_stream()
             
             # Проверяем, что стрим менеджер создан
-            if self._stream_manager is None:
+            if raw_stream_manager is None:
                 self._logger.error("Не удалось создать стрим менеджер")
                 return False
+            
+            # Создаем адаптер для убирания путаницы с названиями
+            self._stream_adapter = TinkoffStreamAdapter(raw_stream_manager)
             
             # Проверяем статус рынка
             market_hours = await get_tinkoff_market_hours()
@@ -115,7 +150,7 @@ class MarketDataStream(MarketDataStreamable):
             
             if market_status.get('is_trading', False):
                 # Рынок открыт - подписываемся на реальные данные
-                # Современный AsyncMarketDataStreamManager использует метод subscribe()
+                # Используем адаптер для убирания путаницы с названиями
                 try:
                     from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
                     request = MarketDataRequest(
@@ -130,7 +165,7 @@ class MarketDataStream(MarketDataStreamable):
                         )
                     )
                     # subscribe() синхронный
-                    self._stream_manager.subscribe(request)
+                    self._stream_adapter.subscribe(request)
                     self._logger.info("Подписка на реальные данные через MarketDataRequest успешна")
                 except Exception as e:
                     self._logger.error(f"Ошибка подписки на реальные данные: {e}")
@@ -167,14 +202,14 @@ class MarketDataStream(MarketDataStreamable):
             
             self._is_running = False
             
-            if self._stream_manager is not None:
+            if self._stream_adapter is not None:
                 try:
                     # Просто вызываем stop() синхронно
-                    self._stream_manager.stop()
+                    self._stream_adapter.stop()
                 except Exception as e:
-                    self._logger.warning(f"Ошибка остановки стрим менеджера: {e}")
+                    self._logger.warning(f"Ошибка остановки стрим адаптера: {e}")
                 finally:
-                    self._stream_manager = None
+                    self._stream_adapter = None
             
             self._logger.info("Стрим рыночных данных остановлен")
             
@@ -188,10 +223,10 @@ class MarketDataStream(MarketDataStreamable):
     async def _process_stream(self) -> None:
         """Обрабатывает данные из стрима"""
         try:
-            while self._is_running and self._stream_manager:
+            while self._is_running and self._stream_adapter:
                 try:
                     # Получаем данные из стрима
-                    async for market_data in self._stream_manager:
+                    async for market_data in self._stream_adapter:
                         if not self._is_running:
                             break
                         

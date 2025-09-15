@@ -165,13 +165,11 @@ class SignalManager:
                 }
             )
             try:
-                # Пытаемся создать задачу, если event loop активен
-                asyncio.create_task(self._event_bus.publish(signal_event))
+                # Если есть запущенный event loop, создаем задачу
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._event_bus.publish(signal_event))
             except RuntimeError:
-                # Если event loop не активен, публикуем синхронно
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._event_bus.publish(signal_event))
-                loop.close()
+                # Нет активного event loop — выполняем синхронно без оставления не-await'нутых корутин
+                asyncio.run(self._event_bus.publish(signal_event))
         
         return signal
