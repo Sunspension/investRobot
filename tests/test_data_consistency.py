@@ -10,7 +10,20 @@ from datetime import datetime, timedelta
 from unittest.mock import Mock, AsyncMock
 from typing import Dict, Any, List
 
-from robotlib.trading.event_bus_interface import EventBus, TradingEvent, EventType
+class EventBus:
+    def __init__(self):
+        self._subs = {}
+
+    def subscribe(self, event_type, handler):
+        self._subs.setdefault(event_type, []).append(handler)
+
+    async def publish(self, event):
+        for h in self._subs.get(event.event_type, []):
+            if asyncio.iscoroutinefunction(h):
+                await h(event)
+            else:
+                h(event)
+from robotlib.trading.events import TradingEvent, EventType
 from robotlib.trading.interfaces import TradingDependencies
 from robotlib.signal_manager import SignalManager, Signal
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
@@ -250,11 +263,10 @@ class TestDataConsistency:
         
         mock_api_client.get_candles.return_value = mock_response
         
-        # Создаем MarketDataStream
+        # Создаем MarketDataStream (без event_bus)
         market_stream = MarketDataStream(
             api_client=mock_api_client,
-            figi="TEST_FIGI",
-            event_bus=event_bus
+            figi="TEST_FIGI"
         )
         
         # Проверяем, что данные корректно обрабатываются
@@ -391,11 +403,10 @@ class TestDataConsistency:
         
         mock_api_client.get_candles.return_value = mock_response
         
-        # Создаем MarketDataStream
+        # Создаем MarketDataStream (без event_bus)
         market_stream = MarketDataStream(
             api_client=mock_api_client,
-            figi="TEST_FIGI",
-            event_bus=event_bus
+            figi="TEST_FIGI"
         )
         
         # Загружаем исторические данные

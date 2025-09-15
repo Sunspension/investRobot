@@ -21,7 +21,10 @@ from robotlib.trading.market_data_stream import MarketDataStream
 from robotlib.trading.session_stats import SessionStats
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.utils.money import Money
-from robotlib.trading.event_bus_interface import EventBus, TradingEvent, EventType
+from robotlib.trading.events import TradingEvent, EventType
+
+class EventBus:
+    ...
 from visualization.data_manager import DataManager
 
 

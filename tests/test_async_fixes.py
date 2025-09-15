@@ -16,9 +16,8 @@ from robotlib.signal_manager import SignalManager
 def market_data_stream():
     """Фикстура для MarketDataStream"""
     api_client = Mock()
-    signal_manager = Mock(spec=SignalManager)
     figi = "FUTIMOEXF000"
-    return MarketDataStream(api_client, signal_manager, figi)
+    return MarketDataStream(api_client, figi)
 
 
 @pytest.mark.asyncio

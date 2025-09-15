@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 from robotlib.utils.money import Money
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
@@ -42,7 +42,7 @@ class Portfolio:
 class PortfolioManager:
     """Класс для управления портфелем и позициями"""
     
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[EventBusable] = None):
+    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[object] = None):
         """
         Инициализация менеджера портфеля
         
@@ -51,7 +51,7 @@ class PortfolioManager:
             event_bus: Шина событий для публикации событий (только для визуализации)
         """
         self._api_client = api_client
-        self._event_bus = event_bus
+        self._event_bus = None
         self.logger = get_logger(__name__)
         
         # Кэш позиций
@@ -143,28 +143,7 @@ class PortfolioManager:
                 f"позиций: {len(positions)}"
             )
             
-            # Публикуем событие обновления портфеля (для визуализации)
-            if self._event_bus:
-                event = TradingEvent(
-                    EventType.PORTFOLIO_UPDATED,
-                    {
-                        'portfolio': portfolio,
-                        'total_amount': total_amount,
-                        'available_amount': portfolio.available_amount,
-                        'positions_count': len(positions),
-                        'variation_margin': variation_margin,
-                        'guarantee_deposit': guarantee_deposit_total,
-                        'pnl': total_pnl
-                    }
-                )
-                try:
-                    asyncio.create_task(self._event_bus.publish(event))
-                except RuntimeError:
-                    # Если event loop не активен, публикуем синхронно
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(self._event_bus.publish(event))
-                    loop.close()
+            # EventBus удален: обновление портфеля не транслируется через шину
             
             return portfolio
             

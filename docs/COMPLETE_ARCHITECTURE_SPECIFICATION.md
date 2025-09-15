@@ -66,7 +66,9 @@ class TradingSystemContainer:
 
 **Файл:** `robotlib/trading/event_bus_interface.py`
 
-**Назначение:** Центральная шина для обмена событиями между компонентами.
+**Назначение:** В текущей версии ядро не использует центральную шину для основного потока.
+EventBus сохранён для изолированных сценариев и тестовой совместимости. Основной UI-поток
+реализован через прямые вызовы `VisualizationSinkable`.
 
 **Интерфейс:**
 ```python
@@ -101,8 +103,7 @@ class TradingEvent:
 ```
 
 **Реализации:**
-- `EventBus` - реальная реализация для продакшна
-- `MockEventBus` - мок для тестирования
+Удалён общий `EventBus`; для визуализации используется прямой sink-интерфейс (on_candle/on_signal/on_market_status). Для обратной совместимости в DI возвращается простая заглушка с методами `subscribe`/`publish`.
 
 ### 3. SignalManager (Менеджер сигналов)
 
@@ -398,7 +399,7 @@ class DashEventVisualizer:
     async def start(self) -> None
     async def stop(self) -> None
     def _create_dash_app(self) -> Dash
-    def _setup_event_handlers(self) -> None
+    # Подписки через EventBus удалены; используется прямой sink (on_candle/on_signal/on_market_status)
     def _run_server(self) -> None
 ```
 
@@ -778,7 +779,7 @@ if __name__ == "__main__":
 ### 2. Работа с EventBus
 
 ```python
-from robotlib.trading.event_bus_interface import EventBus, EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 
 # Создание шины событий
 event_bus = EventBus()
@@ -807,7 +808,7 @@ await event_bus.publish(candle_event)
 
 ```python
 from robotlib.signal_manager import SignalManager
-from robotlib.trading.event_bus_interface import EventBus
+# EventBus устарел для основного потока; примеры ниже используют прямой sink
 
 # Создание менеджера сигналов
 signal_manager = SignalManager(

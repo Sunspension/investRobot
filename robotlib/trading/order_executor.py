@@ -4,7 +4,7 @@
 
 from typing import Optional
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
@@ -16,7 +16,7 @@ import uuid
 class OrderExecutor:
     """Класс для выполнения торговых приказов"""
     
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[EventBusable] = None):
+    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[object] = None):
         """
         Инициализация исполнителя приказов
         
@@ -25,7 +25,7 @@ class OrderExecutor:
             event_bus: Шина событий для публикации событий (только для визуализации)
         """
         self.api_client = api_client
-        self._event_bus = event_bus
+        self._event_bus = None
         self.logger = get_logger(__name__)
     
     async def check_market_availability(self) -> bool:
@@ -68,44 +68,12 @@ class OrderExecutor:
             )
             
             # Публикуем событие размещения ордера (для визуализации)
-            if self._event_bus:
-                placed_event = TradingEvent(
-                    EventType.ORDER_PLACED,
-                    {
-                        'order_id': order_id,
-                        'order_intent': order_intent,
-                        'execution': execution,
-                        'result': result
-                    }
-                )
-                try:
-                    asyncio.create_task(self._event_bus.publish(placed_event))
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(self._event_bus.publish(placed_event))
-                    loop.close()
+            # EventBus удален: заказы можно позже отправлять в отдельный sink, если потребуется
             
             # Если ордер исполнен, публикуем событие исполнения
             if result.success and execution.status == OrderStatus.FILLED:
-                if self._event_bus:
-                    filled_event = TradingEvent(
-                        EventType.ORDER_FILLED,
-                        {
-                            'order_id': order_id,
-                            'execution': execution,
-                            'executed_price': result.executed_price,
-                            'executed_quantity': result.executed_quantity,
-                            'commission': result.commission or 0.0
-                        }
-                    )
-                    try:
-                        asyncio.create_task(self._event_bus.publish(filled_event))
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-                        loop.run_until_complete(self._event_bus.publish(filled_event))
-                        loop.close()
+                # EventBus удален: события ордеров не транслируются
+                pass
             
             self.logger.info(f"Ордер выполнен: {execution}")
             return execution

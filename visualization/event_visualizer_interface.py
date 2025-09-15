@@ -3,7 +3,7 @@
 """
 from abc import ABC, abstractmethod
 from typing import List, Protocol, Dict, Any, runtime_checkable
-from robotlib.trading.event_bus_interface import EventBusable, TradingEvent, EventType
+from robotlib.trading.events import TradingEvent, EventType
 
 
 class EventVisualizerable(ABC):
@@ -72,21 +72,11 @@ class VisualizationSinkable(Protocol):
 class EventVisualizer(EventVisualizerable):
     """Базовый визуализатор событий"""
     
-    def __init__(self, event_bus: EventBusable):
-        self._event_bus = event_bus
+    def __init__(self, event_bus):
+        self._event_bus = None
         self._running = False
-        self._setup_event_handlers()
     
-    def _setup_event_handlers(self) -> None:
-        """Настраивает обработчики событий"""
-        self._event_bus.subscribe(EventType.CANDLE_RECEIVED, self.handle_candle_event)
-        self._event_bus.subscribe(EventType.SIGNAL_GENERATED, self.handle_signal_event)
-        self._event_bus.subscribe(EventType.ORDER_PLACED, self.handle_order_event)
-        self._event_bus.subscribe(EventType.ORDER_FILLED, self.handle_order_event)
-        self._event_bus.subscribe(EventType.POSITION_OPENED, self.handle_position_event)
-        self._event_bus.subscribe(EventType.POSITION_CLOSED, self.handle_position_event)
-        self._event_bus.subscribe(EventType.PORTFOLIO_UPDATED, self.handle_portfolio_event)
-        self._event_bus.subscribe(EventType.MARKET_STATUS_CHANGED, self.handle_market_status_event)
+    # EventBus подписки удалены
     
     async def start(self) -> None:
         """Запускает визуализатор"""
@@ -128,22 +118,12 @@ class EventVisualizer(EventVisualizerable):
 class MockEventVisualizer(EventVisualizerable):
     """Мок визуализатора событий для тестирования"""
     
-    def __init__(self, event_bus: EventBusable):
-        self._event_bus = event_bus
+    def __init__(self, event_bus):
+        self._event_bus = None
         self._running = False
         self._handled_events: List[TradingEvent] = []
-        self._setup_event_handlers()
     
-    def _setup_event_handlers(self) -> None:
-        """Настраивает обработчики событий"""
-        self._event_bus.subscribe(EventType.CANDLE_RECEIVED, self.handle_candle_event)
-        self._event_bus.subscribe(EventType.SIGNAL_GENERATED, self.handle_signal_event)
-        self._event_bus.subscribe(EventType.ORDER_PLACED, self.handle_order_event)
-        self._event_bus.subscribe(EventType.ORDER_FILLED, self.handle_order_event)
-        self._event_bus.subscribe(EventType.POSITION_OPENED, self.handle_position_event)
-        self._event_bus.subscribe(EventType.POSITION_CLOSED, self.handle_position_event)
-        self._event_bus.subscribe(EventType.PORTFOLIO_UPDATED, self.handle_portfolio_event)
-        self._event_bus.subscribe(EventType.MARKET_STATUS_CHANGED, self.handle_market_status_event)
+    # EventBus подписки удалены
     
     async def start(self) -> None:
         self._running = True

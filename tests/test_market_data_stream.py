@@ -27,7 +27,7 @@ def signal_manager():
 @pytest.fixture
 def market_data_stream(api_client, signal_manager):
     """Фикстура для MarketDataStream"""
-    return MarketDataStream(api_client, signal_manager, "FUTIMOEXF000")
+    return MarketDataStream(api_client, "FUTIMOEXF000")
 
 
 class TestMarketDataStreamPytest:

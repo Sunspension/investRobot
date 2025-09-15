@@ -13,7 +13,7 @@ from tinkoff.invest.market_data_stream.async_market_data_stream_manager import A
 from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
-from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
 from visualization.event_visualizer_interface import VisualizationSinkable
 
@@ -56,7 +56,6 @@ class MarketDataStream(MarketDataStreamable):
     def __init__(
         self, 
         api_client: TinkoffAPIClientable, 
-        event_bus: EventBusable,
         figi: str = "FUTIMOEXF000",
         cache_size: int = 100
     ):
@@ -70,7 +69,6 @@ class MarketDataStream(MarketDataStreamable):
             cache_size: Размер кэша для хранения свечей
         """
         self._api_client = api_client
-        self._event_bus = event_bus
         self._figi = figi
         self._cache_size = cache_size
         
@@ -148,9 +146,6 @@ class MarketDataStream(MarketDataStreamable):
                 }
                 if self._sink is not None:
                     asyncio.create_task(self._sink.on_market_status(status_payload))
-                else:
-                    event = TradingEvent(EventType.MARKET_STATUS_CHANGED, data=status_payload)
-                    asyncio.create_task(self._event_bus.publish(event))
                 self._logger.info(f"Опубликован статус рынка: is_trading={market_status.get('is_trading', False)}")
             except Exception as publish_error:
                 self._logger.warning(f"Не удалось опубликовать статус рынка: {publish_error}")
@@ -293,17 +288,6 @@ class MarketDataStream(MarketDataStreamable):
             try:
                 if self._sink is not None:
                     asyncio.create_task(self._sink.on_candle(candle, self._current_price or 0.0, self._figi))
-                elif self._event_bus:
-                    self._logger.info(f"📡 Публикуем событие CANDLE_RECEIVED для {self._figi} @ {self._current_price}")
-                    event = TradingEvent(
-                        EventType.CANDLE_RECEIVED,
-                        {
-                            'candle': candle,
-                            'price': self._current_price,
-                            'figi': self._figi
-                        }
-                    )
-                    asyncio.create_task(self._event_bus.publish(event))
             except Exception as pub_err:
                 self._logger.warning(f"Не удалось отправить свечу в визуализатор: {pub_err}")
             

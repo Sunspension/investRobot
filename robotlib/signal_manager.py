@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from enum import Enum
-from robotlib.trading.event_bus_interface import EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 from visualization.event_visualizer_interface import VisualizationSinkable
 from robotlib.signal_types import Signal, Order
 import asyncio
@@ -49,7 +49,7 @@ class SignalManager:
         self._peak_prominence = peak_prominence
 
         self._hist_window = deque(maxlen=lookback_max)
-        self._event_bus = event_bus
+        self._event_bus = None
         self._sink = visualization_sink
 
     @property
@@ -162,20 +162,6 @@ class SignalManager:
             if self._sink is not None:
                 loop = asyncio.get_running_loop()
                 loop.create_task(self._sink.on_signal(signal, getattr(candle, 'figi', 'unknown'), price))
-            elif self._event_bus:
-                signal_event = TradingEvent(
-                    EventType.SIGNAL_GENERATED,
-                    {
-                        'signal': signal,
-                        'figi': getattr(candle, 'figi', 'unknown'),
-                        'price': price
-                    }
-                )
-                try:
-                    loop = asyncio.get_running_loop()
-                    loop.create_task(self._event_bus.publish(signal_event))
-                except RuntimeError:
-                    asyncio.run(self._event_bus.publish(signal_event))
         except Exception:
             pass
         

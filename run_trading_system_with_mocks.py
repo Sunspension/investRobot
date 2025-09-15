@@ -7,7 +7,7 @@ import argparse
 from robotlib.utils.logger import get_logger
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.di_container import TradingSystemContainer
-from robotlib.trading.event_bus_interface import EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 from tests.mocks.tinkoff_api_client_mock import MockTinkoffAPIClient
 
 logger = get_logger(__name__)

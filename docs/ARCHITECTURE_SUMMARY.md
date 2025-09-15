@@ -19,10 +19,10 @@
 - Singleton pattern для компонентов
 - Ленивая инициализация
 
-### 2. **EventBus** (Шина событий)
-- Центральная шина для обмена событиями
-- Типы: CANDLE_RECEIVED, SIGNAL_GENERATED, ORDER_PLACED, etc.
-- Асинхронная обработка
+### 2. **Visualization Sink** (Прямой поток в UI)
+- Прямые вызовы `VisualizationSinkable` из ядра для обновления UI
+- Методы: `on_candle`, `on_signal`, `on_market_status`
+- Минимум задержек, меньше сложностей с синхронностью
 
 ### 3. **SignalManager** (Менеджер сигналов)
 - Генерация сигналов на основе MACD
@@ -51,7 +51,7 @@
 
 ### 8. **MarketDataStream** (Поток данных)
 - Получение и кэширование свечей
-- Публикация событий о новых данных
+- Прямые вызовы sink для визуализации
 - Ограничение размера кэша
 
 ### 9. **RiskManager** (Менеджер рисков)
@@ -68,12 +68,12 @@
 
 ### Основной торговый поток:
 ```
-MarketDataStream → EventBus → SignalManager → StrategyManager → OrderExecutor → PortfolioManager
+MarketDataStream → SignalManager → StrategyManager → OrderExecutor → PortfolioManager
 ```
 
 ### Поток визуализации:
 ```
-EventBus → DashEventVisualizer → DataManager → UIComponents → Dash App
+MarketDataStream/SignalManager → VisualizationSink (DashEventVisualizer) → DataManager → UIComponents → Dash App
 ```
 
 ## 🚀 Запуск системы
@@ -101,7 +101,7 @@ asyncio.run(main())
 robotlib/
 ├── trading/           # Торговые компоненты
 │   ├── di_container.py        # DI контейнер
-│   ├── event_bus_interface.py # Шина событий
+│   ├── events.py              # Типы событий (без шины)
 │   ├── interfaces.py          # Интерфейсы
 │   ├── session_controller.py  # Контроллер сессии
 │   ├── portfolio_manager.py   # Менеджер портфеля
@@ -174,12 +174,12 @@ TradingConfig(
 
 ## 🎯 Ключевые особенности
 
-1. **Event-Driven** - все компоненты связаны через события
+1. **Event-Driven (избирательно)** - ядро использует прямой sink для UI, EventBus сохранён для совместимости тестов
 2. **Dependency Injection** - чистая архитектура
 3. **Интерфейсы** - все компоненты тестируемы
 4. **Асинхронность** - высокая производительность
 5. **Визуализация** - мониторинг в реальном времени
-6. **Тестируемость** - 345 тестов
+6. **Тестируемость** - 347 тестов
 7. **Расширяемость** - легко добавлять новые компоненты
 
 ## 📚 Документация

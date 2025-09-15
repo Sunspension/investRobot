@@ -3,7 +3,31 @@ DI контейнер для торговой системы
 """
 from typing import Optional, Dict, Any
 from robotlib.utils.logger import get_logger
-from robotlib.trading.event_bus_interface import EventBusable, EventBus, MockEventBus
+from typing import Protocol
+
+from typing import Callable, Dict, List
+
+class EventBusable(Protocol):
+    def subscribe(self, event_type, handler: Callable) -> None: ...
+    async def publish(self, event) -> None: ...
+
+class MockEventBus:
+    def __init__(self):
+        self._subs: Dict[object, List[Callable]] = {}
+
+    def subscribe(self, event_type, handler: Callable) -> None:
+        self._subs.setdefault(event_type, []).append(handler)
+
+    async def publish(self, event) -> None:
+        handlers = self._subs.get(getattr(event, 'event_type', None), [])
+        for h in handlers:
+            try:
+                if hasattr(h, "__call__"):
+                    result = h(event)
+                    if hasattr(result, "__await__"):
+                        await result
+            except Exception:
+                pass
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.interfaces import TradingDependencies
 from robotlib.trading.session_controller import SessionController
@@ -51,12 +75,9 @@ class TradingSystemContainer:
         self._logger.info("✅ Конфигурация торговой системы валидна")
     
     def get_event_bus(self) -> EventBusable:
-        """Получает шину событий (только для визуализации)"""
+        """Шина событий: возвращает MockEventBus для совместимости тестов, но ядро его не использует."""
         if 'event_bus' not in self._instances:
-            if self._config.enable_visualization:
-                self._instances['event_bus'] = EventBus()
-            else:
-                self._instances['event_bus'] = MockEventBus()
+            self._instances['event_bus'] = MockEventBus()
         return self._instances['event_bus']
     
     def get_session_stats(self) -> SessionStats:
@@ -84,7 +105,7 @@ class TradingSystemContainer:
             
             self._instances['portfolio_manager'] = PortfolioManager(
                 api_client=api_client,
-                event_bus=self.get_event_bus()
+                event_bus=None
             )
         return self._instances['portfolio_manager']
     
@@ -108,7 +129,7 @@ class TradingSystemContainer:
             
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
-                event_bus=self.get_event_bus()
+                event_bus=None
             )
         return self._instances['order_executor']
     
@@ -117,7 +138,7 @@ class TradingSystemContainer:
         if 'signal_manager' not in self._instances:
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             self._instances['signal_manager'] = SignalManager(
-                event_bus=self.get_event_bus(),
+                event_bus=None,
                 visualization_sink=visualizer if isinstance(visualizer, VisualizationSinkable) else None
             )
         return self._instances['signal_manager']
@@ -130,7 +151,7 @@ class TradingSystemContainer:
                 risk_manager=await self.get_risk_manager(),
                 portfolio_manager=await self.get_portfolio_manager(),
                 order_executor=await self.get_order_executor(),
-                event_bus=self.get_event_bus()
+                event_bus=None
             )
             
             # Стратегии добавляются автоматически в StrategyManager
@@ -145,7 +166,6 @@ class TradingSystemContainer:
             
             self._instances['market_data_stream'] = MarketDataStream(
                 api_client=api_client,
-                event_bus=self.get_event_bus(),
                 figi=self._config.figi,
                 cache_size=1000
             )
@@ -223,7 +243,7 @@ class TradingSystemContainer:
         if 'visualizer' not in self._instances:
             try:
                 self._instances['visualizer'] = DashEventVisualizer(
-                    event_bus=self.get_event_bus(),
+                    event_bus=None,
                     figi=self._config.figi,
                     host=host,
                     port=port,

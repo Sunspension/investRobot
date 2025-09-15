@@ -4,7 +4,12 @@
 import unittest
 from robotlib.trading.di_container import TradingSystemContainer
 from robotlib.trading.trading_config import TradingConfig
-from robotlib.trading.event_bus_interface import EventBusable, MockEventBus
+from typing import Protocol
+
+from typing import runtime_checkable
+
+# В новой архитектуре EventBus не используется — оставшиеся проверки
+# заменяем на минимальные duck-typed проверки совместимости там, где нужно.
 
 
 class TestTradingSystemContainer(unittest.TestCase):
@@ -25,11 +30,11 @@ class TestTradingSystemContainer(unittest.TestCase):
         
         self.container = TradingSystemContainer(self.config)
     
-    def test_event_bus_creation(self):
-        """Тест создания шины событий"""
+    def test_event_bus_placeholder_present(self):
+        """Контейнер может возвращать заглушку event_bus для обратной совместимости тестов."""
         event_bus = self.container.get_event_bus()
-        self.assertIsInstance(event_bus, EventBusable)
-        self.assertIsInstance(event_bus, MockEventBus)  # Должен быть мок, так как визуализация отключена
+        self.assertTrue(hasattr(event_bus, 'subscribe'))
+        self.assertTrue(hasattr(event_bus, 'publish'))
     
     def test_singleton_instances(self):
         """Тест, что экземпляры создаются как синглтоны"""
@@ -75,25 +80,22 @@ class TestTradingSystemContainer(unittest.TestCase):
         self.assertIn('dependencies', trading_system)
         self.assertIn('visualizer', trading_system)
         
-        # Проверяем типы
-        self.assertIsInstance(trading_system['event_bus'], EventBusable)
+        # Проверяем placeholder API
+        self.assertTrue(hasattr(trading_system['event_bus'], 'subscribe'))
+        self.assertTrue(hasattr(trading_system['event_bus'], 'publish'))
         self.assertIsNone(trading_system['visualizer'])  # Визуализация отключена
     
     def test_visualization_enabled(self):
         """Тест с включенной визуализацией"""
-        # Создаем конфигурацию с визуализацией
         config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
         config_with_viz.tcs_client = self.config.tcs_client
         container_with_viz = TradingSystemContainer(config_with_viz)
         import asyncio
         trading_system = asyncio.run(container_with_viz.build_trading_system())
-        
-        # Визуализатор может быть None, если модуль недоступен
-        # Но event_bus должен быть реальным
-        self.assertIsNotNone(trading_system['event_bus'])
-        # Проверяем, что это не MockEventBus
-        from robotlib.trading.event_bus_interface import EventBus
-        self.assertIsInstance(trading_system['event_bus'], EventBus)
+        # Визуализатор может быть None в тестовой среде
+        self.assertIn('event_bus', trading_system)
+        self.assertTrue(hasattr(trading_system['event_bus'], 'subscribe'))
+        self.assertTrue(hasattr(trading_system['event_bus'], 'publish'))
     
     def test_config_validation(self):
         """Тест валидации конфигурации"""

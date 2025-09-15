@@ -1,28 +1,8 @@
-# Event-Driven Architecture
+# Event-Driven Architecture (устаревший подход)
 
-## Обзор
-
-Торговая система использует Event-Driven архитектуру с Dependency Injection для обеспечения гибкости, расширяемости и тестируемости.
-
-## Основные компоненты
-
-### 1. EventBus (Шина событий)
-
-Центральный компонент для обмена событиями между модулями:
-
-```python
-from robotlib.trading.event_bus_interface import EventBus, EventType, TradingEvent
-
-# Создание шины событий
-event_bus = EventBus()
-
-# Подписка на события
-event_bus.subscribe(EventType.CANDLE_RECEIVED, handle_candle)
-
-# Публикация событий
-event = TradingEvent(EventType.CANDLE_RECEIVED, {'price': 100.0})
-await event_bus.publish(event)
-```
+Основной поток системы переведён на прямой sink для визуализации (без центральной шины событий).
+`EventBus` удалён из ядра и оставлен только как историческая справка. Текущая реализация
+использует прямые вызовы `VisualizationSinkable.on_*`.
 
 ### 2. Типы событий
 

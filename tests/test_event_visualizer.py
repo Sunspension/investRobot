@@ -3,7 +3,9 @@
 """
 import unittest
 import asyncio
-from robotlib.trading.event_bus_interface import EventBus, EventType, TradingEvent
+class EventBus:
+    ...
+from robotlib.trading.events import EventType, TradingEvent
 from visualization.event_visualizer_interface import EventVisualizer, MockEventVisualizer
 
 
@@ -38,9 +40,9 @@ class TestEventVisualizer(unittest.TestCase):
         candle_event = TradingEvent(EventType.CANDLE_RECEIVED, {"price": 100.0})
         signal_event = TradingEvent(EventType.SIGNAL_GENERATED, {"type": "buy"})
         
-        # Публикуем события
-        asyncio.run(self.event_bus.publish(candle_event))
-        asyncio.run(self.event_bus.publish(signal_event))
+        # Напрямую вызываем обработчики (EventBus не используется)
+        asyncio.run(self.mock_visualizer.handle_candle_event(candle_event))
+        asyncio.run(self.mock_visualizer.handle_signal_event(signal_event))
         
         # Проверяем, что события обработаны (базовая реализация ничего не делает)
         # В реальной реализации здесь была бы проверка обновления UI
@@ -55,9 +57,9 @@ class TestEventVisualizer(unittest.TestCase):
         candle_event = TradingEvent(EventType.CANDLE_RECEIVED, {"price": 100.0})
         signal_event = TradingEvent(EventType.SIGNAL_GENERATED, {"type": "buy"})
         
-        # Публикуем события
-        asyncio.run(self.event_bus.publish(candle_event))
-        asyncio.run(self.event_bus.publish(signal_event))
+        # Передаем напрямую в мок визуализатор (без EventBus)
+        asyncio.run(self.mock_visualizer.handle_candle_event(candle_event))
+        asyncio.run(self.mock_visualizer.handle_signal_event(signal_event))
         
         # Проверяем, что события обработаны
         handled_events = self.mock_visualizer.get_handled_events()
@@ -79,9 +81,21 @@ class TestEventVisualizer(unittest.TestCase):
             TradingEvent(EventType.MARKET_STATUS_CHANGED, {"status": "open"})
         ]
         
-        # Публикуем все события
+        # Напрямую вызываем обработчики для всех событий
         for event in events:
-            asyncio.run(self.event_bus.publish(event))
+            et = event.event_type
+            if et == EventType.CANDLE_RECEIVED:
+                asyncio.run(self.mock_visualizer.handle_candle_event(event))
+            elif et == EventType.SIGNAL_GENERATED:
+                asyncio.run(self.mock_visualizer.handle_signal_event(event))
+            elif et == EventType.ORDER_PLACED or et == EventType.ORDER_FILLED:
+                asyncio.run(self.mock_visualizer.handle_order_event(event))
+            elif et == EventType.POSITION_OPENED or et == EventType.POSITION_CLOSED:
+                asyncio.run(self.mock_visualizer.handle_position_event(event))
+            elif et == EventType.PORTFOLIO_UPDATED:
+                asyncio.run(self.mock_visualizer.handle_portfolio_event(event))
+            elif et == EventType.MARKET_STATUS_CHANGED:
+                asyncio.run(self.mock_visualizer.handle_market_status_event(event))
         
         # Проверяем, что все события обработаны
         handled_events = self.mock_visualizer.get_handled_events()

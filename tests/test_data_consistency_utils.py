@@ -10,7 +10,10 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-from robotlib.trading.event_bus_interface import EventBus, TradingEvent, EventType
+from robotlib.trading.events import TradingEvent, EventType
+
+class EventBus:
+    ...
 from robotlib.signal_manager import SignalManager, Signal
 from robotlib.utils.money import Money
 from visualization.data_manager import DataManager

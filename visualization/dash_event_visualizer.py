@@ -9,7 +9,7 @@ import json
 import concurrent.futures
 from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
-from robotlib.trading.event_bus_interface import EventBusable, TradingEvent, EventType
+from robotlib.trading.events import TradingEvent, EventType
 from visualization.event_visualizer_interface import EventVisualizerable, VisualizationSinkable
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
@@ -29,7 +29,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
     
     def __init__(
         self, 
-        event_bus: EventBusable, 
+        event_bus: object | None = None,
         figi: str = "FUTIMOEXF000", 
         host: str = "127.0.0.1", 
         port: int = 8050,
@@ -55,11 +55,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
         self._init_portfolio()
 
-        # Подписываемся на события как можно раньше, чтобы тесты подписок видели подписчиков
-        try:
-            self._setup_event_handlers()
-        except Exception:
-            pass
+        # Подписки через EventBus удалены; используется прямой sink
         
         # Проверяем, что данные загружены
         data_snapshot = self._data_manager.get_data_snapshot()
@@ -241,20 +237,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка добавления демо-данных: {e}")
     
-    def _setup_event_handlers(self) -> None:
-        """Настраивает обработчики событий"""
-        if self._event_bus is None:
-            self._logger.warning("EventBus не инициализирован, обработчики событий не будут работать")
-            return
-            
-        self._event_bus.subscribe(EventType.CANDLE_RECEIVED, self.handle_candle_event)
-        self._event_bus.subscribe(EventType.SIGNAL_GENERATED, self.handle_signal_event)
-        self._event_bus.subscribe(EventType.ORDER_PLACED, self.handle_order_event)
-        self._event_bus.subscribe(EventType.ORDER_FILLED, self.handle_order_event)
-        self._event_bus.subscribe(EventType.POSITION_OPENED, self.handle_position_event)
-        self._event_bus.subscribe(EventType.POSITION_CLOSED, self.handle_position_event)
-        self._event_bus.subscribe(EventType.PORTFOLIO_UPDATED, self.handle_portfolio_event)
-        self._event_bus.subscribe(EventType.MARKET_STATUS_CHANGED, self.handle_market_status_event)
+    # Подписки через EventBus удалены полностью
     
     async def handle_candle_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие свечи"""
@@ -440,8 +423,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             # Устанавливаем флаг запуска сразу, чтобы события обрабатывались
             self._running = True
             
-            # Подписываемся на события сразу при старте
-            self._setup_event_handlers()
+            # Подписки через EventBus не используются
 
             # Загружаем данные портфеля от API
             await self._load_portfolio_from_api()

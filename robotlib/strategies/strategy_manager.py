@@ -11,7 +11,7 @@ from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.interfaces import StrategyManageable, OrderExecutable
-from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
+from robotlib.trading.events import EventType, TradingEvent
 from robotlib.utils.logger import get_logger
 from tinkoff.invest import Candle, HistoricCandle
 
@@ -73,13 +73,13 @@ class StrategyManager(StrategyManageable):
         portfolio_manager,
         order_executor: OrderExecutable = None,
         strategies: List[Strategyable] = None,
-        event_bus: Optional[EventBusable] = None
+        event_bus: Optional[object] = None
     ):
         self._signal_manager = signal_manager
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
         self._order_executor = order_executor
-        self._event_bus = event_bus
+        self._event_bus = None
         self._orders = []
         self.logger = get_logger(__name__)
         
@@ -108,46 +108,13 @@ class StrategyManager(StrategyManageable):
                 await strategy.initialize(figi, point_value, contracts_per_lot)
 
     async def on_candle(self, candle: Candle | HistoricCandle):
-        # Публикуем событие получения свечи (для визуализации)
-        if self._event_bus:
-            candle_event = TradingEvent(
-                EventType.CANDLE_RECEIVED,
-                {
-                    'candle': candle,
-                    'figi': getattr(candle, 'figi', 'unknown'),
-                    'timestamp': getattr(candle, 'time', None)
-                }
-            )
-            try:
-                asyncio.create_task(self._event_bus.publish(candle_event))
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._event_bus.publish(candle_event))
-                loop.close()
+        # EventBus удален: свечи идут напрямую в визуализатор через MarketDataStream
         
         signal: Signal = self._signal_manager.add_candle(candle)
         if not signal:
             return
 
-        # Публикуем событие генерации сигнала (для визуализации)
-        if self._event_bus:
-            signal_event = TradingEvent(
-                EventType.SIGNAL_GENERATED,
-                {
-                    'signal': signal,
-                    'candle': candle,
-                    'figi': getattr(candle, 'figi', 'unknown'),
-                    'timestamp': getattr(candle, 'time', None)
-                }
-            )
-            try:
-                asyncio.create_task(self._event_bus.publish(signal_event))
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                loop.run_until_complete(self._event_bus.publish(signal_event))
-                loop.close()
+        # EventBus удален: сигналы отправляются через VisualizationSink в визуализатор
 
         # Выполняем все стратегии
         for strategy in self._strategies:
