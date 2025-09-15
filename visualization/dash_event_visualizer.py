@@ -65,6 +65,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         self._app = None
         self._server_thread = None
         self._ws_connections = set()
+        self._ticker_thread = None
         
         # Кэш для API данных
         self._market_status_cache = None
@@ -289,8 +290,6 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
 
     # Прямой приемник от ядра без EventBus
     async def on_candle(self, candle: Any, price: float, figi: str) -> None:
-        if not self._running:
-            return
         try:
             candle_time = getattr(candle, 'time', datetime.now())
             candle_data = {
@@ -302,7 +301,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 'volume': getattr(candle, 'volume', 0)
             }
             self._data_manager.add_candle(candle_data)
-            self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
+            if self._running:
+                self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
         except Exception as e:
             self._logger.error(f"Ошибка on_candle: {e}")
     
@@ -342,8 +342,6 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             self._logger.error(f"Ошибка обработки события сигнала: {e}")
 
     async def on_signal(self, signal: Any, figi: str, price: float) -> None:
-        if not self._running:
-            return
         try:
             signal_data = {
                 'time': datetime.now(),
@@ -415,11 +413,10 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             self._logger.error(f"Ошибка обработки события статуса рынка: {e}")
 
     async def on_market_status(self, status: Dict[str, Any]) -> None:
-        if not self._running:
-            return
         try:
             self._data_manager.update_market_status(status)
-            self._broadcast_ws({"type": "market_status", "is_trading": status.get('is_trading', False)})
+            if self._running:
+                self._broadcast_ws({"type": "market_status", "is_trading": status.get('is_trading', False)})
         except Exception as e:
             self._logger.error(f"Ошибка on_market_status: {e}")
     
@@ -438,22 +435,19 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             return
         
         try:
-            # Устанавливаем флаг запуска сразу, чтобы события обрабатывались
-            self._running = True
-            
-            # Подписки через EventBus не используются
+            # До старта UI заполним DataManager актуальным статусом рынка, чтобы не было заглушек
+            try:
+                from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
+                ms = await get_market_status_enhanced()
+                self._data_manager.update_market_status(ms)
+            except Exception as e:
+                self._logger.warning(f"Не удалось предзаполнить статус рынка: {e}")
 
             # Загружаем данные портфеля от API
             await self._load_portfolio_from_api()
 
-            # Немедленно обновляем статус рынка из API без кэша, чтобы UI не показывал "рынок закрыт"
-            # Пока нет явного API в DataManager для статуса рынка, просто логируем актуальный статус
-            try:
-                from robotlib.utils.market_hours import get_market_status_with_api
-                market_status = await get_market_status_with_api()
-                self._logger.info(f"Статус рынка при старте визуализатора: is_trading={market_status.get('is_trading', False)}")
-            except Exception as e:
-                self._logger.warning(f"Не удалось получить статус рынка при старте визуализатора: {e}")
+            # Устанавливаем флаг запуска, после предзаполнения данных
+            self._running = True
             
             # Создаем Dash приложение
             self._app = self._create_dash_app()
@@ -473,6 +467,9 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 self._logger.info(f"Dash визуализатор событий запущен на http://{self._host}:{self._port}")
             else:
                 self._logger.info("Dash визуализатор запущен без сервера (режим тестирования)")
+            
+            # Запускаем тикер для обновления счетчиков каждую секунду
+            self._start_ticker()
             
         except Exception as e:
             self._logger.error(f"Ошибка запуска визуализатора: {e}")
@@ -499,6 +496,9 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             if self._server_thread and self._server_thread.is_alive():
                 self._server_thread.join(timeout=5)
             
+            if self._ticker_thread and self._ticker_thread.is_alive():
+                self._ticker_thread.join(timeout=2)
+            
             self._logger.info("Dash визуализатор событий остановлен")
             
         except Exception as e:
@@ -510,7 +510,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
     
     def _create_dash_app(self) -> Dash:
         """Создает Dash приложение с богатым UI"""
-        app = Dash(__name__)
+        app = Dash(__name__, update_title=None, title="Фьючерс на индекс MOEX")
         
         # Отключаем избыточные логи
         app.logger.setLevel('WARNING')
@@ -545,6 +545,11 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 try:
                     self._logger.info("WS клиент подключен")
                     self._ws_connections.add(ws)
+                    # Отправляем первичное сообщение, чтобы триггернуть обновление UI
+                    try:
+                        ws.send(json.dumps({"type": "init"}))
+                    except Exception as e:
+                        self._logger.debug(f"Не удалось отправить init WS: {e}")
                     while True:
                         msg = ws.receive()
                         if msg is None:
@@ -619,6 +624,21 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         for ws in dead:
             self._ws_connections.discard(ws)
     
+    def _start_ticker(self) -> None:
+        """Запускает серверный тикер, который рассылает WS-сообщение раз в секунду."""
+        if self._ticker_thread and self._ticker_thread.is_alive():
+            return
+        def _ticker_loop():
+            while self._running:
+                try:
+                    # Небольшое сообщение, чтобы триггернуть обновление UI
+                    self._broadcast_ws({"type": "tick", "t": int(time.time())})
+                except Exception:
+                    pass
+                time.sleep(1)
+        self._ticker_thread = threading.Thread(target=_ticker_loop, daemon=True)
+        self._ticker_thread.start()
+    
     def _create_layout(self) -> html.Div:
         """Создает макет приложения с богатым UI из TradingVisualizerAdapter"""
         return self._ui_components._create_layout()
@@ -630,11 +650,11 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             [Output('trading-graph', 'figure'),
              Output('current-price', 'children'),
              Output('market-status', 'children'),
+             Output('market-time', 'children'),
              Output('buy-signals-count', 'children'),
              Output('sell-signals-count', 'children'),
              Output('buy-orders-count', 'children'),
              Output('sell-orders-count', 'children'),
-             Output('total-orders-count', 'children'),
              Output('strategy-status', 'children'),
              Output('trading-status', 'children'),
              Output('signals-list', 'children'),
@@ -677,37 +697,56 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 signals_list = self._ui_components.create_signals_list(data_snapshot['signals_data'])
                 recent_signals = self._ui_components.create_recent_signals(data_snapshot['signals_data'])
                 
-                # Получаем информацию о состоянии рынка
-                market_info = self._get_market_status_info()
-                
-                if isinstance(market_info, dict):
-                    # Форматируем информацию о рынке более читаемо
-                    status = market_info.get('status', 'Неизвестно')
-                    session_info = market_info.get('session_info', '')
-                    next_session = market_info.get('next_session', '')
-                    
-                    # Создаем красивое отображение с HTML компонентами
-                    if session_info and session_info != "Торговая сессия активна":
-                        if session_info.startswith('<br>'):
-                            # Убираем <br> и создаем HTML компонент
-                            clean_session_info = session_info[4:]  # убираем <br>
-                            enhanced_market_status = [
-                                html.Span(status),
-                                html.Br(),
-                                html.Span(clean_session_info)
-                            ]
-                        else:
-                            enhanced_market_status = f"{status} {session_info}"
-                        if next_session:
-                            if isinstance(enhanced_market_status, list):
-                                enhanced_market_status.append(html.Span(f" • {next_session}"))
-                            else:
-                                enhanced_market_status += f" • {next_session}"
+                # Получаем информацию о состоянии рынка из DataManager (источник истины)
+                ms = data_snapshot.get('market_status', {}) or {}
+                is_trading = bool(ms.get('is_trading', False))
+                session_type = ms.get('session_type', 'unknown')
+
+                # Человекочитаемое имя сессии
+                session_name = {
+                    'main': 'Основная сессия',
+                    'evening': 'Вечерняя сессия',
+                    'weekend': 'Выходная сессия'
+                }.get(session_type, 'Торговая сессия')
+
+                # Считаем таймер
+                import pytz as _pytz
+                msk = _pytz.timezone('Europe/Moscow')
+                now_msk = datetime.now(msk)
+                time_text = ""
+
+                if is_trading:
+                    # До конца текущей сессии
+                    if session_type == 'main':
+                        session_end = now_msk.replace(hour=18, minute=45, second=0, microsecond=0)
+                    elif session_type == 'evening':
+                        session_end = now_msk.replace(hour=23, minute=50, second=0, microsecond=0)
+                    elif session_type == 'weekend':
+                        session_end = now_msk.replace(hour=18, minute=0, second=0, microsecond=0)
                     else:
-                        enhanced_market_status = f"{status} {next_session}"
+                        session_end = now_msk
+                    if session_end > now_msk:
+                        delta = session_end - now_msk
+                        hours = delta.days * 24 + delta.seconds // 3600
+                        minutes = (delta.seconds % 3600) // 60
+                        seconds = delta.seconds % 60
+                        time_text = f"До окончания: {hours:02d}:{minutes:02d}:{seconds:02d}"
+                    enhanced_market_status = f"🟢 Открыт • {session_name}"
                 else:
-                    # Если это HTML элементы, используем их напрямую
-                    enhanced_market_status = market_info
+                    # До следующего открытия
+                    next_session = ms.get('time_until_next')
+                    if not next_session:
+                        next_open = now_msk.replace(hour=10, minute=0, second=0, microsecond=0)
+                        if now_msk.hour >= 10:
+                            from datetime import timedelta as _td
+                            next_open = next_open + _td(days=1)
+                        delta = next_open - now_msk
+                        hours = delta.days * 24 + delta.seconds // 3600
+                        minutes = (delta.seconds % 3600) // 60
+                        seconds = delta.seconds % 60
+                        next_session = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                    time_text = f"До открытия: {next_session}"
+                    enhanced_market_status = "🔴 Рынок закрыт"
                 
                 # Получаем данные портфеля
                 portfolio_data = data_snapshot.get('portfolio_data', {})
@@ -736,11 +775,11 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                     fig,
                     f"{float(current_price):.1f} ₽",
                     enhanced_market_status,
+                    time_text,
                     str(data_snapshot['buy_count']),  # buy-signals-count
                     str(data_snapshot['sell_count']), # sell-signals-count
                     str(data_snapshot.get('buy_orders_count', 0)),  # buy-orders-count
                     str(data_snapshot.get('sell_orders_count', 0)), # sell-orders-count
-                    str(data_snapshot['orders_count']),  # total-orders-count
                     strategy_status,
                     trading_status,
                     signals_list,
@@ -757,7 +796,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 import traceback
                 self._logger.error(f"Ошибка обновления отображения: {e}")
                 self._logger.error(f"Traceback: {traceback.format_exc()}")
-                return (Figure(), "Ошибка", "❌ Ошибка", "0", "0", "0", "0", "0",
+                return (Figure(), "Ошибка", "❌ Ошибка", "",
+                       "0", "0", "0", "0",
                        [html.P("Ошибка отображения")], [html.P("Ошибка отображения")], 
                        [html.P("Ошибка отображения")], [html.P("Ошибка отображения")],
                        "0.00 ₽", "0.00 ₽", "0.00 ₽", "0.00 ₽")
@@ -872,11 +912,46 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             current_time = datetime.now()
             
             if market_status.get('is_trading', False):
+                # Название текущей сессии
+                session_type = market_status.get('session_type', 'main')
+                session_name = {
+                    'main': 'Основная сессия',
+                    'evening': 'Вечерняя сессия',
+                    'weekend': 'Выходная сессия'
+                }.get(session_type, 'Торговая сессия')
+
+                # Оценим время до окончания текущей сессии в МСК
+                from datetime import time as _time
+                import pytz as _pytz
+                msk = _pytz.timezone('Europe/Moscow')
+                now_msk = current_time if current_time.tzinfo is None else current_time.astimezone(msk)
+                if now_msk.tzinfo is None:
+                    now_msk = msk.localize(now_msk)
+
+                if session_type == 'main':
+                    session_end = now_msk.replace(hour=18, minute=45, second=0, microsecond=0)
+                elif session_type == 'evening':
+                    session_end = now_msk.replace(hour=23, minute=50, second=0, microsecond=0)
+                elif session_type == 'weekend':
+                    session_end = now_msk.replace(hour=18, minute=0, second=0, microsecond=0)
+                else:
+                    session_end = now_msk
+
+                if session_end <= now_msk:
+                    # На всякий случай не уходим в отрицательные значения
+                    remaining = "00:00"
+                else:
+                    delta = session_end - now_msk
+                    hours = delta.seconds // 3600
+                    minutes = (delta.seconds % 3600) // 60
+                    remaining = f"{hours:02d}:{minutes:02d}"
+
                 return {
                     'is_trading': True,
-                    'status': '🟢 Открыт',
+                    'status': f"🟢 Открыт • {session_name}",
                     'current_time': current_time,
-                    'session_info': '📈 Торги идут'
+                    'session_info': '📈 Торги идут',
+                    'time_text': f"До окончания: {remaining}"
                 }
             else:
                 # Используем время до открытия из market_hours_enhanced
@@ -886,7 +961,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                     'is_trading': False,
                     'status': '🔴 Рынок закрыт',
                     'current_time': current_time,
-                    'session_info': f'<br>До открытия: {time_until_open}'
+                    'session_info': f'<br>До открытия: {time_until_open}',
+                    'time_text': f"До открытия: {time_until_open}"
                 }
         except Exception as e:
             self._logger.error(f"Ошибка получения статуса рынка: {e}")

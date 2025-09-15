@@ -133,16 +133,16 @@ class MarketDataStream(MarketDataStreamable):
             # Создаем адаптер для убирания путаницы с названиями
             self._stream_adapter = TinkoffStreamAdapter(raw_stream_manager)
             
-            # Проверяем статус рынка
-            market_hours = await get_tinkoff_market_hours()
-            market_status = await market_hours.get_trading_status()
-            # Публикуем изменение статуса рынка (прямо в визуализатор или через EventBus)
+            # Проверяем статус рынка (расширенная логика с типом сессии и таймерами)
+            market_status = await get_market_status_enhanced()
+            # Публикуем изменение статуса рынка
             try:
                 status_payload = {
                     'is_trading': market_status.get('is_trading', False),
                     'session_type': market_status.get('session_type', 'unknown'),
                     'current_time': market_status.get('current_time'),
-                    'next_session': market_status.get('next_session')
+                    'next_session': market_status.get('next_session'),
+                    'time_until_next': market_status.get('time_until_next')
                 }
                 if self._sink is not None:
                     asyncio.create_task(self._sink.on_market_status(status_payload))
@@ -412,12 +412,7 @@ class MarketDataStream(MarketDataStreamable):
             if market_status.get('is_trading', False):
                 session_type = market_status.get('session_type', 'unknown')
                 
-                # Для фьючерсов на индекс МосБиржи (FUTIMOEXF000) торги только в основные часы
-                if self._figi == "FUTIMOEXF000" and session_type == 'evening':
-                    # Фьючерсы не торгуются в вечернее время, загружаем данные последней основной сессии
-                    from_date, to_date = await self._get_last_main_trading_session_period()
-                    self._logger.info(f"Фьючерс {self._figi} не торгуется в вечернее время, загружаем данные последней основной сессии: {from_date} - {to_date}")
-                elif session_type == 'weekend':
+                if session_type == 'weekend':
                     # Выходные торги - загружаем данные за последние 4 часа
                     to_date = datetime.now()
                     from_date = to_date - timedelta(hours=4)

@@ -69,10 +69,7 @@ class UIComponents:
     def _create_header(self) -> html.Div:
         """Создает заголовок дашборда"""
         return html.Div([
-            html.H1(
-                f"📊 Инструмент: {self.figi} | Фьючерс на индекс MOEX",
-                className="header-title"
-            ),
+            html.H1("Фьючерс на индекс MOEX", className="header-title"),
             html.Div([
                 html.Span("Текущая цена:", style={'marginRight': '8px'}),
                 html.Span(id="current-price", children="—", className="stat-value")
@@ -84,9 +81,9 @@ class UIComponents:
         return html.Div([
             html.H3("📊 Статус рынка", className="market-status-title"),
             html.Div([
-                html.Span(id="market-status", children="🔴 Рынок закрыт"),
+                html.Span(id="market-status", children="—"),
                 html.Br(),
-                html.Span(id="market-time", children="До открытия: 07:52")
+                html.Span(id="market-time", children="—")
             ], id="market-status-content")
         ], className="market-status")
     
@@ -123,11 +120,6 @@ class UIComponents:
                         html.H4("📉 Ордеры SELL", className="stat-title"),
                         html.H2(id="sell-orders-count", children="0", 
                                className="stat-value", style={'color': '#dc3545'})
-                    ], style={'textAlign': 'center', 'flex': '1'}),
-                    html.Div([
-                        html.H4("Σ Всего ордеров", className="stat-title"),
-                        html.H2(id="total-orders-count", children="0", 
-                               className="stat-value", style={'color': '#2E86AB'})
                     ], style={'textAlign': 'center', 'flex': '1'})
                 ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
             ], className="orders-section"),
