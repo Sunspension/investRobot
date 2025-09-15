@@ -2,7 +2,7 @@
 Интерфейс для визуализатора событий торговой системы
 """
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Protocol, Dict, Any, runtime_checkable
 from robotlib.trading.event_bus_interface import EventBusable, TradingEvent, EventType
 
 
@@ -52,6 +52,20 @@ class EventVisualizerable(ABC):
     @abstractmethod
     async def handle_market_status_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие статуса рынка"""
+        pass
+
+
+@runtime_checkable
+class VisualizationSinkable(Protocol):
+    """Легковесный интерфейс-приемник для прямых вызовов из ядра (без EventBus)."""
+
+    async def on_candle(self, candle: Any, price: float, figi: str) -> None:
+        pass
+
+    async def on_signal(self, signal: Any, figi: str, price: float) -> None:
+        pass
+
+    async def on_market_status(self, status: Dict[str, Any]) -> None:
         pass
 
 

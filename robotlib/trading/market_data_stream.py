@@ -15,6 +15,7 @@ from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
 from robotlib.trading.event_bus_interface import EventBusable, EventType, TradingEvent
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
+from visualization.event_visualizer_interface import VisualizationSinkable
 
 
 class TinkoffStreamAdapter:
@@ -82,6 +83,11 @@ class MarketDataStream(MarketDataStreamable):
         self._stream_adapter: Optional[TinkoffStreamAdapter] = None
         self._is_running = False
         self._current_price: Optional[float] = None
+        self._sink: Optional[VisualizationSinkable] = None
+
+    def set_visualization_sink(self, sink: VisualizationSinkable) -> None:
+        """Устанавливает приемник визуализации (для прямых вызовов без EventBus)."""
+        self._sink = sink
     
     @property
     def figi(self) -> str:
@@ -132,18 +138,19 @@ class MarketDataStream(MarketDataStreamable):
             # Проверяем статус рынка
             market_hours = await get_tinkoff_market_hours()
             market_status = await market_hours.get_trading_status()
-            # Публикуем событие изменения статуса рынка сразу при старте
+            # Публикуем изменение статуса рынка (прямо в визуализатор или через EventBus)
             try:
-                event = TradingEvent(
-                    EventType.MARKET_STATUS_CHANGED,
-                    data={
-                        'is_trading': market_status.get('is_trading', False),
-                        'session_type': market_status.get('session_type', 'unknown'),
-                        'current_time': market_status.get('current_time'),
-                        'next_session': market_status.get('next_session')
-                    }
-                )
-                asyncio.create_task(self._event_bus.publish(event))
+                status_payload = {
+                    'is_trading': market_status.get('is_trading', False),
+                    'session_type': market_status.get('session_type', 'unknown'),
+                    'current_time': market_status.get('current_time'),
+                    'next_session': market_status.get('next_session')
+                }
+                if self._sink is not None:
+                    asyncio.create_task(self._sink.on_market_status(status_payload))
+                else:
+                    event = TradingEvent(EventType.MARKET_STATUS_CHANGED, data=status_payload)
+                    asyncio.create_task(self._event_bus.publish(event))
                 self._logger.info(f"Опубликован статус рынка: is_trading={market_status.get('is_trading', False)}")
             except Exception as publish_error:
                 self._logger.warning(f"Не удалось опубликовать статус рынка: {publish_error}")
@@ -282,24 +289,23 @@ class MarketDataStream(MarketDataStreamable):
             figi_info = getattr(candle, 'figi', self._figi)
             self._logger.debug(f"Получена свеча: {candle.time} - {self._current_price} (FIGI: {figi_info})")
             
-            # Публикуем событие свечи (для визуализации)
-            if self._event_bus:
-                self._logger.info(f"📡 Публикуем событие CANDLE_RECEIVED для {self._figi} @ {self._current_price}")
-                event = TradingEvent(
-                    EventType.CANDLE_RECEIVED,
-                    {
-                        'candle': candle,
-                        'price': self._current_price,
-                        'figi': self._figi
-                    }
-                )
-                try:
+            # Публикуем свечу (напрямую в визуализатор либо через EventBus)
+            try:
+                if self._sink is not None:
+                    asyncio.create_task(self._sink.on_candle(candle, self._current_price or 0.0, self._figi))
+                elif self._event_bus:
+                    self._logger.info(f"📡 Публикуем событие CANDLE_RECEIVED для {self._figi} @ {self._current_price}")
+                    event = TradingEvent(
+                        EventType.CANDLE_RECEIVED,
+                        {
+                            'candle': candle,
+                            'price': self._current_price,
+                            'figi': self._figi
+                        }
+                    )
                     asyncio.create_task(self._event_bus.publish(event))
-                except RuntimeError:
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop.run_until_complete(self._event_bus.publish(event))
-                    loop.close()
+            except Exception as pub_err:
+                self._logger.warning(f"Не удалось отправить свечу в визуализатор: {pub_err}")
             
             # Вызываем колбэки для свечей
             for callback in self._candle_callbacks:

@@ -20,6 +20,7 @@ from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from visualization.dash_event_visualizer import DashEventVisualizer
+from visualization.event_visualizer_interface import VisualizationSinkable
 
 
 class TradingSystemContainer:
@@ -114,8 +115,10 @@ class TradingSystemContainer:
     def get_signal_manager(self) -> SignalManager:
         """Получает менеджер сигналов"""
         if 'signal_manager' not in self._instances:
+            visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             self._instances['signal_manager'] = SignalManager(
-                event_bus=self.get_event_bus()
+                event_bus=self.get_event_bus(),
+                visualization_sink=visualizer if isinstance(visualizer, VisualizationSinkable) else None
             )
         return self._instances['signal_manager']
     
@@ -146,6 +149,10 @@ class TradingSystemContainer:
                 figi=self._config.figi,
                 cache_size=1000
             )
+            # Инжектим sink в поток рыночных данных
+            visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
+            if isinstance(visualizer, VisualizationSinkable):
+                self._instances['market_data_stream'].set_visualization_sink(visualizer)
         return self._instances['market_data_stream']
     
     async def get_trading_dependencies(self) -> TradingDependencies:

@@ -10,7 +10,7 @@ import concurrent.futures
 from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
 from robotlib.trading.event_bus_interface import EventBusable, TradingEvent, EventType
-from visualization.event_visualizer_interface import EventVisualizerable
+from visualization.event_visualizer_interface import EventVisualizerable, VisualizationSinkable
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
 from visualization.ui_components import UIComponents
@@ -24,7 +24,7 @@ from dash import Dash, dcc, html, Input, Output, State, callback_context
 from plotly.graph_objects import Figure
 
 
-class DashEventVisualizer(EventVisualizerable):
+class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
     """Dash визуализатор событий торговой системы (чистая Event-Driven архитектура)"""
     
     def __init__(
@@ -286,6 +286,24 @@ class DashEventVisualizer(EventVisualizerable):
                 self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
         except Exception as e:
             self._logger.error(f"Ошибка обработки события свечи: {e}")
+
+    # Прямой приемник от ядра без EventBus
+    async def on_candle(self, candle: Any, price: float, figi: str) -> None:
+        if not self._running:
+            return
+        try:
+            candle_data = {
+                'time': getattr(candle, 'time', datetime.now()),
+                'open': float(getattr(candle.open, 'units', 0) + getattr(candle.open, 'nano', 0) / 1e9),
+                'high': float(getattr(candle.high, 'units', 0) + getattr(candle.high, 'nano', 0) / 1e9),
+                'low': float(getattr(candle.low, 'units', 0) + getattr(candle.low, 'nano', 0) / 1e9),
+                'close': float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9),
+                'volume': getattr(candle, 'volume', 0)
+            }
+            self._data_manager.add_candle(candle_data)
+            self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
+        except Exception as e:
+            self._logger.error(f"Ошибка on_candle: {e}")
     
     async def handle_signal_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие сигнала"""
@@ -321,6 +339,25 @@ class DashEventVisualizer(EventVisualizerable):
                 self._logger.info(f"📊 Сигналы в DataManager: BUY={data_snapshot['buy_count']}, SELL={data_snapshot['sell_count']}")
         except Exception as e:
             self._logger.error(f"Ошибка обработки события сигнала: {e}")
+
+    async def on_signal(self, signal: Any, figi: str, price: float) -> None:
+        if not self._running:
+            return
+        try:
+            signal_data = {
+                'time': datetime.now(),
+                'type': 'buy' if getattr(signal, 'histogram', 0) > 0 else 'sell',
+                'strength': abs(getattr(signal, 'histogram', 0)),
+                'macd': getattr(signal, 'macd', 0),
+                'signal_line': getattr(signal, 'signal', 0),
+                'histogram': getattr(signal, 'histogram', 0),
+                'price': price
+            }
+            self._data_manager.add_signal(signal_data)
+            # Можно отправить короткий WS сигнал при желании
+            # self._broadcast_ws({"type": "signal", "side": signal_data['type'], "price": price})
+        except Exception as e:
+            self._logger.error(f"Ошибка on_signal: {e}")
     
     async def handle_order_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие ордера"""
@@ -375,6 +412,15 @@ class DashEventVisualizer(EventVisualizerable):
             self._broadcast_ws({"type": "market_status", "is_trading": market_data.get('is_trading', False)})
         except Exception as e:
             self._logger.error(f"Ошибка обработки события статуса рынка: {e}")
+
+    async def on_market_status(self, status: Dict[str, Any]) -> None:
+        if not self._running:
+            return
+        try:
+            self._data_manager.update_market_status(status)
+            self._broadcast_ws({"type": "market_status", "is_trading": status.get('is_trading', False)})
+        except Exception as e:
+            self._logger.error(f"Ошибка on_market_status: {e}")
     
     def _disable_verbose_logging(self) -> None:
         """Отключает избыточные логи"""

@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional
 from enum import Enum
 from robotlib.trading.event_bus_interface import EventType, TradingEvent
+from visualization.event_visualizer_interface import VisualizationSinkable
 from robotlib.signal_types import Signal, Order
 import asyncio
 
@@ -32,6 +33,7 @@ class SignalManager:
         lookback_max=20,
         peak_prominence=0.2,
         event_bus=None,
+        visualization_sink: VisualizationSinkable | None = None,
     ):
         self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
         
@@ -48,6 +50,7 @@ class SignalManager:
 
         self._hist_window = deque(maxlen=lookback_max)
         self._event_bus = event_bus
+        self._sink = visualization_sink
 
     @property
     def candles(self) -> deque:
@@ -155,21 +158,25 @@ class SignalManager:
         )
         
         # Публикуем событие генерации сигнала (для визуализации)
-        if self._event_bus:
-            signal_event = TradingEvent(
-                EventType.SIGNAL_GENERATED,
-                {
-                    'signal': signal,
-                    'figi': getattr(candle, 'figi', 'unknown'),
-                    'price': price
-                }
-            )
-            try:
-                # Если есть запущенный event loop, создаем задачу
+        try:
+            if self._sink is not None:
                 loop = asyncio.get_running_loop()
-                loop.create_task(self._event_bus.publish(signal_event))
-            except RuntimeError:
-                # Нет активного event loop — выполняем синхронно без оставления не-await'нутых корутин
-                asyncio.run(self._event_bus.publish(signal_event))
+                loop.create_task(self._sink.on_signal(signal, getattr(candle, 'figi', 'unknown'), price))
+            elif self._event_bus:
+                signal_event = TradingEvent(
+                    EventType.SIGNAL_GENERATED,
+                    {
+                        'signal': signal,
+                        'figi': getattr(candle, 'figi', 'unknown'),
+                        'price': price
+                    }
+                )
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(self._event_bus.publish(signal_event))
+                except RuntimeError:
+                    asyncio.run(self._event_bus.publish(signal_event))
+        except Exception:
+            pass
         
         return signal
