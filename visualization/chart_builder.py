@@ -21,7 +21,8 @@ class ChartBuilder:
         candles_data: List[Dict[str, Any]], 
         signals_data: List[Dict[str, Any]], 
         orders_data: List[Dict[str, Any]],
-        current_price: float = 0.0
+        current_price: float = 0.0,
+        hide_inactive_time: bool = True
     ) -> Figure:
         """Создает график для торговли"""
         self.logger.debug(f"ChartBuilder: создаем график с {len(candles_data)} свечами, {len(signals_data)} сигналами, {len(orders_data)} ордерами")
@@ -102,6 +103,15 @@ class ChartBuilder:
         
         # Настройка макета
         self._configure_chart_layout(fig)
+
+        # Скрытие неактивного времени (rangebreaks)
+        if hide_inactive_time:
+            # Суббота-воскресенье
+            breaks = [dict(bounds=["sat", "mon"])]
+            # Часы вне торговых: 23:50–10:00, 18:45–19:05 (МСК)
+            breaks.append(dict(pattern="hour", bounds=[23.833, 10]))
+            breaks.append(dict(pattern="hour", bounds=[18.75, 19.083]))
+            fig.update_xaxes(rangebreaks=breaks)
         
         self.logger.debug("График создан успешно")
         return fig

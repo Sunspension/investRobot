@@ -160,6 +160,16 @@ class UIComponents:
         
         return html.Div([
             html.H3("📈 Торговый график", className="chart-title"),
+            html.Div([
+                dcc.Checklist(
+                    id="toggle-rangebreaks",
+                    options=[{"label": "Скрывать неактивное время", "value": "hide"}],
+                    value=["hide"],
+                    inputStyle={"marginRight": "6px"},
+                    labelStyle={"marginRight": "16px"},
+                    style={"marginBottom": "6px"}
+                )
+            ]),
             dcc.Graph(
                 id="trading-graph",
                 figure=figure,

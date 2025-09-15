@@ -661,11 +661,12 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
              Output('portfolio-pnl', 'children'),
              Output('portfolio-variation-margin', 'children'),
              Output('portfolio-guarantee-deposit', 'children')],
-            [Input('ws', 'message')],
+            [Input('ws', 'message'),
+             Input('toggle-rangebreaks', 'value')],
             [State('simulation-state', 'data')],
             prevent_initial_call=False
         )
-        def update_display(ws_message, state):
+        def update_display(ws_message, toggle_value, state):
             """Обновляет отображение данных с богатым UI"""
             try:
                 self._logger.debug("Callback вызван по WebSocket сообщению")
@@ -684,11 +685,15 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                     # self._logger.info(f"📊 После принудительного добавления: {len(data_snapshot['candles_data'])} свечей")
                 
                 # Создаем график
+                # Определяем, скрывать ли неактивное время по чекбоксу
+                hide_inactive = bool(toggle_value and ('hide' in toggle_value))
+
                 fig = self._chart_builder.create_trading_chart(
                     candles_data=data_snapshot['candles_data'],
                     signals_data=data_snapshot['signals_data'],
                     orders_data=data_snapshot['orders_data'],
-                    current_price=data_snapshot['current_price']
+                    current_price=data_snapshot['current_price'],
+                    hide_inactive_time=hide_inactive
                 )
                 
                 # Создаем списки сигналов
