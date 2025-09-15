@@ -1,8 +1,6 @@
-# Event-Driven Architecture (устаревший подход)
+# Real-time архитектура визуализации
 
-Основной поток системы переведён на прямой sink для визуализации (без центральной шины событий).
-`EventBus` удалён из ядра и оставлен только как историческая справка. Текущая реализация
-использует прямые вызовы `VisualizationSinkable.on_*`.
+Текущая реализация использует прямой sink-интерфейс `VisualizationSinkable.on_*` для передачии событий в UI.
 
 ### 2. Типы событий
 
@@ -34,7 +32,6 @@ container = TradingSystemContainer(config, enable_visualization=True)
 trading_system = container.build_trading_system()
 
 # Получение компонентов
-event_bus = trading_system['event_bus']
 session_controller = trading_system['session_controller']
 visualizer = trading_system['visualizer']
 ```
@@ -46,18 +43,7 @@ visualizer = trading_system['visualizer']
 Публикует события `PORTFOLIO_UPDATED` при обновлении портфеля:
 
 ```python
-# В PortfolioManager
-if self._event_bus:
-    event = TradingEvent(
-        EventType.PORTFOLIO_UPDATED,
-        {
-            'portfolio': portfolio,
-            'total_amount': total_amount,
-            'available_amount': available_amount,
-            'positions_count': len(positions)
-        }
-    )
-    asyncio.create_task(self._event_bus.publish(event))
+# В PortfolioManager визуализатор обновляется отдельно через API визуализатора
 ```
 
 ### OrderExecutor
@@ -74,7 +60,7 @@ placed_event = TradingEvent(
         'execution': execution
     }
 )
-await event_bus.publish(placed_event)
+await visualizer.on_order(placed_event)
 
 # Событие исполнения ордера
 if result.success:
@@ -86,7 +72,7 @@ if result.success:
             'executed_price': result.executed_price
         }
     )
-    await event_bus.publish(filled_event)
+    await visualizer.on_order(filled_event)
 ```
 
 ### StrategyManager
@@ -94,17 +80,7 @@ if result.success:
 Публикует события `SIGNAL_GENERATED`:
 
 ```python
-# В StrategyManager
-if self._event_bus:
-    signal_event = TradingEvent(
-        EventType.SIGNAL_GENERATED,
-        {
-            'signal': signal,
-            'candle': candle,
-            'figi': getattr(candle, 'figi', 'unknown')
-        }
-    )
-    asyncio.create_task(self._event_bus.publish(signal_event))
+# В StrategyManager визуализатор уведомляется через sink
 ```
 
 ## Визуализация
@@ -128,10 +104,7 @@ class EventVisualizerable(ABC):
 Реализация визуализатора для Dash:
 
 ```python
-visualizer = DashEventVisualizer(
-    event_bus=event_bus,
-    figi="FUTIMOEXF000"
-)
+visualizer = DashEventVisualizer(figи="FUTIMOEXF000")
 
 await visualizer.start()  # Запуск визуализатора
 await visualizer.stop()   # Остановка визуализатора
@@ -189,11 +162,7 @@ asyncio.run(main())
 container = TradingSystemContainer(config, enable_visualization=False)
 trading_system = container.build_trading_system()
 
-# Проверка типа EventBus
-assert isinstance(trading_system['event_bus'], EventBusable)
-
-# Тест публикации событий
-event = TradingEvent(EventType.CANDLE_RECEIVED, {'price': 100.0})
-await trading_system['event_bus'].publish(event)
+# Тест прямого вызова sink
+await visualizer.on_candle({'price': 100.0})
 ```
 

@@ -6,11 +6,10 @@ investRobot - это торговая система для автоматиче
 
 ## Архитектурные принципы
 
-### 1. Event-Driven Architecture
-- **EventBus** - центральная шина событий для обмена данными между компонентами
-- **TradingEvent** - типизированные события с данными
-- **EventType** - перечисление типов событий
-- **Асинхронная обработка** - все события обрабатываются асинхронно
+### 1. Обновления в реальном времени без центральной шины
+- **VisualizationSinkable** — прямой sink-интерфейс (`on_candle`, `on_signal`, `on_market_status`) для UI
+- **TradingEvent / EventType** — лёгкие определения событий в `robotlib/trading/events.py`
+- **Асинхронная обработка** — события пробрасываются прямыми вызовами без EventBus
 
 ### 2. Dependency Injection
 - **TradingSystemContainer** - DI контейнер для управления зависимостями
@@ -38,7 +37,6 @@ class TradingSystemContainer:
     def __init__(self, config: TradingConfig, enable_visualization: bool = False)
     
     # Основные компоненты
-    def get_event_bus(self) -> EventBusable
     def get_session_stats(self) -> SessionStats
     async def get_api_client(self) -> TinkoffAPIClient
     def get_portfolio_manager(self) -> PortfolioManager
@@ -62,21 +60,19 @@ class TradingSystemContainer:
 - Асинхронная инициализация API клиента
 - Условное создание визуализатора
 
-### 2. EventBus (Шина событий)
+### 2. События и визуализация
 
-**Файл:** `robotlib/trading/event_bus_interface.py`
+**Файл:** `robotlib/trading/events.py`
 
-**Назначение:** В текущей версии ядро не использует центральную шину для основного потока.
-EventBus сохранён для изолированных сценариев и тестовой совместимости. Основной UI-поток
-реализован через прямые вызовы `VisualizationSinkable`.
+**Назначение:** Определения `EventType` и `TradingEvent` для типизации. Передача в UI идёт напрямую
+через `VisualizationSinkable` без центральной шины.
 
-**Интерфейс:**
+**Интерфейс sink:**
 ```python
-class EventBusable(ABC):
-    def subscribe(self, event_type: EventType, handler: Callable[[TradingEvent], None]) -> None
-    def unsubscribe(self, event_type: EventType, handler: Callable[[TradingEvent], None]) -> None
-    async def publish(self, event: TradingEvent) -> None
-    def get_subscribers(self, event_type: EventType) -> List[Callable[[TradingEvent], None]]
+class VisualizationSinkable(Protocol):
+    async def on_candle(self, candle) -> None: ...
+    async def on_signal(self, signal) -> None: ...
+    async def on_market_status(self, status) -> None: ...
 ```
 
 **Типы событий:**
@@ -103,7 +99,7 @@ class TradingEvent:
 ```
 
 **Реализации:**
-Удалён общий `EventBus`; для визуализации используется прямой sink-интерфейс (on_candle/on_signal/on_market_status). Для обратной совместимости в DI возвращается простая заглушка с методами `subscribe`/`publish`.
+Передача в UI осуществляется через прямой sink-интерфейс (on_candle/on_signal/on_market_status).
 
 ### 3. SignalManager (Менеджер сигналов)
 
@@ -123,25 +119,24 @@ class SignalManager:
         vol_period=14,
         lookback_min=6,
         lookback_max=20,
-        peak_prominence=0.2,
-        event_bus=None
+        peak_prominence=0.2
     )
     
     def add_candle(self, candle: Candle | HistoricCandle) -> Optional[Signal]
-    def subscribe_to_events(self)
-    async def _handle_candle_event(self, event: TradingEvent)
+    # Прямой вызов из MarketDataStream
+    async def _handle_candle(self, candle: Candle | HistoricCandle)
     
     @property
     def candles(self) -> deque
 ```
 
 **Алгоритм работы:**
-1. Получает свечи через EventBus
+1. Получает свечи напрямую из `MarketDataStream`
 2. Вычисляет MACD индикатор (быстрая, медленная, сигнальная линии)
 3. Вычисляет ATR для адаптивного окна анализа
 4. Обнаруживает пики и впадины в MACD гистограмме
-5. Генерирует сигналы на основе пиков/впадин
-6. Публикует события сигналов
+5. Генерирует сигналы
+6. Передает сигнал через `VisualizationSinkable.on_signal`
 
 **Структура сигнала:**
 ```python
@@ -166,7 +161,7 @@ class Signal:
 **Основные методы:**
 ```python
 class PortfolioManager:
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[EventBusable] = None)
+    def __init__(self, api_client: TinkoffAPIClient)
     
     async def get_portfolio(self, force_refresh: bool = False) -> Portfolio
     async def get_deposit(self) -> float
@@ -255,8 +250,7 @@ class StrategyManager:
         portfolio_manager: PortfolioManageable,
         order_executor: OrderExecutable,
         risk_manager: RiskManageable,
-        signal_manager: SignalManageable,
-        event_bus: EventBusable
+        signal_manager: SignalManageable
     )
     
     async def initialize(self, figi: str, point_value: float = None, contracts_per_lot: int = None) -> None
@@ -278,7 +272,7 @@ class StrategyManager:
 **Основные методы:**
 ```python
 class OrderExecutor:
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[EventBusable] = None)
+    def __init__(self, api_client: TinkoffAPIClient)
     
     async def execute_order(self, order_intent: OrderIntent) -> OrderExecution
     async def buy_market(self, figi: str, quantity: int, wait_execution: bool = True) -> OrderResult
@@ -323,17 +317,11 @@ class OrderExecution:
 **Основные методы:**
 ```python
 class MarketDataStream:
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: EventBusable, figi: str)
+    def __init__(self, api_client: TinkoffAPIClient, figi: str)
     
     async def start(self) -> None
     async def stop(self) -> None
-    async def get_latest_candles(self, count: int = 10) -> List[Candle]
-    async def get_current_price(self) -> Optional[float]
-    def get_cached_candles(self) -> List[Candle]
-    def get_cache_size(self) -> int
-    def clear_cache(self) -> None
-    def add_signal_callback(self, callback) -> None
-    def remove_signal_callback(self, callback) -> None
+    def set_visualization_sink(self, sink: VisualizationSinkable) -> None
 ```
 
 **Особенности:**
@@ -389,7 +377,6 @@ class RiskCheck:
 class DashEventVisualizer:
     def __init__(
         self, 
-        event_bus: EventBusable, 
         figi: str = "FUTIMOEXF000", 
         host: str = "127.0.0.1", 
         port: int = 8050,
@@ -399,7 +386,7 @@ class DashEventVisualizer:
     async def start(self) -> None
     async def stop(self) -> None
     def _create_dash_app(self) -> Dash
-    # Подписки через EventBus удалены; используется прямой sink (on_candle/on_signal/on_market_status)
+    # Визуализатор получает данные через sink-интерфейс
     def _run_server(self) -> None
 ```
 
@@ -417,11 +404,8 @@ class DashEventVisualizer:
                                         │
                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                                EventBus                                        │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │ CANDLE_RECEIVED │  │ SIGNAL_GENERATED│  │ ORDER_PLACED    │  │ PORTFOLIO_  │ │
-│  │                 │  │                 │  │                 │  │ UPDATED     │ │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘  └─────────────┘ │
+│                         Direct calls to Visualization Sink                      │
+│    on_candle / on_signal / on_market_status                                     │
 └─────────────────────────────────────────────────────────────────────────────────┘
                                         │
                                         ▼
@@ -432,8 +416,8 @@ class DashEventVisualizer:
 │  │SignalManager │    │PortfolioMgr  │    │OrderExecutor │    │RiskManager   │  │
 │  │              │    │              │    │              │    │              │  │
 │  │- MACD calc   │    │- Portfolio   │    │- Buy/Sell    │    │- Risk limits │  │
-│  │- Peak detect │    │- Positions   │    │- Order mgmt  │    │- Risk check  │  │
-│  │- Signal gen  │    │- Balance     │    │- Execution   │    │- Reports     │  │
+│  │- Peak detect │    │- Positions   │    │- Order mgmt  │    │- Reports     │  │
+│  │- Signal gen  │    │- Balance     │    │- Execution   │    │- Checks      │  │
 │  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘  │
 │                                                                                 │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
@@ -441,21 +425,7 @@ class DashEventVisualizer:
 │  │              │    │              │    │              │    │              │  │
 │  │- Long/Short  │    │- Candle cache│    │- Lifecycle   │    │- Settings    │  │
 │  │- Signal exec │    │- Data stream │    │- Market check│    │- Parameters  │  │
-│  │- Position mgmt│   │- Event pub   │    │- Error handle│    │- Timeouts    │  │
-│  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-                                        │
-                                        ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              Внешние системы                                   │
-│                                                                                 │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐  │
-│  │Tinkoff API   │    │Dash Visualizer│   │File System   │    │Logging       │  │
-│  │              │    │              │    │              │    │              │  │
-│  │- Market data │    │- Web UI      │    │- Config      │    │- Console     │  │
-│  │- Orders      │    │- Charts      │    │- Logs        │    │- Files       │  │
-│  │- Portfolio   │    │- Real-time   │    │- Data        │    │- Levels      │  │
-│  │- Positions   │    │- Statistics  │    │- Cache       │    │- Rotation    │  │
+│  │- Position mgmt│   │- Sink calls  │    │- Error handle│    │- Timeouts    │  │
 │  └──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -465,39 +435,35 @@ class DashEventVisualizer:
 ### 1. Основной торговый поток
 
 ```
-MarketDataStream → EventBus → SignalManager → StrategyManager → OrderExecutor → PortfolioManager
+MarketDataStream → SignalManager → StrategyManager → OrderExecutor → PortfolioManager
 ```
 
 1. **MarketDataStream** получает свечи от API
-2. **EventBus** передает событие `CANDLE_RECEIVED`
-3. **SignalManager** обрабатывает свечу и генерирует сигнал
-4. **EventBus** передает событие `SIGNAL_GENERATED`
-5. **StrategyManager** получает сигнал и принимает решение о торговле
-6. **OrderExecutor** выполняет ордер
-7. **PortfolioManager** обновляет портфель
+2. **SignalManager** обрабатывает свечу и генерирует сигнал
+3. **StrategyManager** принимает решение о торговле
+4. **OrderExecutor** выполняет ордер
+5. **PortfolioManager** обновляет портфель
 
 ### 2. Поток визуализации
 
 ```
-EventBus → DashEventVisualizer → DataManager → UIComponents → Dash App
+MarketDataStream/SignalManager → (direct) Visualization Sink → DataManager → UIComponents → Dash App
 ```
 
-1. **EventBus** передает все события
-2. **DashEventVisualizer** подписывается на события
-3. **DataManager** сохраняет данные для отображения
-4. **UIComponents** обновляет интерфейс
-5. **Dash App** отображает данные в браузере
+1. Компоненты вызывают методы `on_*` визуализатора напрямую
+2. **DataManager** сохраняет данные для отображения
+3. **UIComponents** обновляет интерфейс
+4. **Dash App** отображает данные в браузере
 
 ### 3. Поток управления сессией
 
 ```
-SessionController → SessionInitializer → TradingDependencies → EventBus
+SessionController → SessionInitializer → TradingDependencies
 ```
 
 1. **SessionController** управляет жизненным циклом
 2. **SessionInitializer** инициализирует компоненты
 3. **TradingDependencies** связывает все зависимости
-4. **EventBus** обеспечивает связь между компонентами
 
 ## Конфигурация
 
@@ -626,411 +592,13 @@ async def run_trading_system(
     
     # Запуск системы
     session_controller = trading_system['session_controller']
-    await session_controller.start()
-```
-
-### С моками для тестирования
-
-**Файл:** `run_trading_system_with_mocks.py`
-
-Аналогично основному, но с мок-данными вместо реального API.
-
-## Тестирование
-
-### Структура тестов
-
-**Папка:** `tests/`
-
-- **test_di_container.py** - тесты DI контейнера
-- **test_event_integration.py** - тесты интеграции событий
-- **test_signal_manager.py** - тесты менеджера сигналов
-- **test_portfolio_manager.py** - тесты менеджера портфеля
-- **test_strategies.py** - тесты стратегий
-- **test_trading_system_with_di.py** - тесты торговой системы
-
-### Принципы тестирования
-
-1. **Моки для всех внешних зависимостей** - API, база данных, файлы
-2. **Изоляция тестов** - каждый тест независим
-3. **Проверка интерфейсов** - тестирование через интерфейсы
-4. **Асинхронные тесты** - использование pytest-asyncio
-
-## Логирование
-
-### Система логирования
-
-**Файл:** `robotlib/utils/logger.py`
-
-```python
-def get_logger(name: str) -> logging.Logger:
-    # Настройка логов с уровнем INFO
-    # Формат: время, уровень, модуль, сообщение
-    # Вывод в консоль и файл
-```
-
-### Уровни логирования
-
-- **DEBUG** - отладочная информация
-- **INFO** - общая информация о работе
-- **WARNING** - предупреждения
-- **ERROR** - ошибки
-- **CRITICAL** - критические ошибки
-
-## Обработка ошибок
-
-### Принципы обработки ошибок
-
-1. **Логирование всех ошибок** - с контекстом и стеком вызовов
-2. **Graceful degradation** - система продолжает работать при ошибках
-3. **Восстановление после сбоев** - автоматическое восстановление API
-4. **Валидация данных** - проверка входных данных
-
-### Типы ошибок
-
-1. **API ошибки** - проблемы с Tinkoff API
-2. **Сетевые ошибки** - проблемы с сетью
-3. **Ошибки данных** - некорректные данные
-4. **Ошибки конфигурации** - неправильная настройка
-
-## Производительность
-
-### Оптимизации
-
-1. **Кэширование** - кэш портфеля, свечей, статуса рынка
-2. **Ленивая инициализация** - компоненты создаются по требованию
-3. **Асинхронность** - неблокирующие операции
-4. **Ограничение памяти** - ограничение размера кэшей
-
-### Мониторинг
-
-1. **Логирование производительности** - время выполнения операций
-2. **Метрики системы** - использование памяти, CPU
-3. **Статистика торговли** - количество сделок, прибыль/убыток
-
-## Безопасность
-
-### Принципы безопасности
-
-1. **Токены API** - хранение в конфигурации, не в коде
-2. **Валидация данных** - проверка всех входных данных
-3. **Обработка ошибок** - не раскрытие чувствительной информации
-4. **Логирование** - не логирование чувствительных данных
-
-## Расширяемость
-
-### Добавление новых компонентов
-
-1. **Создание интерфейса** - определение контракта
-2. **Реализация интерфейса** - создание класса
-3. **Регистрация в DI** - добавление в контейнер
-4. **Интеграция с EventBus** - подписка на события
-
-### Добавление новых стратегий
-
-1. **Создание класса стратегии** - наследование от базового
-2. **Реализация методов** - on_candle, execute_signal
-3. **Регистрация в StrategyManager** - добавление в список
-4. **Тестирование** - создание тестов
-
-## Детальные примеры кода
-
-### 1. Создание и запуск системы
-
-```python
-# Основной entry point
-import asyncio
-from robotlib.trading.di_container import TradingSystemContainer
-from robotlib.trading.trading_config import TradingConfig
-from config_data.config import load_config
-
-async def main():
-    # Загрузка конфигурации
-    config = load_config()
-    
-    # Создание торговой конфигурации
-    trading_config = TradingConfig(
-        figi="FUTIMOEXF000",
-        enable_visualization=True
-    )
-    trading_config.tcs_client = config.tcs_client
-    
-    # Создание DI контейнера
-    container = TradingSystemContainer(trading_config, enable_visualization=True)
-    
-    # Сборка торговой системы
-    trading_system = await container.build_trading_system(
-        host="127.0.0.1", 
-        port=8050, 
-        start_server=True
-    )
-    
-    # Получение компонентов
-    session_controller = trading_system['session_controller']
-    event_bus = trading_system['event_bus']
     visualizer = trading_system['visualizer']
     
-    # Запуск системы
-    await session_controller.start()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-### 2. Работа с EventBus
-
-```python
-from robotlib.trading.events import EventType, TradingEvent
-
-# Создание шины событий
-event_bus = EventBus()
-
-# Подписка на события
-def handle_candle(event: TradingEvent):
-    candle = event.data['candle']
-    print(f"Получена свеча: {candle.close}")
-
-def handle_signal(event: TradingEvent):
-    signal = event.data['signal']
-    print(f"Сгенерирован сигнал: {signal.peak_detected}")
-
-event_bus.subscribe(EventType.CANDLE_RECEIVED, handle_candle)
-event_bus.subscribe(EventType.SIGNAL_GENERATED, handle_signal)
-
-# Публикация события
-candle_event = TradingEvent(
-    EventType.CANDLE_RECEIVED,
-    {'candle': candle_data, 'figi': 'FUTIMOEXF000'}
-)
-await event_bus.publish(candle_event)
-```
-
-### 3. Создание SignalManager
-
-```python
-from robotlib.signal_manager import SignalManager
-# EventBus устарел для основного потока; примеры ниже используют прямой sink
-
-# Создание менеджера сигналов
-signal_manager = SignalManager(
-    macd_fast=6,
-    macd_slow=11,
-    macd_signal=9,
-    atr_period=7,
-    vol_period=14,
-    lookback_min=6,
-    lookback_max=20,
-    peak_prominence=0.2,
-    event_bus=event_bus
-)
-
-# Подписка на события свечей
-signal_manager.subscribe_to_events()
-
-# Добавление свечи (автоматически через EventBus)
-# signal_manager.add_candle(candle) - вызывается автоматически
-```
-
-### 4. Работа с PortfolioManager
-
-```python
-from robotlib.trading.portfolio_manager import PortfolioManager
-from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
-
-# Создание менеджера портфеля
-portfolio_manager = PortfolioManager(api_client, event_bus)
-
-# Получение портфеля
-portfolio = await portfolio_manager.get_portfolio()
-print(f"Общая сумма: {portfolio.total_amount}")
-print(f"Доступно: {portfolio.available_amount}")
-
-# Получение позиции
-position = await portfolio_manager.get_position("FUTIMOEXF000")
-if position:
-    print(f"Позиция: {position.quantity} контрактов")
-    print(f"Средняя цена: {position.average_price}")
-
-# Получение депозита
-deposit = await portfolio_manager.get_deposit()
-print(f"Депозит: {deposit}")
-```
-
-### 5. Выполнение ордеров
-
-```python
-from robotlib.trading.order_executor import OrderExecutor
-from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
-
-# Создание исполнителя ордеров
-order_executor = OrderExecutor(api_client, event_bus)
-
-# Создание намерения на ордер
-order_intent = OrderIntent(
-    figi="FUTIMOEXF000",
-    direction=OrderDirection.BUY,
-    order_type=OrderType.MARKET,
-    quantity=1
-)
-
-# Выполнение ордера
-execution = await order_executor.execute_order(order_intent)
-print(f"Ордер выполнен: {execution.order_id}")
-print(f"Статус: {execution.status}")
-
-# Простые методы
-result = await order_executor.buy_market("FUTIMOEXF000", 1)
-result = await order_executor.sell_market("FUTIMOEXF000", 1)
-result = await order_executor.buy_limit("FUTIMOEXF000", 1, 2900.0)
-```
-
-### 6. Управление стратегиями
-
-```python
-from robotlib.strategies.strategy_manager import StrategyManager
-from robotlib.strategies.long import LongStrategy
-from robotlib.strategies.short import ShortStrategy
-
-# Создание менеджера стратегий
-strategy_manager = StrategyManager(
-    portfolio_manager=portfolio_manager,
-    order_executor=order_executor,
-    risk_manager=risk_manager,
-    signal_manager=signal_manager,
-    event_bus=event_bus
-)
-
-# Инициализация стратегий
-await strategy_manager.initialize(
-    figi="FUTIMOEXF000",
-    point_value=1.0,
-    contracts_per_lot=1
-)
-
-# Обработка свечи через стратегии
-await strategy_manager.on_candle(candle_data)
-
-# Закрытие всех позиций
-await strategy_manager.close_all_positions()
-```
-
-### 7. Работа с MarketDataStream
-
-```python
-from robotlib.trading.market_data_stream import MarketDataStream
-
-# Создание потока данных
-market_data_stream = MarketDataStream(api_client, event_bus, "FUTIMOEXF000")
-
-# Запуск потока
-await market_data_stream.start()
-
-# Получение последних свечей
-candles = await market_data_stream.get_latest_candles(10)
-print(f"Получено {len(candles)} свечей")
-
-# Получение текущей цены
-current_price = await market_data_stream.get_current_price()
-print(f"Текущая цена: {current_price}")
-
-# Получение кэшированных свечей
-cached_candles = market_data_stream.get_cached_candles()
-print(f"В кэше {len(cached_candles)} свечей")
-
-# Остановка потока
-await market_data_stream.stop()
-```
-
-### 8. Управление рисками
-
-```python
-from robotlib.trading.risk_manager import RiskManager, RiskLimits
-
-# Создание лимитов рисков
-risk_limits = RiskLimits(
-    max_position_size=10,
-    max_daily_loss=10000.0,
-    max_single_trade=1000.0,
-    stop_loss_percent=5.0
-)
-
-# Создание менеджера рисков
-risk_manager = RiskManager(risk_limits)
-
-# Проверка риска сделки
-risk_check = await risk_manager.check_trade_risk(
-    figi="FUTIMOEXF000",
-    quantity=1,
-    price=2900.0
-)
-
-if risk_check.is_approved:
-    print("Сделка одобрена")
-else:
-    print(f"Сделка отклонена: {risk_check.message}")
-
-# Получение отчета о рисках
-risk_report = await risk_manager.get_risk_report()
-print(f"Отчет о рисках: {risk_report}")
-```
-
-### 9. Визуализация
-
-```python
-from visualization.dash_event_visualizer import DashEventVisualizer
-
-# Создание визуализатора
-visualizer = DashEventVisualizer(
-    event_bus=event_bus,
-    figi="FUTIMOEXF000",
-    host="127.0.0.1",
-    port=8050,
-    start_server=True
-)
-
-# Запуск визуализатора
-await visualizer.start()
-
-# Визуализатор будет доступен по адресу http://127.0.0.1:8050
-# Автоматически подписывается на все события и отображает их в веб-интерфейсе
-```
-
-### 10. Полный пример интеграции
-
-```python
-import asyncio
-from robotlib.trading.di_container import TradingSystemContainer
-from robotlib.trading.trading_config import TradingConfig
-from config_data.config import load_config
-
-async def run_complete_system():
-    """Полный пример запуска торговой системы"""
-    
-    # 1. Загрузка конфигурации
-    config = load_config()
-    trading_config = TradingConfig(
-        figi="FUTIMOEXF000",
-        enable_visualization=True
-    )
-    trading_config.tcs_client = config.tcs_client
-    
-    # 2. Создание DI контейнера
-    container = TradingSystemContainer(trading_config, enable_visualization=True)
-    
-    # 3. Сборка системы
-    trading_system = await container.build_trading_system()
-    
-    # 4. Получение компонентов
-    session_controller = trading_system['session_controller']
-    event_bus = trading_system['event_bus']
-    visualizer = trading_system['visualizer']
-    
-    # 5. Настройка обработчиков событий
+    # 5. Настройка обработчиков (опционально для отладки)
     def log_event(event):
-        print(f"Событие: {event.event_type.value} - {event.data}")
+        print(f"Событие: {getattr(event, 'event_type', 'n/a')} - {getattr(event, 'data', {})}")
     
-    event_bus.subscribe(EventType.CANDLE_RECEIVED, log_event)
-    event_bus.subscribe(EventType.SIGNAL_GENERATED, log_event)
-    event_bus.subscribe(EventType.ORDER_PLACED, log_event)
+    # Подписок больше нет — визуализатор получает данные через прямые вызовы sink
     
     # 6. Запуск системы
     print("Запуск торговой системы...")
