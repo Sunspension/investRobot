@@ -4,7 +4,6 @@ import numpy as np
 from plotly.graph_objects import Figure
 from pandas.core.frame import DataFrame
 from dash import Dash, dcc, html, Input, Output
-from talipp.indicators import MACD
 
 app = Dash(__name__)
 app.layout = html.Div([

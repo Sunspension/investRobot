@@ -2,8 +2,7 @@ import numpy as np
 
 from scipy.signal import find_peaks
 from collections import deque
-from talipp.indicators import MACD, ATR
-from talipp.ohlcv import OHLCV
+from robotlib.indicators import IncrementalMACD, IncrementalATR, MACDPoint
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
 from dataclasses import dataclass, field
@@ -37,18 +36,20 @@ class SignalManager:
     ):
         self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
         
-        self._macd = MACD(
-            fast_period=macd_fast, 
-            slow_period=macd_slow, 
-            signal_period=macd_signal
+        self._macd = IncrementalMACD(
+            fast_period=macd_fast,
+            slow_period=macd_slow,
+            signal_period=macd_signal,
         )
-        self._atr = ATR(period=atr_period)
+        self._atr = IncrementalATR(period=atr_period)
         self._vol_period = vol_period
         self._lookback_min = lookback_min
         self._lookback_max = lookback_max
         self._peak_prominence = peak_prominence
 
         self._hist_window = deque(maxlen=lookback_max)
+        self._atr_window = deque(maxlen=vol_period)
+        self._macd_history: deque[MACDPoint] = deque(maxlen=3)
         self._event_bus = None
         self._sink = visualization_sink
 
@@ -72,18 +73,15 @@ class SignalManager:
 
     def add_candle(self, candle: Candle | HistoricCandle) -> Signal:
         price = Money(candle.close).to_float()
-        # Добавляем данные для инкрементального расчета MACD
-        self._macd.add(price)
-        # Добавляем данные для инкрементального расчета ATR
-        ohlcv = OHLCV(
-            open=Money(candle.open).to_float(),
+        # Инкрементальные обновления индикаторов
+        macd_value = self._macd.update(price)
+        atr_value = self._atr.update(
             high=Money(candle.high).to_float(),
             low=Money(candle.low).to_float(),
             close=price,
-            volume=Money(candle.volume).to_float(),
-            time=candle.time.timestamp()
         )
-        self._atr.add(ohlcv)
+        if atr_value is not None:
+            self._atr_window.append(atr_value)
 
         # Сохраняем свечу всегда
         item = {
@@ -97,11 +95,11 @@ class SignalManager:
             'histogram': None
         }
 
-        macd_value = self._macd[-1]
         if macd_value is not None:
             item['macd'] = macd_value.macd
             item['signal'] = macd_value.signal
             item['histogram'] = macd_value.histogram
+            self._macd_history.append(macd_value)
 
         self._candles.append(item)
 
@@ -115,15 +113,17 @@ class SignalManager:
             return None  # ждём накопления данных
 
         # Рассчитать адаптивный lookback по волатильности
-        atr_values = self._atr[-self._vol_period:]
-        if any(x is None for x in atr_values):
+        if len(self._atr_window) < self._vol_period:
             return None
-        
-        atr_mean = np.nanmean(atr_values)
+        atr_values = list(self._atr_window)
+        atr_mean = float(np.nanmean(atr_values))
         if np.isnan(atr_mean):
             return None  # пропускаем шаг, если нет валидных данных
 
-        vol_norm = self._atr[-1] / (atr_mean + 1e-6)
+        current_atr = self._atr.current()
+        if current_atr is None:
+            return None
+        vol_norm = current_atr / (atr_mean + 1e-6)
 
         # Адаптивный размер окна
         lookback = int(self._lookback_max - (self._lookback_max - self._lookback_min) * min(vol_norm, 1))
@@ -146,12 +146,14 @@ class SignalManager:
         recent_indices = [current_idx - i for i in range(check_last_n) if current_idx - i >= 0]
 
         # Сигналы на основе пиков и впадин
+        macd_prev = self._macd_history[-2] if len(self._macd_history) > 1 else None
+
         signal = Signal(
             macd=macd_value.macd,
             signal=macd_value.signal,
             histogram=macd_value.histogram,
-            macd_prev=self._macd[-2].macd if len(self._macd) > 1 else None,
-            signal_prev=self._macd[-2].signal if len(self._macd) > 1 else None,
+            macd_prev=macd_prev.macd if macd_prev else None,
+            signal_prev=macd_prev.signal if macd_prev else None,
             peak_detected=any(idx in peaks for idx in recent_indices),
             trough_detected=any(idx in troughs for idx in recent_indices),
             candle=candle
