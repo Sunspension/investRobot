@@ -68,3 +68,11 @@ python market_visualizer.py
 ---
 
 **Важно**: Это только для анализа данных. Для реальной торговли нужна дополнительная настройка.
+
+## 🧪 Песочница: пополнение через CLI
+
+```bash
+python tools/sandbox_cli.py payin --amount 100000
+```
+
+Требуется `SANDBOX_TOKEN` и `TINKOFF_ACCOUNT` в .env.

@@ -20,6 +20,27 @@
 python main_trading.py --figi FUTIMOEXF000 --deposit 50000 --percent-from-deposit 40
 ```
 
+#### Пополнение sandbox и пример покупки через API
+
+```python
+from config_data.config import load_config
+from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
+
+config = load_config()
+
+async with TinkoffAPIClient(
+    token=config.tcs_client.token,
+    account_id=config.tcs_client.account_id,
+    sandbox_token=config.tcs_client.sandbox_token,
+) as api:
+    # Пополнить sandbox на 100 000 RUB
+    await api.sandbox_pay_in(100000.0)
+
+    # Рыночная покупка 1 лота
+    res = await api.buy_market(figi="FUTIMOEXF000", quantity=1, wait_execution=True)
+    print(res)
+```
+
 ### 2. Запуск с кастомными параметрами:
 
 ```bash

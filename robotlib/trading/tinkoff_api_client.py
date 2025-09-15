@@ -539,6 +539,22 @@ class TinkoffAPIClient:
         """Проверяет, используется ли песочница"""
         return self.sandbox_token is not None
 
+    async def sandbox_pay_in(self, amount_rub: float) -> bool:
+        """Пополнение sandbox-счёта в рублях.
+        Возвращает True при успехе. В продакшне недоступно.
+        """
+        try:
+            if not self.is_sandbox:
+                self.logger.warning("sandbox_pay_in: не песочница")
+                return False
+            amount = MoneyValue(currency="rub", units=int(amount_rub), nano=int((amount_rub - int(amount_rub)) * 1_000_000_000))
+            await self.services.sandbox.sandbox_pay_in(account_id=self.account_id, amount=amount)
+            self.logger.info(f"Sandbox пополнен на {amount_rub} RUB")
+            return True
+        except Exception as e:
+            self.logger.error(f"Ошибка sandbox_pay_in: {e}")
+            return False
+
 
 # Пример использования
 async def main():
