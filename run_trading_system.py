@@ -30,13 +30,19 @@ def stop_previous_processes(port: int = 8050):
         if result.returncode == 0:
             lines = result.stdout.split('\n')
             python_pids = []
+            current_pid = os.getpid()
             
             for line in lines:
                 if 'python' in line and 'run_trading_system.py' in line and 'grep' not in line:
                     parts = line.split()
                     if len(parts) > 1:
                         pid = parts[1]
-                        python_pids.append(pid)
+                        try:
+                            if int(pid) != current_pid:
+                                python_pids.append(pid)
+                        except ValueError:
+                            # пропускаем строки, где PID не число
+                            continue
             
             if python_pids:
                 logger.info(f"🛑 Найдены процессы Python: {python_pids}")
@@ -66,7 +72,11 @@ def stop_previous_processes(port: int = 8050):
                             parts = line.split()
                             if len(parts) > 1:
                                 pid = parts[1]
-                                remaining_pids.append(pid)
+                                try:
+                                    if int(pid) != current_pid:
+                                        remaining_pids.append(pid)
+                                except ValueError:
+                                    continue
                     
                     if remaining_pids:
                         logger.info(f"💀 Остались процессы: {remaining_pids}, отправляем SIGKILL")

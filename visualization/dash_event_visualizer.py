@@ -5,6 +5,7 @@ Dash визуализатор событий торговой системы (ч
 import asyncio
 import threading
 import time
+import json
 import concurrent.futures
 from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
@@ -47,8 +48,6 @@ class DashEventVisualizer(EventVisualizerable):
         self._chart_builder = ChartBuilder()
         self._ui_components = UIComponents(figi, self._chart_builder)
         
-        # Загружаем исторические данные
-        self._load_historical_data()
         
         # Добавляем мок-данные для демонстрации (отключено)
         # self._add_demo_data()
@@ -58,11 +57,12 @@ class DashEventVisualizer(EventVisualizerable):
         
         # Проверяем, что данные загружены
         data_snapshot = self._data_manager.get_data_snapshot()
-        self._logger.info(f"🔍 После инициализации: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
+        self._logger.debug(f"После инициализации: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
         
         # Dash приложение
         self._app = None
         self._server_thread = None
+        self._ws_connections = set()
         
         # Кэш для API данных
         self._market_status_cache = None
@@ -106,7 +106,7 @@ class DashEventVisualizer(EventVisualizerable):
                 'last_update': datetime.now()
             }
             self._data_manager.update_portfolio(portfolio_data)
-            self._logger.info("Портфель инициализирован с нулевыми значениями")
+            self._logger.debug("Портфель инициализирован с нулевыми значениями")
             
         except Exception as e:
             self._logger.error(f"Ошибка инициализации портфеля: {e}")
@@ -122,7 +122,7 @@ class DashEventVisualizer(EventVisualizerable):
             
             async with TinkoffAPIClient(
                 token=config.tcs_client.token,
-                account_id=config.tcs_client.id,
+                account_id=config.tcs_client.account_id,
                 sandbox_token=config.tcs_client.sandbox_token
             ) as api_client:
                 portfolio_manager = PortfolioManager(api_client)
@@ -255,7 +255,7 @@ class DashEventVisualizer(EventVisualizerable):
         if not self._running:
             return
         
-        self._logger.info(f"🎯 DashEventVisualizer получил событие CANDLE_RECEIVED")
+        self._logger.debug("DashEventVisualizer получил событие CANDLE_RECEIVED")
         try:
             candle = event.data.get('candle')
             if candle:
@@ -270,11 +270,14 @@ class DashEventVisualizer(EventVisualizerable):
                 }
                 # Добавляем свечу в менеджер данных
                 self._data_manager.add_candle(candle_data)
-                self._logger.info(f"✅ Добавлена свеча: {candle_data['time']} @ {candle_data['close']}")
+                self._logger.debug(f"Добавлена свеча: {candle_data['time']} @ {candle_data['close']}")
                 
                 # Проверяем, что данные сохранились
                 data_snapshot = self._data_manager.get_data_snapshot()
-                self._logger.info(f"📊 Данные в DataManager: {len(data_snapshot['candles_data'])} свечей, цена: {data_snapshot['current_price']}")
+                self._logger.debug(f"DataManager: {len(data_snapshot['candles_data'])} свечей, цена: {data_snapshot['current_price']}")
+                
+                # Push-уведомление в UI
+                self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
         except Exception as e:
             self._logger.error(f"Ошибка обработки события свечи: {e}")
     
@@ -362,6 +365,8 @@ class DashEventVisualizer(EventVisualizerable):
             # Обновляем статус рынка
             self._data_manager.update_market_status(market_data)
             self._logger.debug(f"Обновлен статус рынка: {event.event_type}")
+            # Push-уведомление в UI
+            self._broadcast_ws({"type": "market_status", "is_trading": market_data.get('is_trading', False)})
         except Exception as e:
             self._logger.error(f"Ошибка обработки события статуса рынка: {e}")
     
@@ -383,8 +388,20 @@ class DashEventVisualizer(EventVisualizerable):
             # Устанавливаем флаг запуска сразу, чтобы события обрабатывались
             self._running = True
             
+            # Подписываемся на события сразу при старте
+            self._setup_event_handlers()
+
             # Загружаем данные портфеля от API
             await self._load_portfolio_from_api()
+
+            # Немедленно обновляем статус рынка из API без кэша, чтобы UI не показывал "рынок закрыт"
+            # Пока нет явного API в DataManager для статуса рынка, просто логируем актуальный статус
+            try:
+                from robotlib.utils.market_hours import get_market_status_with_api
+                market_status = await get_market_status_with_api()
+                self._logger.info(f"Статус рынка при старте визуализатора: is_trading={market_status.get('is_trading', False)}")
+            except Exception as e:
+                self._logger.warning(f"Не удалось получить статус рынка при старте визуализатора: {e}")
             
             # Создаем Dash приложение
             self._app = self._create_dash_app()
@@ -465,13 +482,59 @@ class DashEventVisualizer(EventVisualizerable):
         
         # Настраиваем callbacks
         self._setup_callbacks(app)
+
+        # WebSocket endpoint для push-уведомлений
+        try:
+            from flask_sock import Sock
+            sock = Sock(app.server)
+
+            @sock.route('/ws')
+            def _ws_endpoint(ws):
+                try:
+                    self._logger.info("WS клиент подключен")
+                    self._ws_connections.add(ws)
+                    while True:
+                        msg = ws.receive()
+                        if msg is None:
+                            break
+                except Exception as e:
+                    self._logger.debug(f"WS соединение закрыто: {e}")
+                finally:
+                    if ws in self._ws_connections:
+                        self._ws_connections.discard(ws)
+                        self._logger.info("WS клиент отключен")
+        except Exception as e:
+            self._logger.warning(f"Не удалось инициализировать WebSocket: {e}")
+        
+        # Диагностические эндпоинты для автономной проверки состояния
+        try:
+            from flask import jsonify
+            
+            @app.server.get('/_health')
+            def _health():
+                snapshot = self._data_manager.get_data_snapshot()
+                return jsonify({
+                    'ok': True,
+                    'is_trading': snapshot.get('market_status', {}).get('is_trading', False),
+                    'candles_count': len(snapshot.get('candles_data', [])),
+                    'buy_signals': snapshot.get('buy_count', 0),
+                    'sell_signals': snapshot.get('sell_count', 0)
+                })
+            
+            @app.server.get('/_snapshot')
+            def _snapshot():
+                snapshot = self._data_manager.get_data_snapshot()
+                # Убираем тяжелые поля, если что
+                return jsonify(snapshot)
+        except Exception as e:
+            self._logger.warning(f"Не удалось добавить диагностические эндпоинты: {e}")
         
         # Принудительно вызываем callback при создании приложения
-        self._logger.info("🔄 Принудительно вызываем callback при создании приложения")
+        self._logger.debug("Принудительно вызываем callback при создании приложения")
         try:
             # Получаем данные и создаем график
             data_snapshot = self._data_manager.get_data_snapshot()
-            self._logger.info(f"📊 При создании приложения: {len(data_snapshot['candles_data'])} свечей")
+            self._logger.debug(f"При создании приложения: {len(data_snapshot['candles_data'])} свечей")
             
             # Создаем график
             fig = self._chart_builder.create_trading_chart(
@@ -480,7 +543,7 @@ class DashEventVisualizer(EventVisualizerable):
                 orders_data=data_snapshot['orders_data'],
                 current_price=data_snapshot['current_price']
             )
-            self._logger.info("✅ График создан при инициализации")
+            self._logger.debug("График создан при инициализации")
         except Exception as e:
             self._logger.error(f"❌ Ошибка при создании графика: {e}")
         
@@ -489,6 +552,20 @@ class DashEventVisualizer(EventVisualizerable):
         # Убираем принудительный вызов callback'а - исправим основной callback
         
         return app
+
+    def _broadcast_ws(self, payload: Dict[str, Any]) -> None:
+        """Рассылает сообщение всем WS-клиентам"""
+        if not self._ws_connections:
+            return
+        message = json.dumps(payload, default=str)
+        dead = []
+        for ws in list(self._ws_connections):
+            try:
+                ws.send(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self._ws_connections.discard(ws)
     
     def _create_layout(self) -> html.Div:
         """Создает макет приложения с богатым UI из TradingVisualizerAdapter"""
@@ -514,29 +591,20 @@ class DashEventVisualizer(EventVisualizerable):
              Output('portfolio-pnl', 'children'),
              Output('portfolio-variation-margin', 'children'),
              Output('portfolio-guarantee-deposit', 'children')],
-            [Input('interval-component', 'n_intervals')],
+            [Input('ws', 'message')],
             [State('simulation-state', 'data')],
-            prevent_initial_call=True
+            prevent_initial_call=False
         )
-        def update_display(n, state):
+        def update_display(ws_message, state):
             """Обновляет отображение данных с богатым UI"""
             try:
-                self._logger.info(f"🔄 CALLBACK ВЫЗВАН: n={n}, state={state}")
-                
-                # Принудительно обновляем данные при загрузке
-                if n is None or n == 0:
-                    self._logger.info("Принудительное обновление при загрузке страницы")
-                    # Принудительно добавляем демо-данные если их нет
-                    data_snapshot = self._data_manager.get_data_snapshot()
-                    if len(data_snapshot['candles_data']) == 0:
-                        self._logger.info("🔄 Данных нет, демо-данные отключены")
-                        # self._add_demo_data()  # Отключено
+                self._logger.debug("Callback вызван по WebSocket сообщению")
                 
                 # Получаем снимок данных
                 data_snapshot = self._data_manager.get_data_snapshot()
-                self._logger.info(f"📊 DataManager содержит: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
-                self._logger.info(f"📊 Портфель: {data_snapshot['portfolio_data']}")
-                self._logger.info(f"📊 Стратегии: {data_snapshot['strategies_data']}")
+                self._logger.debug(f"DataManager: {len(data_snapshot['candles_data'])} свечей, BUY={data_snapshot['buy_count']}, SELL={data_snapshot['sell_count']}")
+                self._logger.debug(f"Портфель: {data_snapshot['portfolio_data']}")
+                self._logger.debug(f"Стратегии: {data_snapshot['strategies_data']}")
                 
                 # Проверяем, что данные действительно есть
                 if len(data_snapshot['candles_data']) == 0:
@@ -643,35 +711,17 @@ class DashEventVisualizer(EventVisualizerable):
                        "0.00 ₽", "0.00 ₽", "0.00 ₽", "0.00 ₽")
         
         # Дополнительный callback для принудительного обновления при загрузке
-        @app.callback(
-            Output('interval-component', 'n_intervals'),
-            [Input('interval-component', 'interval')],
-            prevent_initial_call=False
-        )
-        def trigger_initial_update(interval):
-            """Принудительно запускает обновление при загрузке страницы"""
-            self._logger.info("🔄 Trigger callback вызван")
-            
-            # Принудительно вызываем основной callback для обновления UI
-            self._logger.info("🔄 Принудительно вызываем основной callback для обновления UI")
-            try:
-                # Вызываем основной callback напрямую
-                result = update_display(0, None)
-                self._logger.info("✅ Основной callback вызван принудительно")
-            except Exception as e:
-                self._logger.error(f"Ошибка принудительного вызова callback: {e}")
-            
-            return 0
+        # Удален триггер на interval-component (polling отключен)
         
         # Убираем Force callback - используем только основной callback
         
         # Callback для динамического цвета P&L
         @app.callback(
             Output('portfolio-pnl', 'style'),
-            [Input('interval-component', 'n_intervals')],
+            [Input('ws', 'message')],
             prevent_initial_call=False
         )
-        def update_pnl_color(n):
+        def update_pnl_color(_msg):
             """Обновляет цвет P&L в зависимости от значения"""
             try:
                 data_snapshot = self._data_manager.get_data_snapshot()
@@ -694,10 +744,10 @@ class DashEventVisualizer(EventVisualizerable):
         # Callback для динамического цвета вариационной маржи
         @app.callback(
             Output('portfolio-variation-margin', 'style'),
-            [Input('interval-component', 'n_intervals')],
+            [Input('ws', 'message')],
             prevent_initial_call=False
         )
-        def update_variation_margin_color(n):
+        def update_variation_margin_color(_msg):
             """Обновляет цвет вариационной маржи в зависимости от значения"""
             try:
                 data_snapshot = self._data_manager.get_data_snapshot()

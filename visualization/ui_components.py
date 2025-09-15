@@ -7,6 +7,7 @@
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from dash import Dash, dcc, html, Input, Output, State, callback_context
+from dash_extensions import WebSocket
 from robotlib.utils.logger import get_logger
 from visualization.logging_config import disable_verbose_logging
 
@@ -23,7 +24,7 @@ class UIComponents:
     
     def _disable_verbose_logging(self):
         """Отключает избыточные логи Flask/Dash"""
-        disable_verbose_logging()
+        disable_verbose_logging(enable_debug_logs=True)
     
     def create_dash_app(self) -> Dash:
         """Создает Dash приложение"""
@@ -68,8 +69,14 @@ class UIComponents:
     def _create_header(self) -> html.Div:
         """Создает заголовок дашборда"""
         return html.Div([
-            html.H1(f"📊 Инструмент: {self.figi} | Фьючерс на индекс MOEX", 
-                   className="header-title")
+            html.H1(
+                f"📊 Инструмент: {self.figi} | Фьючерс на индекс MOEX",
+                className="header-title"
+            ),
+            html.Div([
+                html.Span("Текущая цена:", style={'marginRight': '8px'}),
+                html.Span(id="current-price", children="—", className="stat-value")
+            ], style={'marginTop': '6px'})
         ], className="header")
     
     def _create_market_status(self) -> html.Div:
@@ -117,6 +124,11 @@ class UIComponents:
                         html.H2(id="sell-orders-count", children="0", 
                                className="stat-value", style={'color': '#dc3545'})
                     ], style={'textAlign': 'center', 'flex': '1'}),
+                    html.Div([
+                        html.H4("Σ Всего ордеров", className="stat-title"),
+                        html.H2(id="total-orders-count", children="0", 
+                               className="stat-value", style={'color': '#2E86AB'})
+                    ], style={'textAlign': 'center', 'flex': '1'})
                 ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
             ], className="orders-section"),
             
@@ -167,6 +179,7 @@ class UIComponents:
         """Создает секцию с сигналами"""
         return html.Div([
             html.H3("📋 Последние сигналы", className="signals-title"),
+            html.Div(id="signals-list", children=[], className="signals-list"),
             html.Div(id="recent-signals", children=[], className="signals-list")
         ], className="signals-container")
     
@@ -201,13 +214,8 @@ class UIComponents:
     def _create_layout(self) -> html.Div:
         """Создает layout приложения используя Dash компоненты"""
         return html.Div([
-            # Интервал обновления
-            dcc.Interval(
-                id='interval-component',
-                interval=60000,  # 60 секунд для обновления UI
-                n_intervals=0,
-                disabled=False
-            ),
+            # WebSocket клиент для push-уведомлений (polling отключен)
+            WebSocket(id="ws", url="/ws"),
             
             # Состояние симуляции
             dcc.Store(id='simulation-state', data={'running': False}),

@@ -40,6 +40,14 @@ class DataManager:
         self.current_price: float = 0.0
         self.last_update: Optional[datetime] = None
         
+        # Статус рынка
+        self.market_status: Dict[str, Any] = {
+            'is_trading': False,
+            'current_time': None,
+            'next_session': None,
+            'session_type': 'unknown'
+        }
+        
         # Статистика сигналов
         self.buy_count: int = 0
         self.sell_count: int = 0
@@ -109,7 +117,7 @@ class DataManager:
             if len(self.candles_data) > 200:
                 self.candles_data = self.candles_data[-100:]
             
-            self.logger.info(f"✅ Добавлена свеча: {candle_data['time']} @ {candle_data['close']:.2f} (всего: {len(self.candles_data)})")
+            self.logger.debug(f"Добавлена свеча: {candle_data['time']} @ {candle_data['close']:.2f} (всего: {len(self.candles_data)})")
     
     def add_signal(self, signal_data: Dict[str, Any]) -> None:
         """Добавляет сигнал в данные"""
@@ -125,7 +133,7 @@ class DataManager:
             if len(self.signals_data) > 100:
                 self.signals_data = self.signals_data[-50:]
             
-            self.logger.info(f"✅ Добавлен сигнал: {signal_data['type']} @ {signal_data.get('price', 0):.2f} (всего: {len(self.signals_data)})")
+            self.logger.debug(f"Добавлен сигнал: {signal_data['type']} @ {signal_data.get('price', 0):.2f} (всего: {len(self.signals_data)})")
     
     def add_order(self, order_data: Dict[str, Any]) -> None:
         """Добавляет ордер в данные"""
@@ -178,6 +186,16 @@ class DataManager:
         with self.data_lock:
             self.strategy_status = status
             self.logger.debug(f"Обновлен статус стратегий: {status}")
+
+    def update_market_status(self, status_data: Dict[str, Any]) -> None:
+        """Обновляет статус рынка"""
+        with self.data_lock:
+            self.market_status.update(status_data)
+            self.last_update = datetime.now()
+            self.logger.info(
+                f"Статус рынка: is_trading={self.market_status.get('is_trading')}, "
+                f"session={self.market_status.get('session_type')}"
+            )
     
     def update_strategies_data(self, strategies_data: List[Dict[str, Any]]) -> None:
         """Обновляет данные о стратегиях"""
@@ -193,6 +211,7 @@ class DataManager:
                 'signals_data': self.signals_data.copy(),
                 'orders_data': self.orders_data.copy(),
                 'portfolio_data': self.portfolio_data.copy(),
+                'market_status': self.market_status.copy(),
                 'strategy_status': self.strategy_status,
                 'strategies_data': self.strategies_data.copy(),
                 'current_price': self.current_price,

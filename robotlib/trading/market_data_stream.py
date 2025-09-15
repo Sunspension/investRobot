@@ -97,10 +97,48 @@ class MarketDataStream(MarketDataStreamable):
             # Проверяем статус рынка
             market_hours = await get_tinkoff_market_hours()
             market_status = await market_hours.get_trading_status()
+            # Публикуем событие изменения статуса рынка сразу при старте
+            try:
+                event = TradingEvent(
+                    EventType.MARKET_STATUS_CHANGED,
+                    data={
+                        'is_trading': market_status.get('is_trading', False),
+                        'session_type': market_status.get('session_type', 'unknown'),
+                        'current_time': market_status.get('current_time'),
+                        'next_session': market_status.get('next_session')
+                    }
+                )
+                asyncio.create_task(self._event_bus.publish(event))
+                self._logger.info(f"Опубликован статус рынка: is_trading={market_status.get('is_trading', False)}")
+            except Exception as publish_error:
+                self._logger.warning(f"Не удалось опубликовать статус рынка: {publish_error}")
             
             if market_status.get('is_trading', False):
                 # Рынок открыт - подписываемся на реальные данные
-                await self._stream_manager.subscribe_candles([self._figi], SubscriptionInterval.SUBSCRIPTION_INTERVAL_ONE_MINUTE)
+                # Современный AsyncMarketDataStreamManager использует метод subscribe()
+                try:
+                    from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
+                    request = MarketDataRequest(
+                        subscribe_candles_request=SubscribeCandlesRequest(
+                            subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
+                            instruments=[
+                                CandleInstrument(
+                                    figi=self._figi,
+                                    interval=CandleInterval.CANDLE_INTERVAL_1_MIN
+                                )
+                            ]
+                        )
+                    )
+                    # subscribe() синхронный
+                    self._stream_manager.subscribe(request)
+                    self._logger.info("Подписка на реальные данные через MarketDataRequest успешна")
+                except Exception as e:
+                    self._logger.error(f"Ошибка подписки на реальные данные: {e}")
+                    # Если не удалось подписаться, загружаем исторические данные
+                    self._logger.info("Переключаемся на загрузку исторических данных")
+                    self._is_running = True
+                    asyncio.create_task(self._load_historical_data())
+                    return True
                 self._logger.info("Рынок открыт, подписка на реальные данные активирована")
                 
                 # Запускаем обработку данных
@@ -159,7 +197,7 @@ class MarketDataStream(MarketDataStreamable):
                         
                         # Обрабатываем свечи
                         if market_data.candle:
-                            await self._process_candle(market_data.candle)
+                            self._process_candle(market_data.candle)
                         
                         # Обрабатываем другие типы данных
                         if market_data.trade:

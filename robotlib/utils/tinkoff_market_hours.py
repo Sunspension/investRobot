@@ -302,16 +302,24 @@ class TinkoffMarketHours:
         if day_info:
             if day_info['is_trading_day']:
                 for session in day_info['sessions']:
-                    if session['start'] > current_time:
+                    # session['start']/['end'] приходят как datetime; сравниваем по времени суток (МСК)
+                    if hasattr(session['start'], 'tzinfo') and session['start'].tzinfo:
+                        session_start_time = session['start'].astimezone(self._moscow_tz).time()
+                        session_end_time = session['end'].astimezone(self._moscow_tz).time()
+                    else:
+                        session_start_time = pytz.UTC.localize(session['start']).astimezone(self._moscow_tz).time()
+                        session_end_time = pytz.UTC.localize(session['end']).astimezone(self._moscow_tz).time()
+
+                    if session_start_time > current_time:
                         session_start = dt.replace(
-                            hour=session['start'].hour,
-                            minute=session['start'].minute,
+                            hour=session_start_time.hour,
+                            minute=session_start_time.minute,
                             second=0,
                             microsecond=0
                         )
                         session_end = dt.replace(
-                            hour=session['end'].hour,
-                            minute=session['end'].minute,
+                            hour=session_end_time.hour,
+                            minute=session_end_time.minute,
                             second=0,
                             microsecond=0
                         )
