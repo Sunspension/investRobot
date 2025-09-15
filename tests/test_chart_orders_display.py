@@ -56,13 +56,16 @@ def test_orders_are_displayed_at_correct_times():
     buy_trace = next(tr for tr in traces if getattr(tr, 'name', '') == 'Ордера покупки')
     sell_trace = next(tr for tr in traces if getattr(tr, 'name', '') == 'Ордера продажи')
 
-    # Times and prices should match provided orders exactly
+    # Times should match; prices have a small visual offset on markers
     assert list(buy_trace.x) == [orders[0]['time']]
-    assert list(buy_trace.y) == [orders[0]['price']]
+    def _offset(p: float) -> float:
+        p = float(p)
+        return max(abs(p) * 0.0002, 0.05)
+    assert list(buy_trace.y) == [orders[0]['price'] + _offset(orders[0]['price'])]
     assert getattr(buy_trace.marker, 'symbol', None) == 'triangle-up'
 
     assert list(sell_trace.x) == [orders[1]['time']]
-    assert list(sell_trace.y) == [orders[1]['price']]
+    assert list(sell_trace.y) == [orders[1]['price'] - _offset(orders[1]['price'])]
     assert getattr(sell_trace.marker, 'symbol', None) == 'triangle-down'
 
     # X-axis is a date axis; ensure layout type is set to 'date' and uses time ticks

@@ -158,12 +158,21 @@ class ChartBuilder:
             
         self.logger.debug(f"Добавляем {len(orders_data)} ордеров на график")
         
+        # Небольшой вертикальный отступ для маркеров, чтобы не перекрывать свечи
+        def _offset(price: float) -> float:
+            try:
+                p = float(price)
+            except Exception:
+                p = 0.0
+            # ~0.02% от цены, минимум 0.05
+            return max(abs(p) * 0.0002, 0.05)
+
         # Покупки (зеленые треугольники вверх)
         buy_orders = [order for order in orders_data if order['type'] in ['buy', 'short_buy', 'stop_loss_short_cover']]
         if buy_orders:
             fig.add_trace(go.Scatter(
                 x=[order['time'] for order in buy_orders],
-                y=[order['price'] for order in buy_orders],
+                y=[order['price'] + _offset(order['price']) for order in buy_orders],
                 mode='markers',
                 marker=dict(
                     symbol='triangle-up',
@@ -189,7 +198,7 @@ class ChartBuilder:
         if sell_orders:
             fig.add_trace(go.Scatter(
                 x=[order['time'] for order in sell_orders],
-                y=[order['price'] for order in sell_orders],
+                y=[order['price'] - _offset(order['price']) for order in sell_orders],
                 mode='markers',
                 marker=dict(
                     symbol='triangle-down',
