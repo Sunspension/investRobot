@@ -143,7 +143,6 @@ class PortfolioManager:
                 f"позиций: {len(positions)}"
             )
             
-            # EventBus удален: обновление портфеля не транслируется через шину
             
             return portfolio
             

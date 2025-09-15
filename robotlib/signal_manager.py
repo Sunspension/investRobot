@@ -6,7 +6,7 @@ from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
 from visualization.event_visualizer_interface import VisualizationSinkable
-from robotlib.signal_types import Signal
+from robotlib.signal_types import Signal, Order
 import asyncio
 
 
@@ -154,12 +154,5 @@ class SignalManager:
             candle=candle
         )
         
-        # Публикуем событие генерации сигнала (для визуализации)
-        try:
-            if self._sink is not None:
-                loop = asyncio.get_running_loop()
-                loop.create_task(self._sink.on_signal(signal, getattr(candle, 'figi', 'unknown'), price))
-        except Exception:
-            pass
-        
+        # Возвращаем сигнал наверх (доставка во внешний sink выполняется на application-уровне)
         return signal

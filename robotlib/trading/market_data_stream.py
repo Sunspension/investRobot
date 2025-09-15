@@ -83,7 +83,7 @@ class MarketDataStream(MarketDataStreamable):
         self._sink: Optional[VisualizationSinkable] = None
 
     def set_visualization_sink(self, sink: VisualizationSinkable) -> None:
-        """Устанавливает приемник визуализации (для прямых вызовов без EventBus)."""
+        """Устанавливает приемник визуализации."""
         self._sink = sink
     
     @property
@@ -290,7 +290,7 @@ class MarketDataStream(MarketDataStreamable):
             figi_info = getattr(candle, 'figi', self._figi)
             self._logger.debug(f"Получена свеча: {candle.time} - {self._current_price} (FIGI: {figi_info})")
             
-            # Публикуем свечу (напрямую в визуализатор либо через EventBus)
+            # Публикуем свечу в визуализатор
             try:
                 if self._sink is not None:
                     asyncio.create_task(self._sink.on_candle(candle, self._current_price or 0.0, self._figi))

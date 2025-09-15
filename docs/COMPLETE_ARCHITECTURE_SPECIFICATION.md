@@ -2,14 +2,14 @@
 
 ## Обзор системы
 
-investRobot - это торговая система для автоматической торговли фьючерсами на основе технических индикаторов (MACD) с использованием Tinkoff Invest API. Система построена на принципах Event-Driven архитектуры с Dependency Injection.
+investRobot - это торговая система для автоматической торговли фьючерсами на основе технических индикаторов (MACD/ATR) с использованием Tinkoff Invest API. Система построена на принципах асинхронной архитектуры и Dependency Injection.
 
 ## Архитектурные принципы
 
-### 1. Обновления в реальном времени без центральной шины
+### 1. Прямые обновления без центральной шины
 - **VisualizationSinkable** — прямой sink-интерфейс (`on_candle`, `on_signal`, `on_market_status`) для UI
-- **TradingEvent / EventType** — лёгкие определения событий в `robotlib/trading/events.py`
-- **Асинхронная обработка** — события пробрасываются прямыми вызовами без EventBus
+- **SignalDispatcher** — тонкий слой доставки сигналов из application-уровня (управляется `StrategyManager`)
+- **Асинхронная обработка** — прямые вызовы без EventBus
 
 ### 2. Dependency Injection
 - **TradingSystemContainer** - DI контейнер для управления зависимостями
@@ -60,14 +60,11 @@ class TradingSystemContainer:
 - Асинхронная инициализация API клиента
 - Условное создание визуализатора
 
-### 2. События и визуализация
+### 2. Сигналы и визуализация
 
-**Файл:** `robotlib/trading/events.py`
+**Интерфейсы:**
 
-**Назначение:** Определения `EventType` и `TradingEvent` для типизации. Передача в UI идёт напрямую
-через `VisualizationSinkable` без центральной шины.
-
-**Интерфейс sink:**
+**Sink-интерфейс:**
 ```python
 class VisualizationSinkable(Protocol):
     async def on_candle(self, candle) -> None: ...
@@ -75,37 +72,22 @@ class VisualizationSinkable(Protocol):
     async def on_market_status(self, status) -> None: ...
 ```
 
-**Типы событий:**
+**Диспетчер сигналов:**
 ```python
-class EventType(Enum):
-    CANDLE_RECEIVED = "candle_received"
-    SIGNAL_GENERATED = "signal_generated"
-    ORDER_PLACED = "order_placed"
-    ORDER_FILLED = "order_filled"
-    POSITION_OPENED = "position_opened"
-    POSITION_CLOSED = "position_closed"
-    PORTFOLIO_UPDATED = "portfolio_updated"
-    MARKET_STATUS_CHANGED = "market_status_changed"
-```
+class SignalDispatchable(Protocol):
+    async def dispatch_signal(self, signal: Signal, figi: str, price: float) -> None: ...
 
-**Структура события:**
-```python
-class TradingEvent:
-    def __init__(self, event_type: EventType, data: Dict[str, Any], timestamp: float = None)
-    # Свойства:
-    # - event_type: EventType
-    # - data: Dict[str, Any]
-    # - timestamp: float
+class VisualizationSignalDispatcher(SignalDispatchable):
+    def __init__(self, sink: VisualizationSinkable): ...
+    async def dispatch_signal(self, signal, figi, price): await sink.on_signal(signal, figi, price)
 ```
-
-**Реализации:**
-Передача в UI осуществляется через прямой sink-интерфейс (on_candle/on_signal/on_market_status).
+Передача в UI осуществляется через `StrategyManager` → `SignalDispatcher` → `VisualizationSinkable`.
 
 ### 3. SignalManager (Менеджер сигналов)
 
 **Файл:** `robotlib/signal_manager.py`
 
-**Назначение:** Генерация торговых сигналов на основе технических индикаторов MACD.
+**Назначение:** Генерация торговых сигналов на основе MACD/ATR.
 
 **Основные методы:**
 ```python
@@ -136,7 +118,7 @@ class SignalManager:
 3. Вычисляет ATR для адаптивного окна анализа
 4. Обнаруживает пики и впадины в MACD гистограмме
 5. Генерирует сигналы
-6. Передает сигнал через `VisualizationSinkable.on_signal`
+6. Возвращает `Signal` наверх; доставка сигнала во внешний мир выполняется `StrategyManager` через `SignalDispatcher`
 
 **Структура сигнала:**
 ```python
@@ -251,10 +233,11 @@ class StrategyManager:
         order_executor: OrderExecutable,
         risk_manager: RiskManageable,
         signal_manager: SignalManageable
+        signal_dispatcher: Optional[SignalDispatchable] = None
     )
     
     async def initialize(self, figi: str, point_value: float = None, contracts_per_lot: int = None) -> None
-    async def on_candle(self, candle) -> None
+    async def on_candle(self, candle) -> None  # при наличии dispatcher вызывает dispatch_signal
     async def close_all_positions(self) -> None
     async def _execute_signal(self, signal: Signal) -> None
 ```
@@ -326,7 +309,7 @@ class MarketDataStream:
 
 **Особенности:**
 - Кэширование свечей в памяти
-- Публикация событий о новых свечах
+- Отправка свечей в визуализатор через sink (при наличии)
 - Ограничение размера кэша (1000 свечей)
 - Асинхронное получение данных
 

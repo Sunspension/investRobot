@@ -25,7 +25,7 @@
 - Минимум задержек, меньше сложностей с синхронностью
 
 ### 3. **SignalManager** (Менеджер сигналов)
-- Генерация сигналов на основе MACD
+- Генерация сигналов на основе MACD/ATR (встроенные инкрементальные индикаторы)
 - Обнаружение пиков и впадин
 - Адаптивное окно анализа
 
@@ -43,6 +43,7 @@
 - Управление торговыми стратегиями
 - Long/Short стратегии
 - Выполнение сигналов
+- Доставка сигналов в UI через SignalDispatcher (при наличии)
 
 ### 7. **OrderExecutor** (Исполнитель ордеров)
 - Выполнение торговых ордеров
@@ -73,7 +74,7 @@ MarketDataStream → SignalManager → StrategyManager → OrderExecutor → Por
 
 ### Поток визуализации:
 ```
-MarketDataStream/SignalManager → VisualizationSink (DashEventVisualizer) → DataManager → UIComponents → Dash App
+MarketDataStream/SignalManager → StrategyManager → SignalDispatcher → VisualizationSink (DashEventVisualizer) → DataManager → UIComponents → Dash App
 ```
 
 ## 🚀 Запуск системы

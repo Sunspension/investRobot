@@ -11,7 +11,7 @@ from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.interfaces import StrategyManageable, OrderExecutable
-from robotlib.trading.events import EventType, TradingEvent
+from robotlib.strategies.signal_dispatcher import SignalDispatchable, VisualizationSignalDispatcher
 from robotlib.utils.logger import get_logger
 from tinkoff.invest import Candle, HistoricCandle
 
@@ -73,13 +73,15 @@ class StrategyManager(StrategyManageable):
         portfolio_manager,
         order_executor: OrderExecutable = None,
         strategies: List[Strategyable] = None,
-        event_bus: Optional[object] = None
+        event_bus: Optional[object] = None,
+        signal_dispatcher: Optional[SignalDispatchable] = None,
     ):
         self._signal_manager = signal_manager
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
         self._order_executor = order_executor
         self._event_bus = None
+        self._signal_dispatcher = signal_dispatcher
         self._orders = []
         self.logger = get_logger(__name__)
         
@@ -108,13 +110,18 @@ class StrategyManager(StrategyManageable):
                 await strategy.initialize(figi, point_value, contracts_per_lot)
 
     async def on_candle(self, candle: Candle | HistoricCandle):
-        # EventBus удален: свечи идут напрямую в визуализатор через MarketDataStream
+        
         
         signal: Signal = self._signal_manager.add_candle(candle)
         if not signal:
             return
-
-        # EventBus удален: сигналы отправляются через VisualizationSink в визуализатор
+        # Отправляем сигнал в диспетчер, если есть
+        if self._signal_dispatcher is not None:
+            try:
+                price = float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9)
+            except Exception:
+                price = 0.0
+            await self._signal_dispatcher.dispatch_signal(signal, getattr(candle, 'figi', 'unknown'), price)
 
         # Выполняем все стратегии
         for strategy in self._strategies:

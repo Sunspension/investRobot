@@ -9,7 +9,6 @@ import json
 import concurrent.futures
 from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
-# Note: TradingEvent/EventType kept only if referenced in docs/tests; otherwise remove.
 from visualization.event_visualizer_interface import EventVisualizerable, VisualizationSinkable
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
@@ -18,6 +17,7 @@ from visualization.logging_config import disable_verbose_logging, QuietFlaskServ
 from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.money import Money
+from robotlib.trading.events import TradingEvent
 
 # Dash импорты
 from dash import Dash, dcc, html, Input, Output, State, callback_context
@@ -55,7 +55,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
         self._init_portfolio()
 
-        # Подписки через EventBus удалены; используется прямой sink
+        
         
         # Проверяем, что данные загружены
         data_snapshot = self._data_manager.get_data_snapshot()
@@ -254,7 +254,6 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка добавления демо-данных: {e}")
     
-    # Подписки через EventBus удалены полностью
     
     async def handle_candle_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие свечи"""
@@ -288,7 +287,6 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка обработки события свечи: {e}")
 
-    # Прямой приемник от ядра без EventBus
     async def on_candle(self, candle: Any, price: float, figi: str) -> None:
         try:
             candle_time = getattr(candle, 'time', datetime.now())

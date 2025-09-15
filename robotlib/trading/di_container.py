@@ -41,6 +41,7 @@ from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from robotlib.trading.api_client_factory import APIClientFactory
 from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
+from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from visualization.dash_event_visualizer import DashEventVisualizer
@@ -75,7 +76,7 @@ class TradingSystemContainer:
         self._logger.info("✅ Конфигурация торговой системы валидна")
     
     def get_event_bus(self) -> EventBusable:
-        """Шина событий: возвращает MockEventBus для совместимости тестов, но ядро его не использует."""
+        """Шина событий: возвращает MockEventBus для совместимости тестов."""
         if 'event_bus' not in self._instances:
             self._instances['event_bus'] = MockEventBus()
         return self._instances['event_bus']
@@ -146,12 +147,15 @@ class TradingSystemContainer:
     async def get_strategy_manager(self) -> StrategyManager:
         """Получает менеджер стратегий"""
         if 'strategy_manager' not in self._instances:
+            visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
+            dispatcher = VisualizationSignalDispatcher(visualizer) if visualizer else None
             strategy_manager = StrategyManager(
                 signal_manager=self.get_signal_manager(),
                 risk_manager=await self.get_risk_manager(),
                 portfolio_manager=await self.get_portfolio_manager(),
                 order_executor=await self.get_order_executor(),
-                event_bus=None
+                event_bus=None,
+                signal_dispatcher=dispatcher
             )
             
             # Стратегии добавляются автоматически в StrategyManager

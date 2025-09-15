@@ -68,11 +68,11 @@ class OrderExecutor:
             )
             
             # Публикуем событие размещения ордера (для визуализации)
-            # EventBus удален: заказы можно позже отправлять в отдельный sink, если потребуется
+            
             
             # Если ордер исполнен, публикуем событие исполнения
             if result.success and execution.status == OrderStatus.FILLED:
-                # EventBus удален: события ордеров не транслируются
+                
                 pass
             
             self.logger.info(f"Ордер выполнен: {execution}")
