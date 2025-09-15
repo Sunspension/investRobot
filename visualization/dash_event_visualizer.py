@@ -70,6 +70,22 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         self._market_status_cache = None
         self._last_cache_update = None
         self._cache_ttl = 5  # Кэш на 5 секунд для отладки
+
+    def _to_moscow_time(self, dt: datetime) -> datetime:
+        """Конвертирует время свечи в московский часовой пояс и делает его naive для стабильного отображения.
+        Plotly рендерит даты в часовом поясе браузера, поэтому используем naive-дату в МСК.
+        """
+        try:
+            import pytz
+            msk = pytz.timezone('Europe/Moscow')
+            if dt is None:
+                return datetime.now(msk).replace(tzinfo=None)
+            if dt.tzinfo is None:
+                # считаем, что это UTC
+                dt = pytz.utc.localize(dt)
+            return dt.astimezone(msk).replace(tzinfo=None)
+        except Exception:
+            return dt
     
     def _load_historical_data(self) -> None:
         """Загружает исторические данные из базы"""
@@ -249,8 +265,9 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             candle = event.data.get('candle')
             if candle:
                 # Конвертируем свечу в словарь для DataManager
+                candle_time = getattr(candle, 'time', datetime.now())
                 candle_data = {
-                    'time': getattr(candle, 'time', datetime.now()),
+                    'time': self._to_moscow_time(candle_time),
                     'open': float(getattr(candle.open, 'units', 0) + getattr(candle.open, 'nano', 0) / 1e9),
                     'high': float(getattr(candle.high, 'units', 0) + getattr(candle.high, 'nano', 0) / 1e9),
                     'low': float(getattr(candle.low, 'units', 0) + getattr(candle.low, 'nano', 0) / 1e9),
@@ -275,8 +292,9 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         if not self._running:
             return
         try:
+            candle_time = getattr(candle, 'time', datetime.now())
             candle_data = {
-                'time': getattr(candle, 'time', datetime.now()),
+                'time': self._to_moscow_time(candle_time),
                 'open': float(getattr(candle.open, 'units', 0) + getattr(candle.open, 'nano', 0) / 1e9),
                 'high': float(getattr(candle.high, 'units', 0) + getattr(candle.high, 'nano', 0) / 1e9),
                 'low': float(getattr(candle.low, 'units', 0) + getattr(candle.low, 'nano', 0) / 1e9),

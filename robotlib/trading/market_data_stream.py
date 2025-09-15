@@ -151,6 +151,13 @@ class MarketDataStream(MarketDataStreamable):
                 self._logger.warning(f"Не удалось опубликовать статус рынка: {publish_error}")
             
             if market_status.get('is_trading', False):
+                # Прогрев сигналов и визуализатора историческими данными перед подпиской
+                try:
+                    self._logger.info("Прогрев историческими данными перед подпиской на реальный стрим")
+                    await self._load_historical_data()
+                except Exception as warmup_err:
+                    self._logger.warning(f"Не удалось выполнить прогрев историческими данными: {warmup_err}")
+                
                 # Рынок открыт - подписываемся на реальные данные
                 # Используем адаптер для убирания путаницы с названиями
                 try:
