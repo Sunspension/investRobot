@@ -5,13 +5,8 @@ from robotlib.indicators import IncrementalMACD, IncrementalATR, MACDPoint
 from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Optional
-from enum import Enum
-from robotlib.trading.events import EventType, TradingEvent
 from visualization.event_visualizer_interface import VisualizationSinkable
-from robotlib.signal_types import Signal, Order
+from robotlib.signal_types import Signal
 import asyncio
 
 

@@ -9,7 +9,7 @@ import json
 import concurrent.futures
 from typing import Optional, Any, Dict, List
 from datetime import datetime, timedelta
-from robotlib.trading.events import TradingEvent, EventType
+# Note: TradingEvent/EventType kept only if referenced in docs/tests; otherwise remove.
 from visualization.event_visualizer_interface import EventVisualizerable, VisualizationSinkable
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder

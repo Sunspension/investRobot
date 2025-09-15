@@ -13,7 +13,6 @@ from tinkoff.invest.market_data_stream.async_market_data_stream_manager import A
 from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
-from robotlib.trading.events import EventType, TradingEvent
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
 from visualization.event_visualizer_interface import VisualizationSinkable
 
