@@ -1,0 +1,171 @@
+syntax = "proto3";
+
+package investrobot.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
+
+enum OrderDirection {
+  ORDER_DIRECTION_UNSPECIFIED = 0;
+  BUY = 1;
+  SELL = 2;
+}
+
+enum OrderType {
+  ORDER_TYPE_UNSPECIFIED = 0;
+  MARKET = 1;
+  LIMIT = 2;
+  STOP = 3;
+  STOP_LIMIT = 4;
+}
+
+enum OrderStatus {
+  ORDER_STATUS_UNSPECIFIED = 0;
+  PENDING = 1;
+  FILLED = 2;
+  PARTIALLY_FILLED = 3;
+  CANCELLED = 4;
+  REJECTED = 5;
+}
+
+enum CandleInterval {
+  CANDLE_INTERVAL_UNSPECIFIED = 0;
+  MIN_1 = 1;
+  MIN_5 = 2;
+  MIN_15 = 3;
+  HOUR_1 = 4;
+  DAY_1 = 5;
+}
+
+message Candle {
+  string figi = 1;
+  google.protobuf.Timestamp time = 2;
+  double open = 3;
+  double high = 4;
+  double low = 5;
+  double close = 6;
+  int64 volume = 7;
+}
+
+message MarketStatus {
+  bool is_trading = 1;
+  string session_type = 2; // main | evening | weekend | unknown
+  google.protobuf.Timestamp current_time = 3;
+  string next_session = 4;
+  google.protobuf.Duration time_until_next = 5;
+}
+
+message Signal {
+  double macd = 1;
+  double signal_line = 2;
+  double histogram = 3;
+  bool peak_detected = 4;
+  bool trough_detected = 5;
+  Candle candle = 6;
+  double macd_prev = 7;
+  double signal_prev = 8;
+  google.protobuf.Timestamp time = 9;
+}
+
+message OrderIntent {
+  string figi = 1;
+  OrderDirection direction = 2;
+  OrderType order_type = 3;
+  int32 quantity = 4;
+  double price = 5;
+  double stop_price = 6;
+  string time_in_force = 7; // e.g., GTC
+  string client_order_id = 8; // idempotency key
+}
+
+message OrderExecution {
+  string order_id = 1;
+  string figi = 2;
+  OrderDirection direction = 3;
+  int32 quantity = 4;
+  int32 filled_quantity = 5;
+  double price = 6;
+  OrderStatus status = 7;
+  google.protobuf.Timestamp timestamp = 8;
+  string error_message = 9;
+  double commission = 10;
+}
+
+message Position {
+  string figi = 1;
+  int32 quantity = 2;
+  double average_price = 3;
+  double current_price = 4;
+  double unrealized_pnl = 5;
+  double realized_pnl = 6;
+}
+
+message Portfolio {
+  double total_amount = 1;
+  double blocked_amount = 2;
+  double available_amount = 3;
+  repeated Position positions = 4;
+  double variation_margin = 5;
+  double guarantee_deposit = 6;
+  double pnl = 7;
+  google.protobuf.Timestamp last_update = 8;
+}
+
+message RiskLimits {
+  double max_position_size = 1;
+  double max_daily_loss = 2;
+  double max_single_trade = 3;
+  double stop_loss_percent = 4;
+}
+
+message RiskCheck {
+  bool is_approved = 1;
+  string risk_level = 2; // low|medium|high
+  string message = 3;
+  string suggested_action = 4;
+}
+
+service VisualizationSink {
+  rpc OnCandle(Candle) returns (google.protobuf.Empty);
+  rpc OnSignal(Signal) returns (google.protobuf.Empty);
+  rpc OnMarketStatus(MarketStatus) returns (google.protobuf.Empty);
+}
+
+service MarketDataStream {
+  message SubscribeRequest {
+    string figi = 1;
+    CandleInterval interval = 2;
+  }
+  rpc Subscribe(SubscribeRequest) returns (stream Candle);
+}
+
+service StrategyEngine {
+  rpc Stream(stream Candle) returns (stream Signal);
+}
+
+service OrderExecutor {
+  rpc Execute(OrderIntent) returns (OrderExecution);
+}
+
+service PortfolioManager {
+  message GetPositionRequest { string figi = 1; }
+  rpc GetPortfolio(google.protobuf.Empty) returns (Portfolio);
+  rpc GetPosition(GetPositionRequest) returns (Position);
+}
+
+service RiskManager {
+  message TradeRiskRequest {
+    string figi = 1;
+    int32 quantity = 2;
+    double price = 3;
+    RiskLimits limits = 4;
+  }
+  rpc CheckTradeRisk(TradeRiskRequest) returns (RiskCheck);
+}
+
+service SignalDispatcher {
+  rpc Dispatch(Signal) returns (google.protobuf.Empty);
+}
+
+

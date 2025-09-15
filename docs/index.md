@@ -42,6 +42,9 @@ python scripts/main.py
 
 ### Основная документация
 - [📋 Правила разработки](project_rules.md) - **ОБЯЗАТЕЛЬНО К ПРОЧТЕНИЮ**
+- [Полная спецификация архитектуры](COMPLETE_ARCHITECTURE_SPECIFICATION.md)
+- [Краткая сводка архитектуры](ARCHITECTURE_SUMMARY.md)
+- [API Contract (Protobuf)](api_contract.md)
 - [Быстрый старт торговой системы](trading_quick_start.md)
 - [Полная документация торговли](trading.md)
 - [Торговые часы](trading_hours.md)
