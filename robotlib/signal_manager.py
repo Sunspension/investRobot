@@ -1,8 +1,8 @@
 import numpy as np
 
-from scipy.signal import find_peaks
 from collections import deque
 from robotlib.indicators import IncrementalMACD, IncrementalATR, MACDPoint
+from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
 from dataclasses import dataclass, field
@@ -137,8 +137,8 @@ class SignalManager:
             return None
         
         hist_array = np.array(loopback_array)
-        troughs, _ = find_peaks(-hist_array, prominence=self._peak_prominence)
-        peaks, _ = find_peaks(hist_array, prominence=self._peak_prominence)
+        troughs = find_troughs_indices(hist_array.tolist(), prominence=self._peak_prominence)
+        peaks = find_peaks_indices(hist_array.tolist(), prominence=self._peak_prominence)
 
         # Проверим ближайшие индексы для сигналов (последние 5 баров)
         check_last_n = 5

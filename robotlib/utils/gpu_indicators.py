@@ -7,7 +7,7 @@ import torch
 import numpy as np
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
-from scipy.signal import find_peaks
+from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 
 
 @dataclass
@@ -148,25 +148,16 @@ class GPUPeakDetector:
         self.device = device if torch.backends.mps.is_available() else "cpu"
         
     def find_peaks(self, data: torch.Tensor, prominence: float = 0.1) -> Tuple[torch.Tensor, dict]:
-        """Находит пики в данных используя scipy.signal.find_peaks"""
-        # Конвертируем в numpy для использования scipy
-        data_np = data.cpu().numpy()
-        
-        peaks, properties = find_peaks(data_np, prominence=prominence)
-        
-        return torch.tensor(peaks, device=self.device), properties
+        """Находит пики в данных без SciPy (простая prominence-метрика)."""
+        vals = data.detach().cpu().tolist()
+        peaks = find_peaks_indices(vals, prominence=prominence)
+        return torch.tensor(peaks, device=self.device), {}
     
     def find_troughs(self, data: torch.Tensor, prominence: float = 0.1) -> Tuple[torch.Tensor, dict]:
-        """Находит впадины в данных используя scipy.signal.find_peaks"""
-        # Инвертируем данные для поиска минимумов
-        inverted_data = -data
-        
-        # Конвертируем в numpy для использования scipy
-        data_np = inverted_data.cpu().numpy()
-        
-        peaks, properties = find_peaks(data_np, prominence=prominence)
-        
-        return torch.tensor(peaks, device=self.device), properties
+        """Находит впадины в данных без SciPy (простая prominence-метрика)."""
+        vals = data.detach().cpu().tolist()
+        troughs = find_troughs_indices(vals, prominence=prominence)
+        return torch.tensor(troughs, device=self.device), {}
 
 
 class GPUSignalManager:
