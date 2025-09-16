@@ -225,6 +225,115 @@ def _run_market_ingestor_daemon():
     return 0
 
 
+def _stop_market_ingestor_daemon():
+    pid_path = PROJECT_ROOT / "data" / "market_recorder.pid"
+    if not pid_path.exists():
+        print("Фоновый сбор данных не запущен (PID-файл отсутствует)")
+        return 0
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, 15)
+        print(f"✔ SIGTERM отправлен процессу {pid}. Подождите несколько секунд.")
+        return 0
+    except Exception as e:
+        print(f"Не удалось остановить: {e}")
+        return 1
+
+
+def _status_market_ingestor_daemon():
+    pid_path = PROJECT_ROOT / "data" / "market_recorder.pid"
+    if not pid_path.exists():
+        print("Статус: не запущен (PID-файл отсутствует)")
+        return 0
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, 0)
+        print(f"Статус: запущен (PID {pid})")
+        log_path = PROJECT_ROOT / "data" / "logs" / "market_recorder.log"
+        if log_path.exists():
+            try:
+                print("Последние строки лога:")
+                with open(log_path, 'rb') as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    f.seek(max(0, size - 4000))
+                    print(f.read().decode(errors='ignore')[-1000:])
+            except Exception:
+                pass
+        return 0
+    except Exception:
+        print("Статус: PID-файл есть, но процесс не найден")
+        return 1
+
+
+def _run_outbox_daemon():
+    db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
+    logs_dir = PROJECT_ROOT / "data" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / "outbox_dispatcher.log"
+    pid_path = PROJECT_ROOT / "data" / "outbox_dispatcher.pid"
+
+    args = [
+        sys.executable,
+        "tools/outbox_dispatcher.py",
+        "--db", db,
+        "--interval", "1.0",
+    ]
+    print(f"Стартуем outbox-доставку в фоне: {' '.join(args)}")
+    with open(log_path, "ab", buffering=0) as logf:
+        proc = subprocess.Popen(
+            args,
+            cwd=str(PROJECT_ROOT),
+            stdout=logf,
+            stderr=logf,
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
+            close_fds=True,
+        )
+    pid_path.write_text(str(proc.pid))
+    print(f"✔ Outbox worker запущен. PID={proc.pid}. Логи: {log_path}")
+    return 0
+
+
+def _stop_outbox_daemon():
+    pid_path = PROJECT_ROOT / "data" / "outbox_dispatcher.pid"
+    if not pid_path.exists():
+        print("Outbox worker не запущен (PID-файл отсутствует)")
+        return 0
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, 15)
+        print(f"✔ SIGTERM отправлен Outbox worker (PID {pid})")
+        return 0
+    except Exception as e:
+        print(f"Не удалось остановить Outbox worker: {e}")
+        return 1
+
+
+def _status_outbox_daemon():
+    pid_path = PROJECT_ROOT / "data" / "outbox_dispatcher.pid"
+    if not pid_path.exists():
+        print("Outbox worker: не запущен (PID-файл отсутствует)")
+        return 0
+    try:
+        pid = int(pid_path.read_text().strip())
+        os.kill(pid, 0)
+        print(f"Outbox worker: запущен (PID {pid})")
+        log_path = PROJECT_ROOT / "data" / "logs" / "outbox_dispatcher.log"
+        if log_path.exists():
+            try:
+                print("Последние строки лога outbox:")
+                with open(log_path, 'rb') as f:
+                    f.seek(0, 2)
+                    size = f.tell()
+                    f.seek(max(0, size - 4000))
+                    print(f.read().decode(errors='ignore')[-1000:])
+            except Exception:
+                pass
+        return 0
+    except Exception:
+        print("Outbox worker: PID-файл есть, но процесс не найден")
+        return 1
+
 def _sandbox_payin():
     amount = _input_nonempty("Сумма пополнения (RUB) [100000]: ", default="100000")
     return _run_subprocess([sys.executable, "tools/sandbox_cli.py", "payin", "--amount", amount])  # type: ignore[arg-type]
@@ -243,6 +352,11 @@ def main() -> int:
         print("  8) Песочница: пополнение счёта")
         print("  9) Просмотр БД (последние записи)")
         print("  10) Загрузка исторических данных")
+        print("  11) Сбор данных → остановить (stop)")
+        print("  12) Сбор данных → статус")
+        print("  13) Outbox → запустить в фоне")
+        print("  14) Outbox → остановить")
+        print("  15) Outbox → статус")
         print("  0) Выход")
 
         choice = input("> ").strip()
@@ -267,6 +381,16 @@ def main() -> int:
                 _view_db_summary()
             elif choice == "10":
                 _load_historical()
+            elif choice == "11":
+                _stop_market_ingestor_daemon()
+            elif choice == "12":
+                _status_market_ingestor_daemon()
+            elif choice == "13":
+                _run_outbox_daemon()
+            elif choice == "14":
+                _stop_outbox_daemon()
+            elif choice == "15":
+                _status_outbox_daemon()
             elif choice == "0":
                 return 0
             else:

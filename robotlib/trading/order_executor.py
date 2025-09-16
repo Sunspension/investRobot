@@ -77,12 +77,14 @@ class OrderExecutor:
                 try:
                     order_record = {
                         'order_id': execution.order_id,
+                        'account_id': getattr(self.api_client, 'account_id', None),
                         'figi': order_intent.figi,
                         'time': execution.timestamp,
                         'type': 'buy' if order_intent.direction.name.lower() == 'buy' else 'sell',
                         'price': execution.price or 0.0,
                         'quantity': execution.filled_quantity or order_intent.quantity,
                         'status': 'filled',
+                        'commission': execution.commission or 0.0,
                         'strategy': getattr(order_intent, 'strategy', None),
                     }
                     await self._order_sink.on_order(order_record)

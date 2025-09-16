@@ -7,7 +7,7 @@ from tinkoff.invest import Candle, HistoricCandle
 
 from robotlib.utils.logger import get_logger
 from robotlib.utils.sql_schema import init_db
-from robotlib.utils.sql_repository import DBCandle, upsert_candles, insert_orders
+from robotlib.utils.sql_repository import DBCandle, upsert_candles, insert_orders, outbox_enqueue_order
 from visualization.event_visualizer_interface import VisualizationSinkable
 
 
@@ -108,6 +108,17 @@ class DBIngestionSink(VisualizationSinkable):
             # Гарантируем наличие схемы даже если рабочий со свечами ещё не стартовал
             await init_db(self._db_path)
             await insert_orders(self._db_path, [order])
+            # Пишем в outbox событие для идемпотентной доставки
+            try:
+                await outbox_enqueue_order(
+                    self._db_path,
+                    account_id=order.get('account_id'),
+                    figi=order.get('figi'),
+                    order_id=order.get('order_id'),
+                    payload=order,
+                )
+            except Exception as e:
+                self._logger.warning(f"Не удалось записать событие в outbox: {e}")
         except Exception as e:
             self._logger.warning(f"Не удалось сохранить ордер: {e}")
 

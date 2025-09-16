@@ -2,10 +2,25 @@
 DI контейнер для торговой системы
 """
 from typing import Optional, Dict, Any
-from robotlib.utils.logger import get_logger
 from typing import Protocol
-
 from typing import Callable, Dict, List
+from robotlib.utils.logger import get_logger
+from robotlib.trading.trading_config import TradingConfig
+from robotlib.trading.interfaces import TradingDependencies
+from robotlib.trading.session_controller import SessionController
+from robotlib.trading.session_initializer import SessionInitializer
+from robotlib.trading.session_stats import SessionStats
+from robotlib.trading.portfolio_manager import PortfolioManager
+from robotlib.trading.risk_manager import RiskManager, RiskLimits
+from robotlib.trading.order_executor import OrderExecutor
+from robotlib.trading.market_data_stream import MarketDataStream
+from robotlib.trading.api_client_factory import APIClientFactory
+from robotlib.signal_manager import SignalManager
+from robotlib.strategies.strategy_manager import StrategyManager
+from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
+from visualization.dash_event_visualizer import DashEventVisualizer
+from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.ingestion.db_sink import DBIngestionSink
 
 class EventBusable(Protocol):
     def subscribe(self, event_type, handler: Callable) -> None: ...
@@ -28,26 +43,6 @@ class MockEventBus:
                         await result
             except Exception:
                 pass
-from robotlib.trading.trading_config import TradingConfig
-from robotlib.trading.interfaces import TradingDependencies
-from robotlib.trading.session_controller import SessionController
-from robotlib.trading.session_initializer import SessionInitializer
-from robotlib.trading.session_stats import SessionStats
-from robotlib.trading.portfolio_manager import PortfolioManager
-from robotlib.trading.risk_manager import RiskManager, RiskLimits
-from robotlib.trading.order_executor import OrderExecutor
-from robotlib.trading.market_data_stream import MarketDataStream
-from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
-from robotlib.trading.api_client_factory import APIClientFactory
-from robotlib.signal_manager import SignalManager
-from robotlib.strategies.strategy_manager import StrategyManager
-from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
-from robotlib.strategies.long import LongStrategy
-from robotlib.strategies.short import ShortStrategy
-from visualization.dash_event_visualizer import DashEventVisualizer
-from visualization.event_visualizer_interface import VisualizationSinkable
-from robotlib.ingestion.db_sink import DBIngestionSink
-
 
 class TradingSystemContainer:
     """DI контейнер для торговой системы"""
@@ -167,7 +162,6 @@ class TradingSystemContainer:
                 risk_manager=await self.get_risk_manager(),
                 portfolio_manager=await self.get_portfolio_manager(),
                 order_executor=await self.get_order_executor(),
-                event_bus=None,
                 signal_dispatcher=dispatcher
             )
             
@@ -197,8 +191,7 @@ class TradingSystemContainer:
         if 'trading_dependencies' not in self._instances:
             # Используем единый API клиент
             api_client = await self.get_api_client()
-            
-            # Создаем TradingDependencies (без session_initializer)
+
             self._instances['trading_dependencies'] = TradingDependencies(
                 api_client=api_client,
                 session_stats=self.get_session_stats(),
