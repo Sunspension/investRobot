@@ -5,7 +5,7 @@
 Функции:
 - Запуск торговой системы (обычный и с ограничением по времени)
 - Управление многоаккаунтным режимом
-- Инжестор рыночных данных → SQLite
+- Сбор рыночных данных → SQLite
 - Загрузка исторических данных
 - Запуск оптимизации
 - Запуск тестов (pytest)
@@ -132,7 +132,7 @@ def _multi_account_menu():
 
 def _run_market_ingestor():
     figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
-    db = _input_nonempty("Путь к БД [data/candles.db]: ", default="data/candles.db")
+    db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
     seconds = _input_nonempty("Секунд работать [0=беск.] [0]: ", default="0")
     return _run_subprocess([sys.executable, "run_market_ingestor.py", "--figi", figi, "--db", db, "--seconds", seconds])  # type: ignore[arg-type]
 
@@ -149,6 +149,82 @@ def _run_tests_pytest():
     return _run_subprocess([sys.executable, "-m", "pytest", "-q"])  # type: ignore[arg-type]
 
 
+def _view_db_summary():
+    import sqlite3
+    db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
+    if not Path(db).exists():
+        print(f"БД не найдена: {db}")
+        return 1
+    try:
+        conn = sqlite3.connect(db)
+        cur = conn.cursor()
+        print("\nТаблицы:")
+        for (name,) in cur.execute("SELECT name FROM sqlite_master WHERE type='table';"):
+            print(f" - {name}")
+        def _count(table: str) -> int:
+            try:
+                return cur.execute(f"SELECT COUNT(1) FROM {table};").fetchone()[0]
+            except Exception:
+                return 0
+        print(f"\nCandles: {_count('candles')} записей")
+        try:
+            rows = cur.execute(
+                "SELECT figi, time, open, high, low, close, volume FROM candles ORDER BY time DESC LIMIT 5;"
+            ).fetchall()
+            if rows:
+                print("Последние 5 свечей:")
+                for r in rows:
+                    print(r)
+        except Exception:
+            pass
+        print(f"\nOrders: {_count('orders')} записей")
+        try:
+            rows = cur.execute(
+                "SELECT order_id, figi, time, type, price, quantity, status, strategy FROM orders ORDER BY time DESC LIMIT 10;"
+            ).fetchall()
+            if rows:
+                print("Последние 10 ордеров:")
+                for r in rows:
+                    print(r)
+        except Exception:
+            pass
+        conn.close()
+        return 0
+    except Exception as e:
+        print(f"Ошибка чтения БД: {e}")
+        return 1
+
+
+def _run_market_ingestor_daemon():
+    figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
+    db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
+    logs_dir = PROJECT_ROOT / "data" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / "market_recorder.log"
+    pid_path = PROJECT_ROOT / "data" / "market_recorder.pid"
+
+    args = [
+        sys.executable,
+        "run_market_ingestor.py",
+        "--figi", figi,
+        "--db", db,
+        "--seconds", "0",
+    ]
+    print(f"Стартуем сбор рыночных данных в фоне: {' '.join(args)}")
+    with open(log_path, "ab", buffering=0) as logf:
+        proc = subprocess.Popen(
+            args,
+            cwd=str(PROJECT_ROOT),
+            stdout=logf,
+            stderr=logf,
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
+            close_fds=True,
+        )
+    pid_path.write_text(str(proc.pid))
+    print(f"✔ Сбор данных запущен в фоне. PID={proc.pid}. Логи: {log_path}")
+    return 0
+
+
 def _sandbox_payin():
     amount = _input_nonempty("Сумма пополнения (RUB) [100000]: ", default="100000")
     return _run_subprocess([sys.executable, "tools/sandbox_cli.py", "payin", "--amount", amount])  # type: ignore[arg-type]
@@ -160,11 +236,13 @@ def main() -> int:
         print("  1) Запустить торговую систему")
         print("  2) Запустить торговую систему (ограниченное время)")
         print("  3) Многоаккаунтный режим")
-        print("  4) Инжестор рыночных данных → SQLite")
-        print("  5) Загрузка исторических данных")
+        print("  4) Сбор рыночных данных → SQLite")
+        print("  5) Сбор данных → запустить в фоне (detached)")
         print("  6) Оптимизация параметров")
         print("  7) Тесты (pytest)")
         print("  8) Песочница: пополнение счёта")
+        print("  9) Просмотр БД (последние записи)")
+        print("  10) Загрузка исторических данных")
         print("  0) Выход")
 
         choice = input("> ").strip()
@@ -178,13 +256,17 @@ def main() -> int:
             elif choice == "4":
                 _run_market_ingestor()
             elif choice == "5":
-                _load_historical()
+                _run_market_ingestor_daemon()
             elif choice == "6":
                 _run_optimization()
             elif choice == "7":
                 _run_tests_pytest()
             elif choice == "8":
                 _sandbox_payin()
+            elif choice == "9":
+                _view_db_summary()
+            elif choice == "10":
+                _load_historical()
             elif choice == "0":
                 return 0
             else:

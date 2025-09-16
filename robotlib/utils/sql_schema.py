@@ -30,5 +30,9 @@ CREATE INDEX IF NOT EXISTS idx_orders_figi_time ON orders(figi, time);
 
 async def init_db(db_path: str):
     async with aiosqlite.connect(db_path) as conn:
+        # Включаем WAL и базовые параметры для конкурентного чтения/записи
+        await conn.execute("PRAGMA journal_mode=WAL;")
+        await conn.execute("PRAGMA synchronous=NORMAL;")
+        await conn.execute("PRAGMA busy_timeout=5000;")
         await conn.executescript(CANDLES_SCHEMA)
         await conn.commit()

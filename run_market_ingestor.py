@@ -74,7 +74,7 @@ def main() -> None:
     parser.add_argument("--seconds", type=int, default=0, help="Run duration in seconds (0 = infinite)")
     args = parser.parse_args()
 
-    logger.info(f"Starting market ingestor for FIGI={args.figi}, DB={args.db}, seconds={args.seconds}")
+    logger.info(f"Старт сбора рыночных данных: FIGI={args.figi}, БД={args.db}, секунд={args.seconds}")
     asyncio.run(_run(args.figi, args.db, args.seconds if args.seconds > 0 else None))
 
 

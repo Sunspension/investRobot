@@ -4,6 +4,7 @@ from unittest.mock import Mock
 
 from visualization.adapters.sink_impl import VisualizationSinkAdapter
 from visualization.data_manager import DataManager
+from visualization.formatters import to_moscow_time
 
 
 class MockCandle:
@@ -39,9 +40,10 @@ def test_sink_adapter_on_candle():
     
     asyncio.run(adapter.on_candle(candle, 102.0, "TESTFIGI"))
     
-    # Проверяем, что данные добавились в DataManager
-    assert len(data_manager.candles_data) == 1
-    candle_data = data_manager.candles_data[0]
+    # Проверяем, что данные добавились в DataManager через публичный API
+    snapshot = data_manager.get_data_snapshot()
+    assert len(snapshot['candles_data']) == 1
+    candle_data = snapshot['candles_data'][0]
     assert candle_data['open'] == 100.0
     assert candle_data['close'] == 102.0
     assert candle_data['volume'] == 1000
@@ -62,12 +64,15 @@ def test_sink_adapter_on_signal():
     
     asyncio.run(adapter.on_signal(signal, "TESTFIGI", 102.0))
     
-    # Проверяем, что сигнал добавился в DataManager
-    assert len(data_manager.signals_data) == 1
-    signal_data = data_manager.signals_data[0]
+    # Проверяем, что сигнал добавился в DataManager через публичный API
+    snapshot = data_manager.get_data_snapshot()
+    assert len(snapshot['signals_data']) == 1
+    signal_data = snapshot['signals_data'][0]
     assert signal_data['type'] == 'buy'  # histogram > 0
     assert signal_data['strength'] == 0.5
     assert signal_data['price'] == 102.0
+    # on_signal не рассылает WS-сообщения
+    broadcast_mock.assert_not_called()
 
 
 def test_sink_adapter_on_market_status():
@@ -79,9 +84,10 @@ def test_sink_adapter_on_market_status():
     
     asyncio.run(adapter.on_market_status(status))
     
-    # Проверяем, что статус обновился в DataManager
-    assert data_manager.market_status['is_trading'] is True
-    assert data_manager.market_status['session'] == 'main'
+    # Проверяем, что статус обновился в DataManager через публичный API
+    snapshot = data_manager.get_data_snapshot()
+    assert snapshot['market_status']['is_trading'] is True
+    assert snapshot['market_status']['session'] == 'main'
     
     # Проверяем, что broadcast был вызван
     broadcast_mock.assert_called_once()
@@ -101,5 +107,53 @@ def test_sink_adapter_error_handling():
     
     asyncio.run(adapter.on_candle(invalid_candle, 100.0, "TESTFIGI"))
     
-    # DataManager должен остаться пустым из-за ошибки
-    assert len(data_manager.candles_data) == 0
+    # DataManager должен остаться пустым из-за ошибки через публичный API
+    snapshot = data_manager.get_data_snapshot()
+    assert len(snapshot['candles_data']) == 0
+    # broadcast не должен вызываться при ошибке
+    broadcast_mock.assert_not_called()
+
+
+def test_sink_adapter_on_signal_sell():
+    data_manager = DataManager()
+    broadcast_mock = Mock()
+    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    
+    signal = MockSignal(histogram=-0.3, macd=-1.0, signal=-0.5)
+    
+    asyncio.run(adapter.on_signal(signal, "TESTFIGI", 99.0))
+    
+    snapshot = data_manager.get_data_snapshot()
+    assert len(snapshot['signals_data']) == 1
+    signal_data = snapshot['signals_data'][0]
+    assert signal_data['type'] == 'sell'
+    assert signal_data['strength'] == 0.3
+    assert signal_data['price'] == 99.0
+    # on_signal не должен делать broadcast
+    broadcast_mock.assert_not_called()
+
+
+def test_sink_adapter_on_candle_broadcast_time_format_utc():
+    import pytz
+    data_manager = DataManager()
+    broadcast_mock = Mock()
+    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    
+    utc_dt = pytz.utc.localize(datetime(2024, 1, 1, 12, 0, 0))
+    candle = MockCandle(
+        time=utc_dt,
+        open_val=100,
+        high_val=105,
+        low_val=95,
+        close_val=102,
+        volume=1000
+    )
+    
+    asyncio.run(adapter.on_candle(candle, 102.0, "TESTFIGI"))
+    
+    broadcast_mock.assert_called_once()
+    call = broadcast_mock.call_args[0][0]
+    assert call['type'] == 'candle'
+    # Ожидаемая строка времени после конвертации в МСК (naive)
+    expected_dt = to_moscow_time(utc_dt)
+    assert call['time'] == str(expected_dt)
