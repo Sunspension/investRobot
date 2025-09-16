@@ -52,6 +52,18 @@ python scripts/main_trading.py --figi FUTIMOEXF000 --deposit 50000
 python scripts/main_trading.py --live-trading --figi FUTIMOEXF000
 ```
 
+#### 🔄 Мультипроцессинг (несколько счетов):
+```bash
+# Создание конфигурации для нескольких счетов
+./tools/multi_robot.sh create-config
+
+# Запуск роботов для всех счетов
+./tools/multi_robot.sh start
+
+# Запуск в daemon режиме
+./tools/multi_robot.sh daemon
+```
+
 #### 📈 Визуализация:
 ```bash
 # Запуск визуализатора
@@ -72,16 +84,12 @@ python tools/market_visualizer.py
 
 ### 📁 Структура проекта
 
-- `tools/` - Инструменты (скрипты запуска, визуализатор, тесты)
-- `optimization/` - Универсальный оптимизатор торговых стратегий
-- `visualization/` - Модульная система визуализации
-- `examples/` - Примеры использования
-- `docs/` - Документация проекта
 - `robotlib/` - Основная библиотека робота
 
 ### 📚 Документация
 - [Быстрый старт торговой системы](docs/trading_quick_start.md)
 - [Полная документация торговли](docs/trading.md)
+- [Мультипроцессинг для нескольких счетов](docs/multi_process_trading.md)
 - [Торговые часы](docs/trading_hours.md)
 - [Документация стратегий](docs/strategy_interface.md)
 - [Управление аккаунтами](docs/account.md)

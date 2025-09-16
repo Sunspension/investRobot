@@ -1,0 +1,56 @@
+{
+  "accounts": [
+    {
+      "account_id": "your_main_account_id_here",
+      "token": "your_tinkoff_api_token_here",
+      "sandbox_token": "your_sandbox_token_here",
+      "figi": "FUTIMOEXF000",
+      "deposit": 100000.0,
+      "max_daily_loss": 5000.0,
+      "max_position_size": 50000.0,
+      "stop_loss_threshold": 2.0,
+      "auto_close_positions": true,
+      "end_of_day_close": true,
+      "enable_visualization": true,
+      "visualization_port": 8050,
+      "visualization_host": "127.0.0.1",
+      "process_name": "robot_futures",
+      "log_level": "INFO",
+      "strategy_config": {
+        "macd_fast": 6,
+        "macd_slow": 16,
+        "macd_signal": 7,
+        "atr_period": 10,
+        "lookback_min": 4,
+        "lookback_max": 19,
+        "peak_prominence": 0.15
+      }
+    },
+    {
+      "account_id": "your_second_account_id_here",
+      "token": "your_tinkoff_api_token_here",
+      "sandbox_token": "your_sandbox_token_here",
+      "figi": "SBER",
+      "deposit": 50000.0,
+      "max_daily_loss": 2500.0,
+      "max_position_size": 25000.0,
+      "stop_loss_threshold": 1.5,
+      "auto_close_positions": true,
+      "end_of_day_close": true,
+      "enable_visualization": true,
+      "visualization_port": 8051,
+      "visualization_host": "127.0.0.1",
+      "process_name": "robot_stocks",
+      "log_level": "INFO",
+      "strategy_config": {
+        "macd_fast": 8,
+        "macd_slow": 21,
+        "macd_signal": 9,
+        "atr_period": 14,
+        "lookback_min": 3,
+        "lookback_max": 15,
+        "peak_prominence": 0.12
+      }
+    }
+  ]
+}
