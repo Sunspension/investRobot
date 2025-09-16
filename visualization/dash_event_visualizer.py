@@ -14,10 +14,16 @@ from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
 from visualization.ui_components import UIComponents
 from visualization.logging_config import disable_verbose_logging, QuietFlaskServer
+from visualization.services.market_status_service import MarketStatusService
+from visualization.channels.ws import WebSocketHub
+from visualization.callbacks.core_callbacks import register_core_callbacks
+from visualization.services.portfolio_loader import PortfolioLoader
+from visualization.services.historical_loader import HistoricalLoader
 from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent
+from visualization.adapters.sink_impl import VisualizationSinkAdapter
 
 # Dash импорты
 from dash import Dash, dcc, html, Input, Output, State, callback_context
@@ -64,8 +70,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         # Dash приложение
         self._app = None
         self._server_thread = None
-        self._ws_connections = set()
-        self._ticker_thread = None
+        self._ws_hub = WebSocketHub()
+        self._market_status_service = MarketStatusService()
         
         # Кэш для API данных
         self._market_status_cache = None
@@ -264,26 +270,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         try:
             candle = event.data.get('candle')
             if candle:
-                # Конвертируем свечу в словарь для DataManager
-                candle_time = getattr(candle, 'time', datetime.now())
-                candle_data = {
-                    'time': self._to_moscow_time(candle_time),
-                    'open': float(getattr(candle.open, 'units', 0) + getattr(candle.open, 'nano', 0) / 1e9),
-                    'high': float(getattr(candle.high, 'units', 0) + getattr(candle.high, 'nano', 0) / 1e9),
-                    'low': float(getattr(candle.low, 'units', 0) + getattr(candle.low, 'nano', 0) / 1e9),
-                    'close': float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9),
-                    'volume': getattr(candle, 'volume', 0)
-                }
-                # Добавляем свечу в менеджер данных
-                self._data_manager.add_candle(candle_data)
-                self._logger.debug(f"Добавлена свеча: {candle_data['time']} @ {candle_data['close']}")
-                
-                # Проверяем, что данные сохранились
-                data_snapshot = self._data_manager.get_data_snapshot()
-                self._logger.debug(f"DataManager: {len(data_snapshot['candles_data'])} свечей, цена: {data_snapshot['current_price']}")
-                
-                # Push-уведомление в UI
-                self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
+                adapter = VisualizationSinkAdapter(self._data_manager, self._broadcast_ws)
+                await adapter.on_candle(candle, 0.0, getattr(candle, 'figi', self._figi))
         except Exception as e:
             self._logger.error(f"Ошибка обработки события свечи: {e}")
 
@@ -312,30 +300,12 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         try:
             signal = event.data.get('signal')
             if signal:
-                # Конвертируем сигнал в словарь для DataManager
+                adapter = VisualizationSinkAdapter(self._data_manager, self._broadcast_ws)
+                price = 0.0
                 candle = getattr(signal, 'candle', None)
                 if candle:
-                    # Извлекаем цену из свечи
                     price = Money(candle.close).to_float()
-                else:
-                    price = 0.0
-                
-                signal_data = {
-                    'time': datetime.now(),
-                    'type': 'buy' if getattr(signal, 'histogram', 0) > 0 else 'sell',
-                    'strength': abs(getattr(signal, 'histogram', 0)),
-                    'macd': getattr(signal, 'macd', 0),
-                    'signal_line': getattr(signal, 'signal', 0),
-                    'histogram': getattr(signal, 'histogram', 0),
-                    'price': price
-                }
-                # Добавляем сигнал в менеджер данных
-                self._data_manager.add_signal(signal_data)
-                self._logger.info(f"✅ Добавлен сигнал: {signal_data['type']} (сила: {signal_data['strength']:.4f})")
-                
-                # Проверяем, что данные сохранились
-                data_snapshot = self._data_manager.get_data_snapshot()
-                self._logger.info(f"📊 Сигналы в DataManager: BUY={data_snapshot['buy_count']}, SELL={data_snapshot['sell_count']}")
+                await adapter.on_signal(signal, getattr(signal, 'figi', 'unknown'), price)
         except Exception as e:
             self._logger.error(f"Ошибка обработки события сигнала: {e}")
 
@@ -412,9 +382,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
 
     async def on_market_status(self, status: Dict[str, Any]) -> None:
         try:
-            self._data_manager.update_market_status(status)
-            if self._running:
-                self._broadcast_ws({"type": "market_status", "is_trading": status.get('is_trading', False)})
+            adapter = VisualizationSinkAdapter(self._data_manager, self._broadcast_ws)
+            await adapter.on_market_status(status)
         except Exception as e:
             self._logger.error(f"Ошибка on_market_status: {e}")
     
@@ -441,8 +410,18 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             except Exception as e:
                 self._logger.warning(f"Не удалось предзаполнить статус рынка: {e}")
 
-            # Загружаем данные портфеля от API
-            await self._load_portfolio_from_api()
+            # Загружаем данные портфеля от API (через сервис)
+            try:
+                from config_data.config import load_config
+                cfg = load_config()
+                await PortfolioLoader().load_into(
+                    self._data_manager,
+                    token=cfg.tcs_client.token,
+                    account_id=cfg.tcs_client.account_id,
+                    sandbox_token=cfg.tcs_client.sandbox_token,
+                )
+            except Exception as e:
+                self._logger.warning(f"Не удалось загрузить портфель через сервис: {e}")
 
             # Устанавливаем флаг запуска, после предзаполнения данных
             self._running = True
@@ -494,8 +473,11 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             if self._server_thread and self._server_thread.is_alive():
                 self._server_thread.join(timeout=5)
             
-            if self._ticker_thread and self._ticker_thread.is_alive():
-                self._ticker_thread.join(timeout=2)
+            # Останавливаем тикер WS-хаба
+            try:
+                self._ws_hub.stop_ticker()
+            except Exception:
+                pass
             
             self._logger.info("Dash визуализатор событий остановлен")
             
@@ -531,7 +513,14 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         app.layout = self._create_layout()
         
         # Настраиваем callbacks
-        self._setup_callbacks(app)
+        register_core_callbacks(
+            app,
+            ui_components=self._ui_components,
+            chart_builder=self._chart_builder,
+            data_manager=self._data_manager,
+            logger=self._logger,
+            market_status_service=self._market_status_service,
+        )
 
         # WebSocket endpoint для push-уведомлений
         try:
@@ -542,7 +531,7 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             def _ws_endpoint(ws):
                 try:
                     self._logger.info("WS клиент подключен")
-                    self._ws_connections.add(ws)
+                    self._ws_hub.add(ws)
                     # Отправляем первичное сообщение, чтобы триггернуть обновление UI
                     try:
                         ws.send(json.dumps({"type": "init"}))
@@ -555,9 +544,8 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 except Exception as e:
                     self._logger.debug(f"WS соединение закрыто: {e}")
                 finally:
-                    if ws in self._ws_connections:
-                        self._ws_connections.discard(ws)
-                        self._logger.info("WS клиент отключен")
+                    self._ws_hub.remove(ws)
+                    self._logger.info("WS клиент отключен")
         except Exception as e:
             self._logger.warning(f"Не удалось инициализировать WebSocket: {e}")
         
@@ -584,23 +572,11 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         except Exception as e:
             self._logger.warning(f"Не удалось добавить диагностические эндпоинты: {e}")
         
-        # Принудительно вызываем callback при создании приложения
-        self._logger.debug("Принудительно вызываем callback при создании приложения")
+        # Начальная подгрузка исторических свечей из БД
         try:
-            # Получаем данные и создаем график
-            data_snapshot = self._data_manager.get_data_snapshot()
-            self._logger.debug(f"При создании приложения: {len(data_snapshot['candles_data'])} свечей")
-            
-            # Создаем график
-            fig = self._chart_builder.create_trading_chart(
-                candles_data=data_snapshot['candles_data'],
-                signals_data=data_snapshot['signals_data'],
-                orders_data=data_snapshot['orders_data'],
-                current_price=data_snapshot['current_price']
-            )
-            self._logger.debug("График создан при инициализации")
+            HistoricalLoader().load_into(self._data_manager, self._figi, limit=200)
         except Exception as e:
-            self._logger.error(f"❌ Ошибка при создании графика: {e}")
+            self._logger.warning(f"Не удалось загрузить исторические данные: {e}")
         
         # Убираем принудительный вызов callback'а - исправим основной callback
         
@@ -610,371 +586,20 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
 
     def _broadcast_ws(self, payload: Dict[str, Any]) -> None:
         """Рассылает сообщение всем WS-клиентам"""
-        if not self._ws_connections:
-            return
-        message = json.dumps(payload, default=str)
-        dead = []
-        for ws in list(self._ws_connections):
-            try:
-                ws.send(message)
-            except Exception:
-                dead.append(ws)
-        for ws in dead:
-            self._ws_connections.discard(ws)
+        self._ws_hub.broadcast(payload)
     
     def _start_ticker(self) -> None:
         """Запускает серверный тикер, который рассылает WS-сообщение раз в секунду."""
-        if self._ticker_thread and self._ticker_thread.is_alive():
-            return
-        def _ticker_loop():
-            while self._running:
-                try:
-                    # Небольшое сообщение, чтобы триггернуть обновление UI
-                    self._broadcast_ws({"type": "tick", "t": int(time.time())})
-                except Exception:
-                    pass
-                time.sleep(1)
-        self._ticker_thread = threading.Thread(target=_ticker_loop, daemon=True)
-        self._ticker_thread.start()
+        self._ws_hub.start_ticker()
     
     def _create_layout(self) -> html.Div:
         """Создает макет приложения с богатым UI из TradingVisualizerAdapter"""
         return self._ui_components._create_layout()
     
     def _setup_callbacks(self, app: Dash) -> None:
-        """Настраивает callbacks для обновления данных с богатым UI"""
-        
-        @app.callback(
-            [Output('trading-graph', 'figure'),
-             Output('current-price', 'children'),
-             Output('market-status', 'children'),
-             Output('market-time', 'children'),
-             Output('buy-signals-count', 'children'),
-             Output('sell-signals-count', 'children'),
-             Output('buy-orders-count', 'children'),
-             Output('sell-orders-count', 'children'),
-             Output('strategy-status', 'children'),
-             Output('trading-status', 'children'),
-             Output('signals-list', 'children'),
-             Output('recent-signals', 'children'),
-             Output('portfolio-balance', 'children'),
-             Output('portfolio-pnl', 'children'),
-             Output('portfolio-variation-margin', 'children'),
-             Output('portfolio-guarantee-deposit', 'children')],
-            [Input('ws', 'message'),
-             Input('toggle-rangebreaks', 'value')],
-            [State('simulation-state', 'data')],
-            prevent_initial_call=False
-        )
-        def update_display(ws_message, toggle_value, state):
-            """Обновляет отображение данных с богатым UI"""
-            try:
-                self._logger.debug("Callback вызван по WebSocket сообщению")
-                
-                # Получаем снимок данных
-                data_snapshot = self._data_manager.get_data_snapshot()
-                self._logger.debug(f"DataManager: {len(data_snapshot['candles_data'])} свечей, BUY={data_snapshot['buy_count']}, SELL={data_snapshot['sell_count']}")
-                self._logger.debug(f"Портфель: {data_snapshot['portfolio_data']}")
-                self._logger.debug(f"Стратегии: {data_snapshot['strategies_data']}")
-                
-                # Проверяем, что данные действительно есть
-                if len(data_snapshot['candles_data']) == 0:
-                    self._logger.warning("⚠️ НЕТ СВЕЧЕЙ В DATAMANAGER! Демо-данные отключены")
-                    # self._add_demo_data()  # Отключено
-                    # data_snapshot = self._data_manager.get_data_snapshot()
-                    # self._logger.info(f"📊 После принудительного добавления: {len(data_snapshot['candles_data'])} свечей")
-                
-                # Создаем график
-                # Определяем, скрывать ли неактивное время по чекбоксу
-                hide_inactive = bool(toggle_value and ('hide' in toggle_value))
-
-                fig = self._chart_builder.create_trading_chart(
-                    candles_data=data_snapshot['candles_data'],
-                    signals_data=data_snapshot['signals_data'],
-                    orders_data=data_snapshot['orders_data'],
-                    current_price=data_snapshot['current_price'],
-                    hide_inactive_time=hide_inactive
-                )
-                
-                # Создаем списки сигналов
-                signals_list = self._ui_components.create_signals_list(data_snapshot['signals_data'])
-                recent_signals = self._ui_components.create_recent_signals(data_snapshot['signals_data'])
-                
-                # Получаем информацию о состоянии рынка из DataManager (источник истины)
-                ms = data_snapshot.get('market_status', {}) or {}
-                is_trading = bool(ms.get('is_trading', False))
-                session_type = ms.get('session_type', 'unknown')
-
-                # Человекочитаемое имя сессии
-                session_name = {
-                    'main': 'Основная сессия',
-                    'evening': 'Вечерняя сессия',
-                    'weekend': 'Выходная сессия'
-                }.get(session_type, 'Торговая сессия')
-
-                # Считаем таймер
-                import pytz as _pytz
-                msk = _pytz.timezone('Europe/Moscow')
-                now_msk = datetime.now(msk)
-                time_text = ""
-
-                if is_trading:
-                    # До конца текущей сессии
-                    if session_type == 'main':
-                        session_end = now_msk.replace(hour=18, minute=45, second=0, microsecond=0)
-                    elif session_type == 'evening':
-                        session_end = now_msk.replace(hour=23, minute=50, second=0, microsecond=0)
-                    elif session_type == 'weekend':
-                        session_end = now_msk.replace(hour=18, minute=0, second=0, microsecond=0)
-                    else:
-                        session_end = now_msk
-                    if session_end > now_msk:
-                        delta = session_end - now_msk
-                        hours = delta.days * 24 + delta.seconds // 3600
-                        minutes = (delta.seconds % 3600) // 60
-                        seconds = delta.seconds % 60
-                        time_text = f"До окончания: {hours:02d}:{minutes:02d}:{seconds:02d}"
-                    enhanced_market_status = f"🟢 Открыт • {session_name}"
-                else:
-                    # До следующего открытия
-                    next_session = ms.get('time_until_next')
-                    if not next_session:
-                        next_open = now_msk.replace(hour=10, minute=0, second=0, microsecond=0)
-                        if now_msk.hour >= 10:
-                            from datetime import timedelta as _td
-                            next_open = next_open + _td(days=1)
-                        delta = next_open - now_msk
-                        hours = delta.days * 24 + delta.seconds // 3600
-                        minutes = (delta.seconds % 3600) // 60
-                        seconds = delta.seconds % 60
-                        next_session = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-                    time_text = f"До открытия: {next_session}"
-                    enhanced_market_status = "🔴 Рынок закрыт"
-                
-                # Получаем данные портфеля
-                portfolio_data = data_snapshot.get('portfolio_data', {})
-                self._logger.info(f"📊 Portfolio data в callback: {portfolio_data}")
-                portfolio_balance = f"{portfolio_data.get('total_amount', 0):.2f} ₽"
-                
-                # P&L с динамическим цветом
-                pnl_value = portfolio_data.get('pnl', 0)
-                portfolio_pnl = f"{pnl_value:.2f} ₽"
-                
-                portfolio_variation_margin = f"{portfolio_data.get('variation_margin', 0):.2f} ₽"
-                portfolio_guarantee_deposit = f"{portfolio_data.get('guarantee_deposit', 0):.2f} ₽"
-                
-                # Создаем статус стратегий
-                strategy_status = self._get_strategy_status()
-                
-                # Создаем торговый статус
-                trading_status = self._get_trading_status()
-                
-                # Безопасное получение current_price
-                current_price = data_snapshot.get('current_price', 0.0)
-                if current_price is None:
-                    current_price = 0.0
-                
-                result = (
-                    fig,
-                    f"{float(current_price):.1f} ₽",
-                    enhanced_market_status,
-                    time_text,
-                    str(data_snapshot['buy_count']),  # buy-signals-count
-                    str(data_snapshot['sell_count']), # sell-signals-count
-                    str(data_snapshot.get('buy_orders_count', 0)),  # buy-orders-count
-                    str(data_snapshot.get('sell_orders_count', 0)), # sell-orders-count
-                    strategy_status,
-                    trading_status,
-                    signals_list,
-                    recent_signals,
-                    portfolio_balance,
-                    portfolio_pnl,
-                    portfolio_variation_margin,
-                    portfolio_guarantee_deposit
-                )
-                
-                return result
-                
-            except Exception as e:
-                import traceback
-                self._logger.error(f"Ошибка обновления отображения: {e}")
-                self._logger.error(f"Traceback: {traceback.format_exc()}")
-                return (Figure(), "Ошибка", "❌ Ошибка", "",
-                       "0", "0", "0", "0",
-                       [html.P("Ошибка отображения")], [html.P("Ошибка отображения")], 
-                       [html.P("Ошибка отображения")], [html.P("Ошибка отображения")],
-                       "0.00 ₽", "0.00 ₽", "0.00 ₽", "0.00 ₽")
-        
-        # Дополнительный callback для принудительного обновления при загрузке
-        # Удален триггер на interval-component (polling отключен)
-        
-        # Убираем Force callback - используем только основной callback
-        
-        # Callback для динамического цвета P&L
-        @app.callback(
-            Output('portfolio-pnl', 'style'),
-            [Input('ws', 'message')],
-            prevent_initial_call=False
-        )
-        def update_pnl_color(_msg):
-            """Обновляет цвет P&L в зависимости от значения"""
-            try:
-                data_snapshot = self._data_manager.get_data_snapshot()
-                portfolio_data = data_snapshot.get('portfolio_data', {})
-                pnl_value = portfolio_data.get('pnl', 0)
-                
-                # Определяем цвет на основе значения P&L
-                if pnl_value > 0:
-                    color = '#28a745'  # Зеленый для прибыли
-                elif pnl_value < 0:
-                    color = '#dc3545'  # Красный для убытка
-                else:
-                    color = '#6c757d'  # Серый для нуля
-                
-                return {'color': color}
-            except Exception as e:
-                self._logger.error(f"Ошибка обновления цвета P&L: {e}")
-                return {'color': '#6c757d'}  # Серый по умолчанию
-        
-        # Callback для динамического цвета вариационной маржи
-        @app.callback(
-            Output('portfolio-variation-margin', 'style'),
-            [Input('ws', 'message')],
-            prevent_initial_call=False
-        )
-        def update_variation_margin_color(_msg):
-            """Обновляет цвет вариационной маржи в зависимости от значения"""
-            try:
-                data_snapshot = self._data_manager.get_data_snapshot()
-                portfolio_data = data_snapshot.get('portfolio_data', {})
-                variation_margin_value = portfolio_data.get('variation_margin', 0)
-                
-                # Определяем цвет на основе значения вариационной маржи
-                if variation_margin_value > 0:
-                    color = '#28a745'  # Зеленый для положительной вариационной маржи
-                elif variation_margin_value < 0:
-                    color = '#dc3545'  # Красный для отрицательной вариационной маржи
-                else:
-                    color = '#6c757d'  # Серый для нуля
-                
-                return {'color': color}
-            except Exception as e:
-                self._logger.error(f"Ошибка обновления цвета вариационной маржи: {e}")
-                return {'color': '#6c757d'}  # Серый по умолчанию
+        """Зарезервировано для совместимости; основные callbacks вынесены."""
     
-    def _get_market_status(self) -> Dict[str, Any]:
-        """Получает статус рынка"""
-        try:
-            # Проверяем кэш
-            if (self._market_status_cache and 
-                self._last_cache_update and 
-                time.time() - self._last_cache_update < self._cache_ttl):
-                return self._market_status_cache
-            
-            # Получаем актуальный статус
-            try:
-                loop = asyncio.get_event_loop()
-                status = loop.run_until_complete(get_market_status_enhanced())
-            except RuntimeError:
-                # Если нет event loop, создаем новый
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    status = loop.run_until_complete(get_market_status_enhanced())
-                finally:
-                    loop.close()
-            
-            # Обновляем кэш
-            self._market_status_cache = status
-            self._last_cache_update = time.time()
-            
-            return status
-            
-        except Exception as e:
-            self._logger.error(f"Ошибка получения статуса рынка: {e}")
-            return {"is_trading": False, "status": "Ошибка"}
-    
-    def _get_market_status_info(self):
-        """Получает информацию о состоянии рынка"""
-        try:
-            self._logger.info("🔍 Вызываем _get_market_status_info()")
-            
-            # Используем функцию get_market_status_enhanced асинхронно
-            try:
-                loop = asyncio.get_event_loop()
-                market_status = loop.run_until_complete(get_market_status_enhanced())
-            except RuntimeError:
-                # Если нет event loop, создаем новый
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    market_status = loop.run_until_complete(get_market_status_enhanced())
-                finally:
-                    loop.close()
-            
-            current_time = datetime.now()
-            
-            if market_status.get('is_trading', False):
-                # Название текущей сессии
-                session_type = market_status.get('session_type', 'main')
-                session_name = {
-                    'main': 'Основная сессия',
-                    'evening': 'Вечерняя сессия',
-                    'weekend': 'Выходная сессия'
-                }.get(session_type, 'Торговая сессия')
-
-                # Оценим время до окончания текущей сессии в МСК
-                from datetime import time as _time
-                import pytz as _pytz
-                msk = _pytz.timezone('Europe/Moscow')
-                now_msk = current_time if current_time.tzinfo is None else current_time.astimezone(msk)
-                if now_msk.tzinfo is None:
-                    now_msk = msk.localize(now_msk)
-
-                if session_type == 'main':
-                    session_end = now_msk.replace(hour=18, minute=45, second=0, microsecond=0)
-                elif session_type == 'evening':
-                    session_end = now_msk.replace(hour=23, minute=50, second=0, microsecond=0)
-                elif session_type == 'weekend':
-                    session_end = now_msk.replace(hour=18, minute=0, second=0, microsecond=0)
-                else:
-                    session_end = now_msk
-
-                if session_end <= now_msk:
-                    # На всякий случай не уходим в отрицательные значения
-                    remaining = "00:00"
-                else:
-                    delta = session_end - now_msk
-                    hours = delta.seconds // 3600
-                    minutes = (delta.seconds % 3600) // 60
-                    remaining = f"{hours:02d}:{minutes:02d}"
-
-                return {
-                    'is_trading': True,
-                    'status': f"🟢 Открыт • {session_name}",
-                    'current_time': current_time,
-                    'session_info': '📈 Торги идут',
-                    'time_text': f"До окончания: {remaining}"
-                }
-            else:
-                # Используем время до открытия из market_hours_enhanced
-                time_until_open = market_status.get('time_until_next', 'Неизвестно')
-                
-                return {
-                    'is_trading': False,
-                    'status': '🔴 Рынок закрыт',
-                    'current_time': current_time,
-                    'session_info': f'<br>До открытия: {time_until_open}',
-                    'time_text': f"До открытия: {time_until_open}"
-                }
-        except Exception as e:
-            self._logger.error(f"Ошибка получения статуса рынка: {e}")
-            return {
-                'is_trading': False,
-                'status': '❌ Ошибка',
-                'current_time': datetime.now(),
-                'session_info': '❌ Ошибка получения статуса'
-            }
+    # Удалены устаревшие методы статуса рынка: используется MarketStatusService
     
     
     def _get_strategy_status(self):

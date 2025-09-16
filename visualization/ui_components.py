@@ -71,7 +71,7 @@ class UIComponents:
         return html.Div([
             html.H1("Фьючерс на индекс MOEX", className="header-title"),
             html.Div([
-                html.Span("Текущая цена:", style={'marginRight': '8px'}),
+                html.Span("Текущая цена:", style={'marginRight': '8px', 'fontSize': '24px'}),
                 html.Span(id="current-price", children="—", className="stat-value")
             ], style={'marginTop': '6px'})
         ], className="header")
@@ -90,56 +90,44 @@ class UIComponents:
     def _create_statistics_cards(self) -> html.Div:
         """Создает карточки статистики"""
         return html.Div([
-            # Секция сигналов
             html.Div([
-                html.H3("📊 СИГНАЛЫ", className="section-title"),
+                # Секция сигналов
                 html.Div([
                     html.Div([
-                        html.H4("📈 Сигналы BUY", className="stat-title"),
-                        html.H2(id="buy-signals-count", children="0", 
-                               className="stat-value", style={'color': '#28a745'})
+                        html.H3("СИГНАЛЫ", className="section-title"),
+                        html.Div([
+                            html.Div([
+                                html.H4("📈 Сигналы BUY", className="stat-title"),
+                                html.H2(id="buy-signals-count", children="0", 
+                                    className="stat-value", style={'color': '#28a745'})
+                            ], style={'textAlign': 'center', 'flex': '1'}),
+                            html.Div([
+                                html.H4("📉 Сигналы SELL", className="stat-title"),
+                                html.H2(id="sell-signals-count", children="0", 
+                                    className="stat-value", style={'color': '#dc3545'})
+                            ], style={'textAlign': 'center', 'flex': '1'})
+                        ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
                     ], style={'textAlign': 'center', 'flex': '1'}),
-                    html.Div([
-                        html.H4("📉 Сигналы SELL", className="stat-title"),
-                        html.H2(id="sell-signals-count", children="0", 
-                               className="stat-value", style={'color': '#dc3545'})
-                    ], style={'textAlign': 'center', 'flex': '1'})
-                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
-            ], className="signals-section"),
-            
-            # Секция ордеров
-            html.Div([
-                html.H3("📋 ОРДЕРЫ", className="section-title"),
+                ], className="signals-section"),
+                # Секция ордеров
                 html.Div([
                     html.Div([
-                        html.H4("📈 Ордеры BUY", className="stat-title"),
-                        html.H2(id="buy-orders-count", children="0", 
-                               className="stat-value", style={'color': '#28a745'})
+                        html.H3("ОРДЕРЫ", className="section-title"),
+                        html.Div([
+                            html.Div([
+                                html.H4("📈 Ордеры BUY", className="stat-title"),
+                                html.H2(id="buy-orders-count", children="0", 
+                                    className="stat-value", style={'color': '#28a745'})
+                            ], style={'textAlign': 'center', 'flex': '1'}),
+                            html.Div([
+                                html.H4("📉 Ордеры SELL", className="stat-title"),
+                                html.H2(id="sell-orders-count", children="0", 
+                                    className="stat-value", style={'color': '#dc3545'})
+                            ], style={'textAlign': 'center', 'flex': '1'})
+                        ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'}),
                     ], style={'textAlign': 'center', 'flex': '1'}),
-                    html.Div([
-                        html.H4("📉 Ордеры SELL", className="stat-title"),
-                        html.H2(id="sell-orders-count", children="0", 
-                               className="stat-value", style={'color': '#dc3545'})
-                    ], style={'textAlign': 'center', 'flex': '1'})
-                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
-            ], className="orders-section"),
-            
-            # Секция стратегий
-            html.Div([
-                html.H3("🎯 СТРАТЕГИИ", className="section-title"),
-                html.Div([
-                    html.Div([
-                        html.H4("📊 Статус стратегий", className="stat-title"),
-                        html.H2(id="strategy-status", children="Активны", 
-                               className="stat-value", style={'color': '#28a745'})
-                    ], style={'textAlign': 'center', 'flex': '1'}),
-                    html.Div([
-                        html.H4("⚡ Торговля", className="stat-title"),
-                        html.H2(id="trading-status", children="Включена", 
-                               className="stat-value", style={'color': '#28a745'})
-                    ], style={'textAlign': 'center', 'flex': '1'})
-                ], style={'display': 'flex', 'gap': '20px', 'marginTop': '8px'})
-            ], className="strategies-section")
+                ], className="orders-section"),
+            ], className="container-grid")
         ], className="stats-grid")
     
     def _create_chart_section(self) -> html.Div:

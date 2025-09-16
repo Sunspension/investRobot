@@ -37,16 +37,34 @@ body {
     margin-bottom: 30px;
 }
 
+.container-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 30px;
+}
+
+.container-grid > div {
+    flex-grow: 1;
+}
+
 /* Секции статистики */
 .signals-section,
 .orders-section,
 .strategies-section {
+    display: flex;
     background: rgba(255, 255, 255, 0.05);
     backdrop-filter: blur(10px);
     border-radius: 15px;
     padding: 20px;
     border: 1px solid rgba(255, 255, 255, 0.1);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+.signals-section > div,
+.orders-section > div,
+.strategies-section > div {
+    flex-grow: 1;
 }
 
 .section-title {
