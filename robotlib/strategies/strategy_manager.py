@@ -73,14 +73,12 @@ class StrategyManager(StrategyManageable):
         portfolio_manager,
         order_executor: OrderExecutable = None,
         strategies: List[Strategyable] = None,
-        event_bus: Optional[object] = None,
         signal_dispatcher: Optional[SignalDispatchable] = None,
     ):
         self._signal_manager = signal_manager
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
         self._order_executor = order_executor
-        self._event_bus = None
         self._signal_dispatcher = signal_dispatcher
         self._orders = []
         self.logger = get_logger(__name__)

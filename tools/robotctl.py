@@ -339,6 +339,41 @@ def _sandbox_payin():
     return _run_subprocess([sys.executable, "tools/sandbox_cli.py", "payin", "--amount", amount])  # type: ignore[arg-type]
 
 
+def _systemd_menu():
+    print("\nLinux systemd помощник:")
+    print("  1) Установить user‑юниты (market+outbox)")
+    print("  2) Статус market‑recorder")
+    print("  3) Статус outbox")
+    print("  4) Запустить market‑recorder")
+    print("  5) Остановить market‑recorder")
+    print("  6) Запустить outbox")
+    print("  7) Остановить outbox")
+    print("  8) Показать логи market‑recorder (последние строки)")
+    print("  9) Показать логи outbox (последние строки)")
+    print("  0) Назад")
+
+    choice = input("> ").strip()
+    if choice == "1":
+        return _run_subprocess(["bash", "tools/systemd/install_systemd_units.sh"])  # type: ignore[arg-type]
+    if choice == "2":
+        return _run_subprocess(["systemctl", "--user", "status", "investrobot-market-recorder.service"])  # type: ignore[arg-type]
+    if choice == "3":
+        return _run_subprocess(["systemctl", "--user", "status", "investrobot-outbox.service"])  # type: ignore[arg-type]
+    if choice == "4":
+        return _run_subprocess(["systemctl", "--user", "start", "investrobot-market-recorder.service"])  # type: ignore[arg-type]
+    if choice == "5":
+        return _run_subprocess(["systemctl", "--user", "stop", "investrobot-market-recorder.service"])  # type: ignore[arg-type]
+    if choice == "6":
+        return _run_subprocess(["systemctl", "--user", "start", "investrobot-outbox.service"])  # type: ignore[arg-type]
+    if choice == "7":
+        return _run_subprocess(["systemctl", "--user", "stop", "investrobot-outbox.service"])  # type: ignore[arg-type]
+    if choice == "8":
+        return _run_subprocess(["journalctl", "--user", "-u", "investrobot-market-recorder", "-n", "100", "-e"])  # type: ignore[arg-type]
+    if choice == "9":
+        return _run_subprocess(["journalctl", "--user", "-u", "investrobot-outbox", "-n", "100", "-e"])  # type: ignore[arg-type]
+    return 0
+
+
 def main() -> int:
     while True:
         print("\n=== investRobot — Мастер-скрипт ===")
@@ -357,6 +392,7 @@ def main() -> int:
         print("  13) Outbox → запустить в фоне")
         print("  14) Outbox → остановить")
         print("  15) Outbox → статус")
+        print("  16) Linux: сервисы (systemd)")
         print("  0) Выход")
 
         choice = input("> ").strip()
@@ -391,6 +427,8 @@ def main() -> int:
                 _stop_outbox_daemon()
             elif choice == "15":
                 _status_outbox_daemon()
+            elif choice == "16":
+                _systemd_menu()
             elif choice == "0":
                 return 0
             else:
