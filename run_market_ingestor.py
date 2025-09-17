@@ -8,6 +8,7 @@ from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from robotlib.trading.market_data_stream import MarketDataStream
 from robotlib.ingestion.db_sink import DBIngestionSink
 from robotlib.utils.logger import get_logger
+from robotlib.utils.backoff import compute_backoff_delay
 
 
 logger = get_logger(__name__)
@@ -43,11 +44,6 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
             except Exception:
                 pass
 
-        started = await stream.start()
-        if not started:
-            logger.error("Не удалось запустить MarketDataStream для инжестора")
-            return
-
         # Optional timeout for controlled runs
         timeout_task: Optional[asyncio.Task] = None
         if run_seconds and run_seconds > 0:
@@ -56,13 +52,39 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
                 stop_event.set()
             timeout_task = asyncio.create_task(_timeout())
 
+        # Перезапуск стрима с экспоненциальным бэкоффом как в ядре
+        retries = 0
         try:
-            await stop_event.wait()
+            while not stop_event.is_set():
+                try:
+                    ok = await stream.start()
+                except Exception as e:
+                    logger.warning(f"Ошибка старта стрима: {e}")
+                    ok = False
+
+                if not ok:
+                    delay = compute_backoff_delay(retries, base_seconds=0.5, max_seconds=30.0, jitter="full")
+                    logger.info(f"Повторный запуск через {delay:.2f}с (попытка {retries+1})")
+                    await asyncio.sleep(delay)
+                    retries += 1
+                    continue
+
+                # Успешный старт: ждём стоп или падение стрима
+                retries = 0
+                while not stop_event.is_set():
+                    await asyncio.sleep(5)
+                    if not stream.is_running:
+                        logger.warning("Стрим остановился — перезапускаем")
+                        break
+
+            # Вышли из внешнего цикла — остановка
         finally:
-            await stream.stop()
-            await sink.close()
-            if timeout_task:
-                timeout_task.cancel()
+            try:
+                await stream.stop()
+            finally:
+                await sink.close()
+                if timeout_task:
+                    timeout_task.cancel()
 
 
 def main() -> None:
@@ -70,7 +92,7 @@ def main() -> None:
 
     parser = argparse.ArgumentParser(description="Standalone market data ingestor → SQLite")
     parser.add_argument("--figi", default="FUTIMOEXF000", help="Instrument FIGI")
-    parser.add_argument("--db", default=os.path.join("data", "candles.db"), help="SQLite DB path")
+    parser.add_argument("--db", default=os.path.join("data", "market.db"), help="SQLite DB path")
     parser.add_argument("--seconds", type=int, default=0, help="Run duration in seconds (0 = infinite)")
     args = parser.parse_args()
 

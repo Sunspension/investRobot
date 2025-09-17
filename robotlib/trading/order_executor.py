@@ -5,7 +5,6 @@
 from typing import Optional
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
 from robotlib.ingestion.db_sink import DBIngestionSink
-from robotlib.trading.events import EventType, TradingEvent
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
@@ -17,16 +16,18 @@ import uuid
 class OrderExecutor:
     """Класс для выполнения торговых приказов"""
     
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[object] = None, order_sink: Optional[DBIngestionSink] = None):
+    def __init__(
+        self, api_client: TinkoffAPIClient, 
+        order_sink: Optional[DBIngestionSink] = None
+    ):
         """
         Инициализация исполнителя приказов
         
         Args:
             api_client: API клиент для работы с Tinkoff
-            event_bus: Шина событий для публикации событий (только для визуализации)
+            order_sink: Приёмник исполненных ордеров
         """
         self.api_client = api_client
-        self._event_bus = None
         self._order_sink = order_sink
         self.logger = get_logger(__name__)
     
@@ -59,18 +60,26 @@ class OrderExecutor:
                 raise ValueError(f"Неподдерживаемый тип ордера: {order_intent.order_type}")
             
             # Создаем OrderExecution
+            if order_intent.direction == OrderDirection.BUY:
+                dir_text = "лонг" if (result.executed_quantity or 0) > 0 else "покупка"
+            else:
+                dir_text = "шорт" if (result.executed_quantity or 0) > 0 else "продажа"
+
+            exec_reason = f"{dir_text} {order_intent.quantity} шт."
+
             execution = OrderExecution(
                 order_id=order_id,
-                intent=order_intent,
-                executed_price=result.executed_price,
-                executed_quantity=result.executed_quantity,
-                executed_at=datetime.now(),
+                figi=order_intent.figi,
+                direction=order_intent.direction,
+                quantity=order_intent.quantity,
+                filled_quantity=result.executed_quantity or 0,
+                price=result.executed_price or 0.0,
                 status=OrderStatus.FILLED if result.success else OrderStatus.REJECTED,
-                commission=result.commission or 0.0
+                timestamp=datetime.now(),
+                error_message=None if result.success else getattr(result, 'error_message', None),
+                commission=result.commission or 0.0,
+                reason=exec_reason
             )
-            
-            # Публикуем событие размещения ордера (для визуализации)
-            
             
             # Если ордер исполнен, записываем в БД (если sink задан)
             if result.success and execution.status == OrderStatus.FILLED and self._order_sink is not None:
@@ -86,6 +95,7 @@ class OrderExecutor:
                         'status': 'filled',
                         'commission': execution.commission or 0.0,
                         'strategy': getattr(order_intent, 'strategy', None),
+                        'reason': execution.reason,
                     }
                     await self._order_sink.on_order(order_record)
                 except Exception as persist_err:
@@ -100,12 +110,16 @@ class OrderExecutor:
             # Создаем OrderExecution с ошибкой
             execution = OrderExecution(
                 order_id=str(uuid.uuid4()),
-                intent=order_intent,
-                executed_price=0.0,
-                executed_quantity=0,
-                executed_at=datetime.now(),
+                figi=order_intent.figi,
+                direction=order_intent.direction,
+                quantity=order_intent.quantity,
+                filled_quantity=0,
+                price=0.0,
                 status=OrderStatus.REJECTED,
-                commission=0.0
+                timestamp=datetime.now(),
+                error_message=str(e),
+                commission=0.0,
+                reason="ошибка выполнения"
             )
             
             return execution

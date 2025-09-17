@@ -131,6 +131,39 @@ def _multi_account_menu():
 
 
 def _run_market_ingestor():
+    # Предохранитель: не запускаем второй экземпляр, если уже есть инжестор
+    try:
+        found = False
+        try:
+            p = subprocess.run(["pgrep", "-fl", "run_market_ingestor.py"], capture_output=True, text=True)
+            if p.returncode == 0 and p.stdout.strip():
+                lines = [ln for ln in p.stdout.splitlines() if "run_market_ingestor.py" in ln]
+                if lines:
+                    print("⚠ Обнаружен уже запущенный инжестор:")
+                    for ln in lines:
+                        print("  ", ln)
+                    found = True
+        except Exception:
+            pass
+
+        # Проверяем PID-файл фонового режима
+        pid_path = PROJECT_ROOT / "data" / "market_recorder.pid"
+        if pid_path.exists():
+            try:
+                pid = int(pid_path.read_text().strip())
+                os.kill(pid, 0)
+                print(f"⚠ Найден активный PID из фонового режима: {pid} (data/market_recorder.pid)")
+                found = True
+            except Exception:
+                # PID-файл устаревший — игнорируем
+                pass
+
+        if found:
+            print("Не буду запускать второй экземпляр. Остановите существующий через пункт 11 и попробуйте снова.")
+            return 1
+    except Exception:
+        pass
+
     figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
     db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
     seconds = _input_nonempty("Секунд работать [0=беск.] [0]: ", default="0")
@@ -196,6 +229,37 @@ def _view_db_summary():
 
 
 def _run_market_ingestor_daemon():
+    # Предохранитель: не запускаем второй экземпляр в фоне, если уже есть инжестор
+    try:
+        found = False
+        try:
+            p = subprocess.run(["pgrep", "-fl", "run_market_ingestor.py"], capture_output=True, text=True)
+            if p.returncode == 0 and p.stdout.strip():
+                lines = [ln for ln in p.stdout.splitlines() if "run_market_ingestor.py" in ln]
+                if lines:
+                    print("⚠ Обнаружен уже запущенный инжестор:")
+                    for ln in lines:
+                        print("  ", ln)
+                    found = True
+        except Exception:
+            pass
+
+        pid_path_check = PROJECT_ROOT / "data" / "market_recorder.pid"
+        if pid_path_check.exists():
+            try:
+                pid = int(pid_path_check.read_text().strip())
+                os.kill(pid, 0)
+                print(f"⚠ Найден активный PID из фонового режима: {pid} (data/market_recorder.pid)")
+                found = True
+            except Exception:
+                pass  # устаревший PID-файл — игнорируем
+
+        if found:
+            print("Не буду запускать второй экземпляр. Сначала остановите текущий (пункт 11).")
+            return 1
+    except Exception:
+        pass
+
     figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
     db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
     logs_dir = PROJECT_ROOT / "data" / "logs"

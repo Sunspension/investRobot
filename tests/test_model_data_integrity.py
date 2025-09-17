@@ -22,9 +22,6 @@ from robotlib.trading.session_stats import SessionStats
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent, EventType
-
-class EventBus:
-    ...
 from visualization.data_manager import DataManager
 
 
@@ -51,10 +48,6 @@ class TestModelDataIntegrity:
         return api_client
     
     @pytest.fixture
-    def event_bus(self):
-        """EventBus для тестов"""
-        return EventBus()
-    
     def test_signal_model_integrity(self):
         """Тест целостности модели Signal"""
         # Создаем тестовую свечу
@@ -345,10 +338,8 @@ class TestModelDataIntegrity:
         
         mock_api_client.get_portfolio.return_value = mock_response
         
-        # Создаем PortfolioManager с mock event bus
-        mock_event_bus = Mock()
-        mock_event_bus.publish = AsyncMock()
-        portfolio_manager = PortfolioManager(mock_api_client, mock_event_bus)
+        # Создаем PortfolioManager
+        portfolio_manager = PortfolioManager(mock_api_client)
         
         # Получаем данные портфеля
         portfolio_data = asyncio.run(portfolio_manager.get_portfolio_data())
@@ -402,10 +393,10 @@ class TestModelDataIntegrity:
         assert risk_limits.stop_loss_threshold > 0
         assert risk_limits.max_daily_loss < risk_limits.max_position_size
     
-    def test_cross_component_data_consistency(self, event_bus):
+    def test_cross_component_data_consistency(self):
         """Тест консистентности данных между компонентами"""
         # Создаем компоненты
-        signal_manager = SignalManager(event_bus=event_bus)
+        signal_manager = SignalManager()
         data_manager = DataManager()
         
         # Создаем тестовую свечу

@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.trading.events import EventType, TradingEvent
 from robotlib.utils.money import Money
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
@@ -42,16 +41,14 @@ class Portfolio:
 class PortfolioManager:
     """Класс для управления портфелем и позициями"""
     
-    def __init__(self, api_client: TinkoffAPIClient, event_bus: Optional[object] = None):
+    def __init__(self, api_client: TinkoffAPIClient):
         """
         Инициализация менеджера портфеля
         
         Args:
             api_client: API клиент для работы с Tinkoff
-            event_bus: Шина событий для публикации событий (только для визуализации)
         """
         self._api_client = api_client
-        self._event_bus = None
         self.logger = get_logger(__name__)
         
         # Кэш позиций

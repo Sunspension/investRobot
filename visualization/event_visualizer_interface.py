@@ -72,8 +72,8 @@ class VisualizationSinkable(Protocol):
 class EventVisualizer(EventVisualizerable):
     """Базовый визуализатор событий"""
     
-    def __init__(self, event_bus):
-        self._event_bus = None
+    def __init__(self):
+        pass
         self._running = False
     
     # EventBus подписки удалены
@@ -118,8 +118,8 @@ class EventVisualizer(EventVisualizerable):
 class MockEventVisualizer(EventVisualizerable):
     """Мок визуализатора событий для тестирования"""
     
-    def __init__(self, event_bus):
-        self._event_bus = None
+    def __init__(self):
+        pass
         self._running = False
         self._handled_events: List[TradingEvent] = []
     

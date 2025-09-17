@@ -217,14 +217,15 @@ class DataManager:
             import pytz
             
             with sqlite3.connect(db_path) as conn:
+                # Берём только текущий день (по локальному времени SQLite) и упорядочиваем по времени корректно
                 query = """
                 SELECT time, open, high, low, close, volume
-                FROM candles 
-                WHERE figi = ? 
-                ORDER BY time DESC 
-                LIMIT ?
+                FROM candles
+                WHERE figi = ?
+                  AND date(time, 'localtime') = date('now','localtime')
+                ORDER BY datetime(time) ASC
                 """
-                df = pd.read_sql_query(query, conn, params=(figi, limit))
+                df = pd.read_sql_query(query, conn, params=(figi,))
                 
                 if not df.empty:
                     # Конвертируем данные в нужный формат
@@ -241,16 +242,7 @@ class DataManager:
                             'volume': int(row['volume'])
                         }
                         candles.append(candle_data)
-                    # Данные из БД приходят DESC, переведём в хронологический порядок (ASC)
-                    candles.reverse()
-
-                    # Фильтруем только текущий торговый день (МСК)
-                    try:
-                        msk = pytz.timezone('Europe/Moscow')
-                        today_msk = to_moscow_time(None).date()
-                        candles = [c for c in candles if c['time'].date() == today_msk]
-                    except Exception:
-                        pass
+                    # Уже отсортировано по возрастанию и отфильтровано по текущему дню на уровне SQL
                     
                     with self.data_lock:
                         self.candles_data = candles
@@ -264,6 +256,53 @@ class DataManager:
                     
         except Exception as e:
             self.logger.error(f"Ошибка загрузки исторических данных: {e}")
+
+    def merge_historical_candles(self, db_path: str, figi: str, from_time: datetime, to_time: Optional[datetime] = None) -> None:
+        """Догружает и сливает свечи из БД в заданном окне времени, не перезаписывая весь список.
+
+        Использует upsert по времени (add_candle), чтобы заполнить пропуски после разрывов стрима.
+        """
+        try:
+            import sqlite3
+            import pandas as pd
+            from visualization.formatters import to_moscow_time
+            import pytz
+            from datetime import timezone as _tz
+
+            def _as_utc_sqlstr(dt: datetime) -> str:
+                """Возвращает UTC-дату в ISO8601 с оффсетом (+00:00) для корректного сравнения в SQLite."""
+                if dt.tzinfo is None:
+                    msk = pytz.timezone('Europe/Moscow')
+                    dt = msk.localize(dt)
+                return dt.astimezone(_tz.utc).isoformat()
+
+            params = [figi, _as_utc_sqlstr(from_time)]
+            to_clause = ""
+            if to_time is not None:
+                to_clause = " AND time <= ?"
+                params.append(_as_utc_sqlstr(to_time))
+
+            query = (
+                "SELECT time, open, high, low, close, volume FROM candles "
+                "WHERE figi = ? AND datetime(time) >= datetime(?)" + to_clause.replace("time", "datetime(time)") + " ORDER BY datetime(time) ASC"
+            )
+            with sqlite3.connect(db_path) as conn:
+                df = pd.read_sql_query(query, conn, params=params)
+                if df.empty:
+                    return
+                for _, row in df.iterrows():
+                    dt_val = pd.to_datetime(row['time']).to_pydatetime()
+                    candle_data = {
+                        'time': to_moscow_time(dt_val),
+                        'open': float(row['open']),
+                        'high': float(row['high']),
+                        'low': float(row['low']),
+                        'close': float(row['close']),
+                        'volume': int(row['volume'])
+                    }
+                    self.add_candle(candle_data)
+        except Exception as e:
+            self.logger.error(f"Ошибка merge_historical_candles: {e}")
     
     def reset_data(self) -> None:
         """Сбрасывает все данные"""

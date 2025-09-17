@@ -57,3 +57,4 @@ class OrderExecution:
     timestamp: datetime
     error_message: Optional[str] = None
     commission: float = 0.0
+    reason: Optional[str] = None

@@ -35,8 +35,8 @@ def test_load_historical_today_and_cap(monkeypatch, tmp_path):
     dm = DataManager()
     dm.load_historical_candles(str(db), "F1", limit=500)
     snap = dm.get_data_snapshot()
-    # Только сегодня и не больше 200
-    assert len(snap["candles_data"]) == 200
+    # Только сегодня (лимит больше не режем до 200 в загрузке)
+    assert len(snap["candles_data"]) == 210
     assert all(c["time"].date() == snap["candles_data"][-1]["time"].date() for c in snap["candles_data"])
 
 

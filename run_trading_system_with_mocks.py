@@ -49,8 +49,7 @@ async def run_trading_system_with_mocks(
         if 'portfolio_manager' not in container._instances:
             from robotlib.trading.portfolio_manager import PortfolioManager
             container._instances['portfolio_manager'] = PortfolioManager(
-                api_client=mock_api_client,
-                event_bus=None
+                api_client=mock_api_client
             )
         return container._instances['portfolio_manager']
     

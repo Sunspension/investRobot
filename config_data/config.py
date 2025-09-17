@@ -21,6 +21,8 @@ class Config:
     clearing_day_end: str
     clearing_evening_start: str
     clearing_evening_end: str
+    watchdog_enabled: bool = True
+    watchdog_stale_seconds: int = 120
 
 
 def load_config(path: str = None) -> Config:
@@ -48,5 +50,7 @@ def load_config(path: str = None) -> Config:
         clearing_day_end=clearing_day_end,
         clearing_evening_start=clearing_evening_start,
         clearing_evening_end=clearing_evening_end,
+        watchdog_enabled=env.bool('WATCHDOG_ENABLED', True),
+        watchdog_stale_seconds=int(env('WATCHDOG_STALE_SECONDS', 120)),
     )
                                     

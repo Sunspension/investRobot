@@ -26,7 +26,6 @@ class SignalManager:
         lookback_min=6,
         lookback_max=20,
         peak_prominence=0.2,
-        event_bus=None,
         visualization_sink: VisualizationSinkable | None = None,
     ):
         self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
@@ -45,7 +44,6 @@ class SignalManager:
         self._hist_window = deque(maxlen=lookback_max)
         self._atr_window = deque(maxlen=vol_period)
         self._macd_history: deque[MACDPoint] = deque(maxlen=3)
-        self._event_bus = None
         self._sink = visualization_sink
 
     @property

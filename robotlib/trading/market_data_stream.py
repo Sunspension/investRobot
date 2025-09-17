@@ -82,6 +82,7 @@ class MarketDataStream(MarketDataStreamable):
         self._is_running = False
         self._current_price: Optional[float] = None
         self._sink: Optional[VisualizationSinkable] = None
+        self._last_candle_at: Optional[datetime] = None
 
     def set_visualization_sink(self, sink: VisualizationSinkable) -> None:
         """Устанавливает приемник визуализации."""
@@ -176,6 +177,14 @@ class MarketDataStream(MarketDataStreamable):
             # Запускаем обработку данных
             self._is_running = True
             asyncio.create_task(self._process_stream())
+            # Запускаем сторож, чтобы восстановиться при тишине потока (по конфигу)
+            try:
+                from config_data.config import load_config
+                cfg = load_config()
+                if getattr(cfg, 'watchdog_enabled', True):
+                    asyncio.create_task(self._watchdog_stale_stream(cfg.watchdog_stale_seconds))
+            except Exception:
+                pass
             
             self._logger.info("Стрим рыночных данных запущен")
             return True
@@ -277,6 +286,7 @@ class MarketDataStream(MarketDataStreamable):
             # Обновляем кэш и текущую цену
             self._cached_candles.append(candle)
             self._current_price = candle.close.units + candle.close.nano / 1_000_000_000
+            self._last_candle_at = datetime.now()
             
             # Логируем получение свечи
             figi_info = getattr(candle, 'figi', self._figi)
@@ -308,6 +318,29 @@ class MarketDataStream(MarketDataStreamable):
         """Обрабатывает стакан заявок"""
         # Пока что просто логируем
         self._logger.debug(f"Получен стакан: {orderbook}")
+
+    async def _watchdog_stale_stream(self, stale_seconds: int = 120) -> None:
+        """Перезапускает стрим, если не приходят свечи более stale_seconds."""
+        try:
+            while self._is_running:
+                await asyncio.sleep(30)
+                if not self._is_running:
+                    break
+                if self._last_candle_at is None:
+                    continue
+                if (datetime.now() - self._last_candle_at).total_seconds() > stale_seconds:
+                    self._logger.warning("Watchdog: тишина >120с — перезапуск стрима")
+                    try:
+                        if self._stream_adapter is not None:
+                            self._stream_adapter.stop()
+                    except Exception:
+                        pass
+                    self._is_running = False
+                    await asyncio.sleep(1)
+                    await self.start()
+                    return
+        except Exception:
+            pass
     
     def add_candle_callback(self, callback: Callable[[Candle], None]) -> None:
         """

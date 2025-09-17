@@ -74,8 +74,7 @@ class TradingSystemContainer:
             api_client = await self.get_api_client()
             
             self._instances['portfolio_manager'] = PortfolioManager(
-                api_client=api_client,
-                event_bus=None
+                api_client=api_client
             )
         return self._instances['portfolio_manager']
     
@@ -110,7 +109,6 @@ class TradingSystemContainer:
             
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
-                event_bus=None,
                 order_sink=order_sink
             )
         return self._instances['order_executor']
@@ -120,7 +118,6 @@ class TradingSystemContainer:
         if 'signal_manager' not in self._instances:
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             self._instances['signal_manager'] = SignalManager(
-                event_bus=None,
                 visualization_sink=visualizer if isinstance(visualizer, VisualizationSinkable) else None
             )
         return self._instances['signal_manager']
@@ -241,7 +238,6 @@ class TradingSystemContainer:
         if 'visualizer' not in self._instances:
             try:
                 self._instances['visualizer'] = DashEventVisualizer(
-                    event_bus=None,
                     figi=self._config.figi,
                     host=host,
                     port=port,

@@ -25,7 +25,7 @@ class TestTradingSystemContainer(unittest.TestCase):
         from unittest.mock import Mock
         self.config.tcs_client = Mock()
         self.config.tcs_client.token = "test_token"
-        self.config.tcs_client.id = "test_account_id"
+        self.config.tcs_client.account_id = "test_account_id"
         self.config.tcs_client.sandbox_token = "test_sandbox_token"
         
         self.container = TradingSystemContainer(self.config)
@@ -101,7 +101,7 @@ class TestTradingSystemContainer(unittest.TestCase):
         config_incomplete_tcs = TradingConfig(figi="FUTIMOEXF000")
         config_incomplete_tcs.tcs_client = type('MockTCSClient', (), {
             'token': '',  # Пустой токен
-            'id': 'test_account_id',
+            'account_id': 'test_account_id',
             'sandbox_token': 'test_sandbox_token'
         })()
         

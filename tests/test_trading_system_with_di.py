@@ -5,10 +5,6 @@ import unittest
 import asyncio
 from robotlib.trading.di_container import TradingSystemContainer
 from robotlib.trading.trading_config import TradingConfig
-from typing import Protocol, runtime_checkable
-
-# Убираем строгие интерфейсы EventBus — проверяем только наличие требуемых методов
-
 
 class TestTradingSystemWithDI(unittest.TestCase):
     """Тесты для примера использования торговой системы с DI"""
@@ -23,7 +19,7 @@ class TestTradingSystemWithDI(unittest.TestCase):
         from unittest.mock import Mock
         self.config.tcs_client = Mock()
         self.config.tcs_client.token = "test_token"
-        self.config.tcs_client.id = "test_account_id"
+        self.config.tcs_client.account_id = "test_account_id"
         self.config.tcs_client.sandbox_token = "test_sandbox_token"
     
     def test_container_creation(self):
@@ -89,8 +85,8 @@ class TestTradingSystemWithDI(unittest.TestCase):
         session_initializer = asyncio.run(container.get_session_initializer())
         self.assertIsNotNone(session_initializer)
     
-    def test_no_event_bus_required(self):
-        """Проверяем, что система собирается без EventBus."""
+    def test_build_trading_system(self):
+        """Проверяем, что система собирается."""
         container = TradingSystemContainer(self.config)
         trading_system = asyncio.run(container.build_trading_system())
         self.assertIn('session_controller', trading_system)

@@ -42,8 +42,23 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
                 current_price=snapshot['current_price'],
                 hide_inactive_time=hide_inactive,
             )
-            # Принудительно сбрасываем relayout, чтобы Plotly применил rangebreaks немедленно
-            fig._layout_obj[u"uirevision"] = f"toggle_{'hide' if hide_inactive else 'show'}"
+            # При догрузке пропусков (backfill) принудительно меняем uirevision, чтобы ось пересчиталась
+            try:
+                import json as _json
+                import time as _time
+                msg = None
+                if isinstance(ws_message, dict):
+                    msg = ws_message
+                elif isinstance(ws_message, str):
+                    try:
+                        msg = _json.loads(ws_message)
+                    except Exception:
+                        msg = None
+                msg_type = (msg or {}).get('type') if isinstance(msg, dict) else None
+                if msg_type in {'candle_backfill', 'candle_gap_backfill', 'init'}:
+                    fig._layout_obj[u"uirevision"] = f"backfill_{_time.time()}"
+            except Exception:
+                pass
 
             # Списки сигналов
             signals_list = ui_components.create_signals_list(snapshot['signals_data'])

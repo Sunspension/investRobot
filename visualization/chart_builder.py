@@ -230,9 +230,10 @@ class ChartBuilder:
                              "Цена: %{y:.2f} ₽<br>" +
                              "Время: %{x}<br>" +
                              "Количество: %{customdata[0]}<br>" +
+                             "Причина: %{customdata[2]}<br>" +
                              "Стратегия: %{customdata[1]}<br>" +
                              "<extra></extra>",
-                customdata=[[order.get('quantity', 1), order.get('strategy', 'Unknown')] for order in buy_orders]
+                customdata=[[order.get('quantity', 1), order.get('strategy', 'Unknown'), order.get('reason', 'N/A')] for order in buy_orders]
             ))
         
         # Продажи (красные треугольники вниз)
@@ -256,9 +257,10 @@ class ChartBuilder:
                              "Цена: %{y:.2f} ₽<br>" +
                              "Время: %{x}<br>" +
                              "Количество: %{customdata[0]}<br>" +
+                             "Причина: %{customdata[2]}<br>" +
                              "Стратегия: %{customdata[1]}<br>" +
                              "<extra></extra>",
-                customdata=[[order.get('quantity', 1), order.get('strategy', 'Unknown')] for order in sell_orders]
+                customdata=[[order.get('quantity', 1), order.get('strategy', 'Unknown'), order.get('reason', 'N/A')] for order in sell_orders]
             ))
 
     def _configure_chart_layout(self, fig: Figure) -> None:
@@ -278,8 +280,10 @@ class ChartBuilder:
         
         fig.update_xaxes(
             type='date',
-            tickformat='%H:%M:%S'
+            tickformat='%H:%M:%S',
+            autorange=True
         )
+        fig.update_yaxes(autorange=True)
         
         self.logger.debug("Макет графика настроен")
     

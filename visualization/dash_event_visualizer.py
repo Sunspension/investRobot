@@ -35,13 +35,12 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
     
     def __init__(
         self, 
-        event_bus: object | None = None,
         figi: str = "FUTIMOEXF000", 
         host: str = "127.0.0.1", 
         port: int = 8050,
         start_server: bool = True
     ):
-        self._event_bus = event_bus
+        # EventBus удалён
         self._figi = figi
         self._host = host
         self._port = port
@@ -612,6 +611,61 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 ms = await get_market_status_enhanced()
                 self._data_manager.update_market_status(ms)
                 self._broadcast_ws({"type": "market_status", "is_trading": ms.get('is_trading', False)})
+                # Периодически обновляем портфель, чтобы баланс отражал последние сделки
+                try:
+                    from config_data.config import load_config
+                    cfg = load_config()
+                    await PortfolioLoader().load_into(
+                        self._data_manager,
+                        token=cfg.tcs_client.token,
+                        account_id=cfg.tcs_client.account_id,
+                        sandbox_token=cfg.tcs_client.sandbox_token,
+                    )
+                except Exception as _e:
+                    self._logger.debug(f"Обновление портфеля пропущено: {_e}")
+                # Автодогрузка пропущенных свечей из БД, если был разрыв
+                try:
+                    snapshot = self._data_manager.get_data_snapshot()
+                    candles = snapshot.get('candles_data', [])
+                    if candles:
+                        last_time = candles[-1]['time']
+                        from datetime import datetime, timedelta
+                        import os
+                        db_path = os.path.join(os.getcwd(), "data", "market.db")
+                        # если больше 3 минут без новых данных — догружаем из БД окно 15 минут
+                        if isinstance(last_time, datetime) and (datetime.now() - last_time) > timedelta(minutes=3):
+                            self._logger.info("Автодогрузка пропущенных свечей из БД")
+                            self._data_manager.merge_historical_candles(
+                                db_path=db_path,
+                                figi=self._figi,
+                                from_time=last_time,
+                                to_time=None,
+                            )
+                            self._broadcast_ws({"type": "candle_backfill"})
+                        # Поиск внутренних разрывов внутри последних 300 баров и догрузка этих окон
+                        try:
+                            window = candles[-300:] if len(candles) > 300 else candles
+                            gap_pairs = []
+                            for i in range(1, len(window)):
+                                t_prev = window[i-1]['time']
+                                t_curr = window[i]['time']
+                                if isinstance(t_prev, datetime) and isinstance(t_curr, datetime):
+                                    if (t_curr - t_prev).total_seconds() > 90:  # gap > 1.5 мин
+                                        gap_pairs.append((t_prev, t_curr))
+                            if gap_pairs:
+                                self._logger.info(f"Найдены разрывы свечей: {len(gap_pairs)}. Догружаем из БД…")
+                                for start, end in gap_pairs[:5]:  # ограничим до 5 окон за цикл
+                                    self._data_manager.merge_historical_candles(
+                                        db_path=db_path,
+                                        figi=self._figi,
+                                        from_time=start,
+                                        to_time=end,
+                                    )
+                                self._broadcast_ws({"type": "candle_gap_backfill"})
+                        except Exception as __e:
+                            self._logger.debug(f"Проверка/догрузка внутренних разрывов пропущена: {__e}")
+                except Exception as _e:
+                    self._logger.debug(f"Автодогрузка пропусков пропущена: {_e}")
             except Exception as e:
                 self._logger.debug(f"Ошибка обновления статуса рынка: {e}")
             # Обновляем раз в 30 секунд
