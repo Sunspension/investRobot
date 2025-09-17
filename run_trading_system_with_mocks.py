@@ -7,7 +7,6 @@ import argparse
 from robotlib.utils.logger import get_logger
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.di_container import TradingSystemContainer
-from robotlib.trading.events import EventType, TradingEvent
 from tests.mocks.tinkoff_api_client_mock import MockTinkoffAPIClient
 
 logger = get_logger(__name__)
@@ -51,7 +50,7 @@ async def run_trading_system_with_mocks(
             from robotlib.trading.portfolio_manager import PortfolioManager
             container._instances['portfolio_manager'] = PortfolioManager(
                 api_client=mock_api_client,
-                event_bus=container.get_event_bus()
+                event_bus=None
             )
         return container._instances['portfolio_manager']
     
@@ -60,7 +59,7 @@ async def run_trading_system_with_mocks(
             from robotlib.trading.order_executor import OrderExecutor
             container._instances['order_executor'] = OrderExecutor(
                 api_client=mock_api_client,
-                event_bus=container.get_event_bus()
+                order_sink=None
             )
         return container._instances['order_executor']
     
@@ -69,7 +68,6 @@ async def run_trading_system_with_mocks(
             from robotlib.trading.market_data_stream import MarketDataStream
             container._instances['market_data_stream'] = MarketDataStream(
                 api_client=mock_api_client,
-                event_bus=container.get_event_bus(),
                 figi=config.figi,
                 cache_size=1000
             )
@@ -111,46 +109,10 @@ async def run_trading_system_with_mocks(
     trading_system = await container.build_trading_system(host=host, port=port, start_server=True)
     
     logger.info("✅ Торговая система собрана с мок-данными")
-    logger.info(f"🚌 EventBus: {type(trading_system['event_bus']).__name__}")
     
     # Визуализатор будет запущен автоматически в SessionController
     logger.info("✅ Dash визуализатор будет запущен в SessionController")
     
-    # Получаем EventBus для настройки обработчиков
-    event_bus = trading_system['event_bus']
-    
-    # Создаем обработчики событий
-    def handle_portfolio_event(event: TradingEvent):
-        total_amount = event.data.get('total_amount', 0)
-        positions_count = event.data.get('positions_count', 0)
-        logger.info(f"📊 Портфель обновлен: {total_amount:.2f} руб, позиций: {positions_count}")
-    
-    def handle_signal_event(event: TradingEvent):
-        signal = event.data.get('signal')
-        if signal:
-            # Определяем тип сигнала по MACD
-            signal_type = "BUY" if signal.histogram > 0 else "SELL" if signal.histogram < 0 else "NEUTRAL"
-            strength = abs(signal.histogram) if signal.histogram else 0
-            logger.info(f"📈 Сигнал сгенерирован: {signal_type} (сила: {strength:.4f})")
-    
-    def handle_order_event(event: TradingEvent):
-        order_id = event.data.get('order_id', 'unknown')
-        event_type = event.event_type.value
-        logger.info(f"📋 Ордер {event_type}: {order_id}")
-    
-    def handle_candle_event(event: TradingEvent):
-        price = event.data.get('price', 0)
-        figi = event.data.get('figi', 'unknown')
-        logger.info(f"🕯️ Получена свеча: {figi} @ {price}")
-    
-    # Подписываемся на события
-    event_bus.subscribe(EventType.PORTFOLIO_UPDATED, handle_portfolio_event)
-    event_bus.subscribe(EventType.SIGNAL_GENERATED, handle_signal_event)
-    event_bus.subscribe(EventType.ORDER_PLACED, handle_order_event)
-    event_bus.subscribe(EventType.ORDER_FILLED, handle_order_event)
-    event_bus.subscribe(EventType.CANDLE_RECEIVED, handle_candle_event)
-    
-    logger.info("👥 Подписались на события торговой системы")
     
     # Запускаем торговую систему
     try:

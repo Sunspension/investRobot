@@ -55,6 +55,12 @@ class ChartBuilder:
             return fig
         
         df = pd.DataFrame(candles_data)
+        # Гарантируем хронологический порядок: от старых к новым
+        try:
+            if not df.empty and 'time' in df.columns:
+                df = df.sort_values('time').reset_index(drop=True)
+        except Exception:
+            pass
         self.logger.debug(f"DataFrame создан: {len(df)} строк, колонки: {list(df.columns)}")
         
         # Свечи
@@ -126,10 +132,18 @@ class ChartBuilder:
             fig.update_xaxes(rangebreaks=breaks)
         else:
             # Явно очищаем ранее установленные разрывы времени
-            fig.update_xaxes(rangebreaks=None)
+            fig.update_xaxes(rangebreaks=[])
 
         # Важно: меняем uirevision при переключении, чтобы Plotly применил обновление layout
-        fig.update_layout(uirevision=f"real_data_{'hide' if hide_inactive_time else 'show'}")
+        # Делаем uirevision зависящим от последнего времени свечи и состояния тоггла,
+        # чтобы при появлении новой свечи ось X переавторассчитывалась.
+        try:
+            last_key = "0"
+            if not df.empty:
+                last_key = str(pd.to_datetime(df['time'].iloc[-1]).value)
+            fig._layout_obj[u"uirevision"] = f"data_{last_key}_{'hide' if hide_inactive_time else 'show'}"
+        except Exception:
+            fig._layout_obj[u"uirevision"] = f"data_{len(df)}_{'hide' if hide_inactive_time else 'show'}"
 
         self.logger.debug("График создан успешно")
         return fig
@@ -258,7 +272,8 @@ class ChartBuilder:
             template="plotly_white",
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
-            uirevision="real_data"  # Сохраняет зум и позицию при обновлении
+            uirevision=None,
+            xaxis_rangeslider_visible=False
         )
         
         fig.update_xaxes(

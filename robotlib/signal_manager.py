@@ -156,3 +156,97 @@ class SignalManager:
         
         # Возвращаем сигнал наверх (доставка во внешний sink выполняется на application-уровне)
         return signal
+
+    def add_bar_values(
+        self,
+        *,
+        time,
+        open_price: float,
+        high_price: float,
+        low_price: float,
+        close_price: float,
+    ) -> Signal:
+        """Добавляет бар значениями (для прогрева из БД) без генерации ордеров.
+
+        Возвращает рассчитанный Signal или None, аналогично add_candle, но принимает числа.
+        """
+        price = float(close_price)
+        macd_value = self._macd.update(price)
+        atr_value = self._atr.update(
+            high=float(high_price),
+            low=float(low_price),
+            close=price,
+        )
+        if atr_value is not None:
+            self._atr_window.append(atr_value)
+
+        item = {
+            'date': time,
+            'open': float(open_price),
+            'high': float(high_price),
+            'low': float(low_price),
+            'close': float(close_price),
+            'macd': None,
+            'signal': None,
+            'histogram': None
+        }
+
+        if macd_value is not None:
+            item['macd'] = macd_value.macd
+            item['signal'] = macd_value.signal
+            item['histogram'] = macd_value.histogram
+            self._macd_history.append(macd_value)
+
+        self._candles.append(item)
+
+        if macd_value is None:
+            return None
+
+        self._hist_window.append(macd_value.histogram)
+
+        if len(self._hist_window) < self._lookback_min:
+            return None
+
+        if len(self._atr_window) < self._vol_period:
+            return None
+        atr_values = list(self._atr_window)
+        atr_mean = float(np.nanmean(atr_values))
+        if np.isnan(atr_mean):
+            return None
+
+        current_atr = self._atr.current()
+        if current_atr is None:
+            return None
+        vol_norm = current_atr / (atr_mean + 1e-6)
+
+        lookback = int(self._lookback_max - (self._lookback_max - self._lookback_min) * min(vol_norm, 1))
+        lookback = max(self._lookback_min, min(lookback, self._lookback_max))
+
+        if len(self._hist_window) < lookback:
+            return None
+
+        loopback_array = list(self._hist_window)[-lookback:]
+        if any([x is None for x in loopback_array]):
+            return None
+
+        hist_array = np.array(loopback_array)
+        troughs = find_troughs_indices(hist_array.tolist(), prominence=self._peak_prominence)
+        peaks = find_peaks_indices(hist_array.tolist(), prominence=self._peak_prominence)
+
+        check_last_n = 5
+        current_idx = lookback - 1
+        recent_indices = [current_idx - i for i in range(check_last_n) if current_idx - i >= 0]
+
+        macd_prev = self._macd_history[-2] if len(self._macd_history) > 1 else None
+
+        signal = Signal(
+            macd=macd_value.macd,
+            signal=macd_value.signal,
+            histogram=macd_value.histogram,
+            macd_prev=macd_prev.macd if macd_prev else None,
+            signal_prev=macd_prev.signal if macd_prev else None,
+            peak_detected=any(idx in peaks for idx in recent_indices),
+            trough_detected=any(idx in troughs for idx in recent_indices),
+            candle=None,
+        )
+        return signal

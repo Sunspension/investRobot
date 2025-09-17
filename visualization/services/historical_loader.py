@@ -13,7 +13,7 @@ class HistoricalLoader:
         self._logger = get_logger(__name__)
         self._db_path = db_path or os.path.join(os.getcwd(), "data", "market.db")
 
-    def load_into(self, data_manager, figi: str, limit: int = 200) -> None:
+    def load_into(self, data_manager, figi: str, limit: int = 500) -> None:
         try:
             if os.path.exists(self._db_path):
                 self._logger.info(f"🔄 Загружаем исторические данные из {self._db_path}")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import aiosqlite
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import AsyncIterator, Iterable, List, Dict, Any, Optional
 
 from tinkoff.invest import Candle, HistoricCandle
@@ -147,7 +147,7 @@ async def outbox_enqueue_order(
         await conn.execute(
             "INSERT INTO order_outbox (created_at, account_id, figi, order_id, payload, delivered) VALUES (?, ?, ?, ?, ?, 0)",
             (
-                datetime.utcnow().isoformat(),
+                datetime.now(timezone.utc).isoformat(),
                 account_id,
                 figi,
                 order_id,
@@ -182,7 +182,7 @@ async def outbox_mark_delivered(db_path: str, event_id: int) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute(
             "UPDATE order_outbox SET delivered = 1, delivered_at = ? WHERE id = ?",
-            (datetime.utcnow().isoformat(), event_id),
+            (datetime.now(timezone.utc).isoformat(), event_id),
         )
         await conn.commit()
 

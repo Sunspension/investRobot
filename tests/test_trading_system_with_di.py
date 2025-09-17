@@ -40,14 +40,9 @@ class TestTradingSystemWithDI(unittest.TestCase):
         
         # Проверяем, что все компоненты присутствуют
         self.assertIn('config', trading_system)
-        self.assertIn('event_bus', trading_system)
         self.assertIn('session_controller', trading_system)
         self.assertIn('dependencies', trading_system)
         self.assertIn('visualizer', trading_system)
-        
-        # Проверяем минимальный API заглушки event_bus
-        self.assertTrue(hasattr(trading_system['event_bus'], 'subscribe'))
-        self.assertTrue(hasattr(trading_system['event_bus'], 'publish'))
         self.assertIsNone(trading_system['visualizer'])  # Визуализация отключена
     
     def test_trading_system_with_visualization(self):
@@ -58,9 +53,7 @@ class TestTradingSystemWithDI(unittest.TestCase):
         container = TradingSystemContainer(config_with_viz)
         trading_system = asyncio.run(container.build_trading_system())
         
-        # Проверяем минимальный API заглушки event_bus
-        self.assertTrue(hasattr(trading_system['event_bus'], 'subscribe'))
-        self.assertTrue(hasattr(trading_system['event_bus'], 'publish'))
+        # Визуализатор может быть None
         
         # Визуализатор может быть None, если модуль недоступен
         # Но это нормально для тестов
@@ -69,16 +62,9 @@ class TestTradingSystemWithDI(unittest.TestCase):
         """Тест синглтон поведения"""
         container = TradingSystemContainer(self.config)
         
-        # Получаем компоненты дважды
-        event_bus1 = container.get_event_bus()
-        event_bus2 = container.get_event_bus()
-        
-        # Проверяем, что это один и тот же объект
-        self.assertIs(event_bus1, event_bus2)
-        
-        # Проверяем, что build_trading_system возвращает те же объекты
+        # Проверяем, что build_trading_system возвращает валидные компоненты
         trading_system = asyncio.run(container.build_trading_system())
-        self.assertIs(trading_system['event_bus'], event_bus1)
+        self.assertIn('dependencies', trading_system)
     
     def test_dependencies_injection(self):
         """Тест инжекции зависимостей"""
@@ -103,15 +89,11 @@ class TestTradingSystemWithDI(unittest.TestCase):
         session_initializer = asyncio.run(container.get_session_initializer())
         self.assertIsNotNone(session_initializer)
     
-    def test_event_bus_integration_placeholder(self):
-        """Проверяем, что заглушка event_bus имеет методы subscribe/publish."""
-        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
-        config_with_viz.tcs_client = self.config.tcs_client
-        container = TradingSystemContainer(config_with_viz)
+    def test_no_event_bus_required(self):
+        """Проверяем, что система собирается без EventBus."""
+        container = TradingSystemContainer(self.config)
         trading_system = asyncio.run(container.build_trading_system())
-        event_bus = trading_system['event_bus']
-        self.assertTrue(hasattr(event_bus, 'subscribe'))
-        self.assertTrue(hasattr(event_bus, 'publish'))
+        self.assertIn('session_controller', trading_system)
 
 
 if __name__ == '__main__':

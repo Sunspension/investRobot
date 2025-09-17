@@ -54,15 +54,9 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         self._chart_builder = ChartBuilder()
         self._ui_components = UIComponents(figi, self._chart_builder)
         
-        
-        # Добавляем мок-данные для демонстрации (отключено)
-        # self._add_demo_data()
-        
         # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
         self._init_portfolio()
 
-        
-        
         # Проверяем, что данные загружены
         data_snapshot = self._data_manager.get_data_snapshot()
         self._logger.debug(f"После инициализации: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
@@ -180,7 +174,6 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 
         except Exception as e:
             self._logger.error(f"Ошибка загрузки портфеля от API: {e}")
-            # В случае ошибки оставляем нулевые значения
 
     def _add_demo_data(self) -> None:
         """Добавляет демонстрационные данные"""
@@ -321,8 +314,9 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                 'price': price
             }
             self._data_manager.add_signal(signal_data)
-            # Можно отправить короткий WS сигнал при желании
-            # self._broadcast_ws({"type": "signal", "side": signal_data['type'], "price": price})
+            # Отправляем короткое WS-сообщение, чтобы UI сразу обновил счетчики
+            if self._running:
+                self._broadcast_ws({"type": "signal", "side": signal_data['type'], "price": price})
         except Exception as e:
             self._logger.error(f"Ошибка on_signal: {e}")
     
@@ -578,11 +572,23 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         except Exception as e:
             self._logger.warning(f"Не удалось добавить диагностические эндпоинты: {e}")
         
-        # Начальная подгрузка исторических свечей из БД
+        # Начальная подгрузка исторических свечей из БД (больше окна)
         try:
-            HistoricalLoader().load_into(self._data_manager, self._figi, limit=200)
+            HistoricalLoader().load_into(self._data_manager, self._figi, limit=500)
         except Exception as e:
             self._logger.warning(f"Не удалось загрузить исторические данные: {e}")
+
+        # Прогреем стратегии историческими барами из DataManager без размещения ордеров
+        try:
+            from robotlib.trading.di_container import TradingSystemContainer  # избегаем циклов импортов в рантайме
+        except Exception:
+            TradingSystemContainer = None
+        try:
+            # Если DI доступен и стратегии уже сконфигурированы, прогреем их данными
+            # (в обычном запуске прогрев лучше вызывать из раннера после сборки DI)
+            pass
+        except Exception as e:
+            self._logger.debug(f"Прогрев стратегий пропущен: {e}")
         
         # Убираем принудительный вызов callback'а - исправим основной callback
         

@@ -44,8 +44,7 @@ class TestEventIntegration(unittest.TestCase):
     def test_event_flow_integration(self):
         """Тест полного потока событий"""
         # Создаем мок визуализатор для тестирования
-        event_bus = self.trading_system['event_bus']
-        mock_visualizer = MockEventVisualizer(event_bus)
+        mock_visualizer = MockEventVisualizer(None)
         
         # Запускаем мок визуализатор
         asyncio.run(mock_visualizer.start())
@@ -108,8 +107,6 @@ class TestEventIntegration(unittest.TestCase):
         trading_system_no_viz = asyncio.run(container_no_viz.build_trading_system(start_server=False))
         
         self.assertIsNone(trading_system_no_viz['visualizer'])
-        # EventBus может быть разного типа в зависимости от настроек
-        self.assertIsNotNone(trading_system_no_viz['event_bus'])
         
         # Контейнер с визуализацией
         # Создаем конфигурацию с визуализацией

@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 from robotlib.utils.sql_schema import init_db
 from robotlib.utils.sql_repository import (
@@ -22,7 +22,7 @@ def test_outbox_roundtrip_and_orders_commission(tmp_path):
         "order_id": "OID-1",
         "account_id": "ACC-1",
         "figi": "TESTFIGI",
-        "time": datetime.utcnow(),
+        "time": datetime.now(timezone.utc),
         "type": "buy",
         "price": 123.45,
         "quantity": 2,

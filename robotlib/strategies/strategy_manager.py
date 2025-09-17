@@ -82,6 +82,7 @@ class StrategyManager(StrategyManageable):
         self._signal_dispatcher = signal_dispatcher
         self._orders = []
         self.logger = get_logger(__name__)
+        self._last_processed_bar_time = None
         
         # Если стратегии не переданы, создаем стандартные
         if strategies is None:
@@ -108,8 +109,16 @@ class StrategyManager(StrategyManageable):
                 await strategy.initialize(figi, point_value, contracts_per_lot)
 
     async def on_candle(self, candle: Candle | HistoricCandle):
-        
-        
+        # Обрабатываем только закрытую свечу и не более одного раза на бар
+        try:
+            if hasattr(candle, 'is_complete') and not getattr(candle, 'is_complete'):
+                return
+        except Exception:
+            pass
+        bar_time = getattr(candle, 'time', None)
+        if bar_time is not None and self._last_processed_bar_time == bar_time:
+            return
+
         signal: Signal = self._signal_manager.add_candle(candle)
         if not signal:
             return
@@ -143,6 +152,33 @@ class StrategyManager(StrategyManageable):
             else:
                 # Если нет OrderExecutor, просто сохраняем намерения
                 self._orders.extend(order_intents)
+
+        # Отмечаем свечу как обработанную
+        self._last_processed_bar_time = bar_time
+
+    async def warmup_with_bars(self, bars: list[dict], *, dispatch_signals: bool = True, place_orders: bool = False):
+        """Прогревает индикаторы историческими барами без размещения ордеров.
+
+        bars: [{'time': dt, 'open': float, 'high': float, 'low': float, 'close': float}]
+        dispatch_signals: если True — отправляем сигналы в визуализатор для счетчиков, но ордера не размещаем
+        place_orders: должен быть False на прогреве
+        """
+        for b in bars:
+            sig = self._signal_manager.add_bar_values(
+                time=b['time'],
+                open_price=b['open'],
+                high_price=b['high'],
+                low_price=b['low'],
+                close_price=b['close'],
+            )
+            if sig and dispatch_signals and self._signal_dispatcher is not None:
+                try:
+                    await self._signal_dispatcher.dispatch_signal(sig, 'unknown', float(b['close']))
+                except Exception:
+                    pass
+            if place_orders and self._order_executor:
+                # На прогреве мы не создаём ордеров
+                pass
     
     def close_position(self, candle: Candle | HistoricCandle):
         # Закрываем позиции во всех стратегиях

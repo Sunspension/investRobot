@@ -30,18 +30,8 @@ class TestTradingSystemContainer(unittest.TestCase):
         
         self.container = TradingSystemContainer(self.config)
     
-    def test_event_bus_placeholder_present(self):
-        """Контейнер может возвращать заглушку event_bus для обратной совместимости тестов."""
-        event_bus = self.container.get_event_bus()
-        self.assertTrue(hasattr(event_bus, 'subscribe'))
-        self.assertTrue(hasattr(event_bus, 'publish'))
-    
     def test_singleton_instances(self):
         """Тест, что экземпляры создаются как синглтоны"""
-        event_bus1 = self.container.get_event_bus()
-        event_bus2 = self.container.get_event_bus()
-        self.assertIs(event_bus1, event_bus2)
-        
         session_stats1 = self.container.get_session_stats()
         session_stats2 = self.container.get_session_stats()
         self.assertIs(session_stats1, session_stats2)
@@ -75,14 +65,9 @@ class TestTradingSystemContainer(unittest.TestCase):
         
         # Проверяем, что все компоненты присутствуют
         self.assertIn('config', trading_system)
-        self.assertIn('event_bus', trading_system)
         self.assertIn('session_controller', trading_system)
         self.assertIn('dependencies', trading_system)
         self.assertIn('visualizer', trading_system)
-        
-        # Проверяем placeholder API
-        self.assertTrue(hasattr(trading_system['event_bus'], 'subscribe'))
-        self.assertTrue(hasattr(trading_system['event_bus'], 'publish'))
         self.assertIsNone(trading_system['visualizer'])  # Визуализация отключена
     
     def test_visualization_enabled(self):
@@ -93,9 +78,7 @@ class TestTradingSystemContainer(unittest.TestCase):
         import asyncio
         trading_system = asyncio.run(container_with_viz.build_trading_system())
         # Визуализатор может быть None в тестовой среде
-        self.assertIn('event_bus', trading_system)
-        self.assertTrue(hasattr(trading_system['event_bus'], 'subscribe'))
-        self.assertTrue(hasattr(trading_system['event_bus'], 'publish'))
+        self.assertIn('visualizer', trading_system)
     
     def test_config_validation(self):
         """Тест валидации конфигурации"""

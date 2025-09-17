@@ -106,6 +106,32 @@ class SessionController(SessionControllable):
                 await self._visualizer.start()
                 self.logger.info("✅ Dash визуализатор событий запущен")
             
+            # Прогрев стратегий историческими барами из БД (за текущий день), без сигналов и без ордеров
+            try:
+                if self._visualizer and _has_data_manager(self._visualizer):
+                    snapshot = self._visualizer.data_manager.get_data_snapshot()
+                    candles = snapshot.get('candles_data', [])
+                    if candles:
+                        # Берём последние 200 баров (или меньше)
+                        bars = [
+                            {
+                                'time': c['time'],
+                                'open': float(c['open']),
+                                'high': float(c['high']),
+                                'low': float(c['low']),
+                                'close': float(c['close']),
+                            }
+                            for c in candles[-200:]
+                        ]
+                        await self._dependencies.strategy_manager.warmup_with_bars(
+                            bars,
+                            dispatch_signals=False,
+                            place_orders=False,
+                        )
+                        self.logger.info(f"Прогрето стратегий барами: {len(bars)}")
+            except Exception as e:
+                self.logger.warning(f"Прогрев стратегий пропущен: {e}")
+
             # Логируем информацию о сессии
             await self._log_session_info()
             

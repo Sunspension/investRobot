@@ -54,7 +54,6 @@ async def run_trading_system_limited(
     trading_system = await container.build_trading_system(host=host, port=port, start_server=start_server)
     
     logger.info("✅ Торговая система собрана через DI контейнер")
-    logger.info(f"🚌 EventBus: {type(trading_system['event_bus']).__name__}")
     
     # Запускаем визуализатор (если включен и сервер нужен)
     if trading_system['visualizer'] and start_server:

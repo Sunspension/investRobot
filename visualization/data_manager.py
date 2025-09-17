@@ -4,11 +4,9 @@
 Управляет свечами, сигналами, ордерами и их синхронизацией
 """
 
-import random
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import List, Dict, Any, Optional
-import pandas as pd
 from robotlib.utils.logger import get_logger
 
 class DataManager:
@@ -19,6 +17,8 @@ class DataManager:
         
         # Данные для визуализации
         self.candles_data: List[Dict] = []
+        # Максимальное количество свечей, которое мы держим в памяти (rolling window)
+        self.max_candles: int = 5000
         self.signals_data: List[Dict] = []
         self.orders_data: List[Dict] = []
         
@@ -63,59 +63,43 @@ class DataManager:
         # Потокобезопасность
         self.data_lock = threading.Lock()
     
-    def _validate_candle_data(self, candle_data: Dict[str, Any]) -> bool:
-        """Валидирует данные свечи"""
-        try:
-            # Проверяем наличие обязательных полей
-            required_fields = ['time', 'open', 'high', 'low', 'close', 'volume']
-            for field in required_fields:
-                if field not in candle_data:
-                    return False
-            
-            # Проверяем типы данных
-            open_price = float(candle_data['open'])
-            high_price = float(candle_data['high'])
-            low_price = float(candle_data['low'])
-            close_price = float(candle_data['close'])
-            volume = float(candle_data['volume'])
-            
-            # Проверяем логическую корректность
-            if high_price < low_price:
-                return False
-            # High должен быть >= max(open, close)
-            if high_price < max(open_price, close_price):
-                return False
-            # Low должен быть <= min(open, close)  
-            if low_price > min(open_price, close_price):
-                return False
-            if volume <= 0:
-                return False
-            if open_price <= 0:
-                return False
-            
-            return True
-            
-        except (ValueError, TypeError):
-            return False
-    
     def add_candle(self, candle_data: Dict[str, Any]) -> None:
         """Добавляет свечу в данные"""
-        # Валидация данных свечи
-        if not self._validate_candle_data(candle_data):
-            self.logger.warning(f"Некорректные данные свечи, пропускаем: {candle_data}")
-            return
             
         with self.data_lock:
-            self.candles_data.append(candle_data)
+            # Upsert по времени: если бар с таким же временем уже есть, обновляем вместо дублирования
+            try:
+                t_new = candle_data.get('time')
+                if t_new is not None:
+                    for i in range(len(self.candles_data) - 1, -1, -1):
+                        if self.candles_data[i].get('time') == t_new:
+                            self.candles_data[i] = candle_data
+                            break
+                    else:
+                        # Вставляем с сохранением хронологического порядка по времени
+                        if not self.candles_data or self.candles_data[-1].get('time') <= t_new:
+                            self.candles_data.append(candle_data)
+                        else:
+                            idx = len(self.candles_data) - 1
+                            while idx >= 0 and self.candles_data[idx].get('time') > t_new:
+                                idx -= 1
+                            self.candles_data.insert(idx + 1, candle_data)
+                else:
+                    self.candles_data.append(candle_data)
+            except Exception:
+                # На всякий случай, если что-то пошло не так, просто добавим в конец
+                self.candles_data.append(candle_data)
             self.current_price = candle_data['close']
             self.last_update = datetime.now()
             
             # Обновляем общий объем
             self.total_volume += candle_data['volume']
             
-            # Ограничиваем количество свечей
-            if len(self.candles_data) > 200:
-                self.candles_data = self.candles_data[-100:]
+            # Ограничиваем количество свечей (оставляем последние max_candles)
+            if len(self.candles_data) > self.max_candles:
+                overflow = len(self.candles_data) - self.max_candles
+                # Удаляем самые старые overflow
+                del self.candles_data[0:overflow]
             
             self.logger.debug(f"Добавлена свеча: {candle_data['time']} @ {candle_data['close']:.2f} (всего: {len(self.candles_data)})")
     
@@ -229,6 +213,8 @@ class DataManager:
         try:
             import sqlite3
             import pandas as pd
+            from visualization.formatters import to_moscow_time
+            import pytz
             
             with sqlite3.connect(db_path) as conn:
                 query = """
@@ -244,8 +230,10 @@ class DataManager:
                     # Конвертируем данные в нужный формат
                     candles = []
                     for _, row in df.iterrows():
+                        # Время → naive МСК для стабильного отображения и дальнейшей фильтрации по дню
+                        _dt = pd.to_datetime(row['time']).to_pydatetime()
                         candle_data = {
-                            'time': pd.to_datetime(row['time']),
+                            'time': to_moscow_time(_dt),
                             'open': float(row['open']),
                             'high': float(row['high']),
                             'low': float(row['low']),
@@ -253,6 +241,16 @@ class DataManager:
                             'volume': int(row['volume'])
                         }
                         candles.append(candle_data)
+                    # Данные из БД приходят DESC, переведём в хронологический порядок (ASC)
+                    candles.reverse()
+
+                    # Фильтруем только текущий торговый день (МСК)
+                    try:
+                        msk = pytz.timezone('Europe/Moscow')
+                        today_msk = to_moscow_time(None).date()
+                        candles = [c for c in candles if c['time'].date() == today_msk]
+                    except Exception:
+                        pass
                     
                     with self.data_lock:
                         self.candles_data = candles

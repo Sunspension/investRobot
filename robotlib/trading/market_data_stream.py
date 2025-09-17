@@ -150,49 +150,32 @@ class MarketDataStream(MarketDataStreamable):
             except Exception as publish_error:
                 self._logger.warning(f"Не удалось опубликовать статус рынка: {publish_error}")
             
-            if market_status.get('is_trading', False):
-                # Прогрев сигналов и визуализатора историческими данными перед подпиской
-                try:
-                    self._logger.info("Прогрев историческими данными перед подпиской на реальный стрим")
-                    await self._load_historical_data()
-                except Exception as warmup_err:
-                    self._logger.warning(f"Не удалось выполнить прогрев историческими данными: {warmup_err}")
-                
-                # Рынок открыт - подписываемся на реальные данные
-                # Используем адаптер для убирания путаницы с названиями
-                try:
-                    from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
-                    request = MarketDataRequest(
-                        subscribe_candles_request=SubscribeCandlesRequest(
-                            subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
-                            instruments=[
-                                CandleInstrument(
-                                    figi=self._figi,
-                                    interval=CandleInterval.CANDLE_INTERVAL_1_MIN
-                                )
-                            ]
-                        )
+            # Всегда подписываемся на поток свечей, независимо от статуса рынка
+            try:
+                from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
+                request = MarketDataRequest(
+                    subscribe_candles_request=SubscribeCandlesRequest(
+                        subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
+                        instruments=[
+                            CandleInstrument(
+                                figi=self._figi,
+                                interval=CandleInterval.CANDLE_INTERVAL_1_MIN
+                            )
+                        ]
                     )
-                    # subscribe() синхронный
-                    self._stream_adapter.subscribe(request)
-                    self._logger.info("Подписка на реальные данные через MarketDataRequest успешна")
-                except Exception as e:
-                    self._logger.error(f"Ошибка подписки на реальные данные: {e}")
-                    # Если не удалось подписаться, загружаем исторические данные
-                    self._logger.info("Переключаемся на загрузку исторических данных")
-                    self._is_running = True
-                    asyncio.create_task(self._load_historical_data())
-                    return True
-                self._logger.info("Рынок открыт, подписка на реальные данные активирована")
-                
-                # Запускаем обработку данных
-                self._is_running = True
-                asyncio.create_task(self._process_stream())
-            else:
-                # Рынок закрыт - загружаем исторические данные последней сессии
-                self._logger.info("Рынок закрыт, загружаем исторические данные последней сессии")
+                )
+                self._stream_adapter.subscribe(request)
+                self._logger.info("Подписка на поток свечей активирована (независимо от статуса рынка)")
+            except Exception as e:
+                self._logger.error(f"Ошибка подписки на поток свечей: {e}")
+                # В фоне попробуем подгрузить историю, чтобы не было пусто
                 self._is_running = True
                 asyncio.create_task(self._load_historical_data())
+                return True
+
+            # Запускаем обработку данных
+            self._is_running = True
+            asyncio.create_task(self._process_stream())
             
             self._logger.info("Стрим рыночных данных запущен")
             return True
@@ -251,29 +234,24 @@ class MarketDataStream(MarketDataStreamable):
                             await self._process_orderbook(market_data.orderbook)
                             
                 except Exception as stream_error:
-                    # Обрабатываем ошибки стрима отдельно
-                    if "CANCELLED" in str(stream_error) or "RST_STREAM" in str(stream_error):
-                        self._logger.warning(f"Стрим отменен сервером: {stream_error}")
-                        self._is_running = False
-                        break
-                    else:
-                        self._logger.error(f"Ошибка в стриме: {stream_error}")
-                        # Пытаемся переподключиться с backoff + jitter
-                        retries = 0
-                        while self._is_running:
-                            delay = compute_backoff_delay(retries, base_seconds=0.5, max_seconds=30.0, jitter="full")
-                            self._logger.info(f"Повторное подключение через {delay:.2f}с (попытка {retries+1})")
-                            await asyncio.sleep(delay)
-                            try:
-                                ok = await self.start()
-                                if ok:
-                                    self._logger.info("Переподключение успешно")
-                                    return
-                            except Exception as e:
-                                self._logger.warning(f"Не удалось переподключиться: {e}")
-                            retries += 1
-                        break
-                        break
+                    # Обрабатываем ошибки стрима: везде пытаемся переподключиться
+                    self._logger.warning(f"Ошибка/отмена стрима: {stream_error}")
+                    retries = 0
+                    # Отключаем текущий цикл обработки
+                    self._is_running = True  # позволяем циклу переподключений работать
+                    while self._is_running:
+                        delay = compute_backoff_delay(retries, base_seconds=0.5, max_seconds=30.0, jitter="full")
+                        self._logger.info(f"Повторное подключение через {delay:.2f}с (попытка {retries+1})")
+                        await asyncio.sleep(delay)
+                        try:
+                            ok = await self.start()
+                            if ok:
+                                self._logger.info("Переподключение успешно")
+                                return
+                        except Exception as e:
+                            self._logger.warning(f"Не удалось переподключиться: {e}")
+                        retries += 1
+                    break
                         
         except Exception as e:
             self._logger.error(f"Ошибка обработки стрима: {e}")
@@ -414,36 +392,12 @@ class MarketDataStream(MarketDataStreamable):
         self._current_price = None
     
     async def _load_historical_data(self) -> None:
-        """Загружает исторические данные последней торговой сессии"""
+        """Загружает исторические данные фиксированного окна до текущего момента (UTC)."""
         try:
-            self._logger.info("Загрузка исторических данных последней торговой сессии...")
-            
-            # Получаем информацию о торговых часах (расширенная версия с поддержкой выходных)
-            market_status = await get_market_status_enhanced()
-            
-            # Определяем период для загрузки
-            if market_status.get('is_trading', False):
-                session_type = market_status.get('session_type', 'unknown')
-                
-                if session_type == 'weekend':
-                    # Выходные торги - загружаем данные за последние 4 часа
-                    to_date = datetime.now()
-                    from_date = to_date - timedelta(hours=4)
-                    self._logger.info("Выходные торги, загружаем данные за последние 4 часа")
-                elif session_type == 'evening':
-                    # Вечерние торги - загружаем данные за последние 2 часа
-                    to_date = datetime.now()
-                    from_date = to_date - timedelta(hours=2)
-                    self._logger.info("Вечерние торги, загружаем данные за последние 2 часа")
-                else:
-                    # Основные торги - загружаем данные за последние 2 часа
-                    to_date = datetime.now()
-                    from_date = to_date - timedelta(hours=2)
-                    self._logger.info("Основные торги, загружаем данные за последние 2 часа")
-            else:
-                # Если рынок закрыт, загружаем данные последней торговой сессии
-                from_date, to_date = await self._get_last_trading_session_period()
-                self._logger.info(f"Рынок закрыт, загружаем данные последней сессии: {from_date} - {to_date}")
+            self._logger.info("Загрузка исторических данных (фиксированное окно)")
+            now_utc = datetime.now(timezone.utc)
+            from_date = now_utc - timedelta(hours=4)
+            to_date = now_utc
             
             # Логируем параметры запроса
             self._logger.info(f"🔍 Параметры запроса свечей:")

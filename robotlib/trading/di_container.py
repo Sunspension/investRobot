@@ -2,7 +2,6 @@
 DI контейнер для торговой системы
 """
 from typing import Optional, Dict, Any
-from typing import Protocol
 from typing import Callable, Dict, List
 from robotlib.utils.logger import get_logger
 from robotlib.trading.trading_config import TradingConfig
@@ -22,27 +21,6 @@ from visualization.dash_event_visualizer import DashEventVisualizer
 from visualization.event_visualizer_interface import VisualizationSinkable
 from robotlib.ingestion.db_sink import DBIngestionSink
 
-class EventBusable(Protocol):
-    def subscribe(self, event_type, handler: Callable) -> None: ...
-    async def publish(self, event) -> None: ...
-
-class MockEventBus:
-    def __init__(self):
-        self._subs: Dict[object, List[Callable]] = {}
-
-    def subscribe(self, event_type, handler: Callable) -> None:
-        self._subs.setdefault(event_type, []).append(handler)
-
-    async def publish(self, event) -> None:
-        handlers = self._subs.get(getattr(event, 'event_type', None), [])
-        for h in handlers:
-            try:
-                if hasattr(h, "__call__"):
-                    result = h(event)
-                    if hasattr(result, "__await__"):
-                        await result
-            except Exception:
-                pass
 
 class TradingSystemContainer:
     """DI контейнер для торговой системы"""
@@ -71,11 +49,6 @@ class TradingSystemContainer:
         
         self._logger.info("✅ Конфигурация торговой системы валидна")
     
-    def get_event_bus(self) -> EventBusable:
-        """Шина событий: возвращает MockEventBus для совместимости тестов."""
-        if 'event_bus' not in self._instances:
-            self._instances['event_bus'] = MockEventBus()
-        return self._instances['event_bus']
     
     def get_session_stats(self) -> SessionStats:
         """Получает статистику сессии"""
@@ -184,6 +157,21 @@ class TradingSystemContainer:
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             if isinstance(visualizer, VisualizationSinkable):
                 self._instances['market_data_stream'].set_visualization_sink(visualizer)
+            # Подключаем стратегии к потоку свечей (генерация сигналов)
+            try:
+                strategy_manager = await self.get_strategy_manager()
+                if not hasattr(self._instances['market_data_stream'], '_strategy_cb_registered'):
+                    def _strategy_cb(candle):
+                        try:
+                            import asyncio as _asyncio
+                            _asyncio.create_task(strategy_manager.on_candle(candle))
+                        except Exception:
+                            pass
+                    self._instances['market_data_stream'].add_candle_callback(_strategy_cb)
+                    setattr(self._instances['market_data_stream'], '_strategy_cb_registered', True)
+            except Exception:
+                # Если стратегий нет, продолжаем только с визуализатором
+                pass
         return self._instances['market_data_stream']
     
     async def get_trading_dependencies(self) -> TradingDependencies:
@@ -269,7 +257,6 @@ class TradingSystemContainer:
         """Собирает полную торговой системы"""
         return {
             'config': self._config,
-            'event_bus': self.get_event_bus(),
             'session_controller': await self.get_session_controller(),
             'dependencies': await self.get_trading_dependencies(),
             'visualizer': self.get_visualizer(host=host, port=port, start_server=start_server)
