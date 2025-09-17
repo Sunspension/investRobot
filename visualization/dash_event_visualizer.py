@@ -447,6 +447,12 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
             
             # Запускаем тикер для обновления счетчиков каждую секунду
             self._start_ticker()
+            # Параллельно запускаем периодический опрос статуса рынка
+            try:
+                import asyncio as _asyncio
+                _asyncio.create_task(self._periodic_market_status_refresh())
+            except Exception as e:
+                self._logger.warning(f"Не удалось запустить опрос статуса рынка: {e}")
             
         except Exception as e:
             self._logger.error(f"Ошибка запуска визуализатора: {e}")
@@ -591,6 +597,19 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
     def _start_ticker(self) -> None:
         """Запускает серверный тикер, который рассылает WS-сообщение раз в секунду."""
         self._ws_hub.start_ticker()
+
+    async def _periodic_market_status_refresh(self) -> None:
+        """Периодически обновляет статус рынка и пушит его в UI."""
+        while self._running:
+            try:
+                from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
+                ms = await get_market_status_enhanced()
+                self._data_manager.update_market_status(ms)
+                self._broadcast_ws({"type": "market_status", "is_trading": ms.get('is_trading', False)})
+            except Exception as e:
+                self._logger.debug(f"Ошибка обновления статуса рынка: {e}")
+            # Обновляем раз в 30 секунд
+            await asyncio.sleep(30)
     
     def _create_layout(self) -> html.Div:
         """Создает макет приложения с богатым UI из TradingVisualizerAdapter"""

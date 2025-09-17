@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objs as go
 from plotly.graph_objects import Figure
 from robotlib.utils.logger import get_logger
+from config_data.config import load_config
 
 class ChartBuilder:
     """Строитель графиков для визуализации"""
@@ -106,22 +107,39 @@ class ChartBuilder:
 
         # Скрытие неактивного времени (rangebreaks)
         if hide_inactive_time:
+            cfg = load_config()
+            def _hm_to_float(hhmm: str) -> float:
+                h, m = hhmm.split(":")
+                return int(h) + int(m) / 60.0
             # Суббота-воскресенье
             breaks = [dict(bounds=["sat", "mon"])]
-            # Часы вне торговых: 23:50–10:00, 18:45–19:05 (МСК)
-            breaks.append(dict(pattern="hour", bounds=[23.833, 10]))
-            breaks.append(dict(pattern="hour", bounds=[18.75, 19.083]))
+            # Ночные часы: два интервала (23:50–24:00 и 00:00–10:00)
+            breaks.append(dict(pattern="hour", bounds=[23 + 50/60, 24]))
+            breaks.append(dict(pattern="hour", bounds=[0, 10]))
+            # Клинринги из конфига
+            day_start = _hm_to_float(cfg.clearing_day_start)
+            day_end = _hm_to_float(cfg.clearing_day_end)
+            eve_start = _hm_to_float(cfg.clearing_evening_start)
+            eve_end = _hm_to_float(cfg.clearing_evening_end)
+            breaks.append(dict(pattern="hour", bounds=[day_start, day_end]))
+            breaks.append(dict(pattern="hour", bounds=[eve_start, eve_end]))
             fig.update_xaxes(rangebreaks=breaks)
-        
+        else:
+            # Явно очищаем ранее установленные разрывы времени
+            fig.update_xaxes(rangebreaks=None)
+
+        # Важно: меняем uirevision при переключении, чтобы Plotly применил обновление layout
+        fig.update_layout(uirevision=f"real_data_{'hide' if hide_inactive_time else 'show'}")
+
         self.logger.debug("График создан успешно")
         return fig
-    
+
     def _add_signals_to_chart(self, fig: Figure, signals_data: List[Dict[str, Any]]) -> None:
         """Добавляет сигналы на график"""
         if not signals_data:
             self.logger.debug("Нет сигналов для добавления на график")
             return
-            
+        
         self.logger.debug(f"Добавляем {len(signals_data)} сигналов на график")
         for signal in signals_data[-20:]:  # Последние 20 сигналов
             color = '#00ff88' if signal['type'] == 'buy' else '#ff4444'
@@ -159,7 +177,7 @@ class ChartBuilder:
                              (f"Сила: {signal.get('strength', 'N/A'):.3f}<br>" if 'strength' in signal else "") +
                              "<extra></extra>"
             ))
-    
+
     def _add_orders_to_chart(self, fig: Figure, orders_data: List[Dict[str, Any]]) -> None:
         """Добавляет ордера на график"""
         if not orders_data:
@@ -228,7 +246,7 @@ class ChartBuilder:
                              "<extra></extra>",
                 customdata=[[order.get('quantity', 1), order.get('strategy', 'Unknown')] for order in sell_orders]
             ))
-    
+
     def _configure_chart_layout(self, fig: Figure) -> None:
         """Настраивает макет графика"""
         self.logger.debug("Настраиваем макет графика")

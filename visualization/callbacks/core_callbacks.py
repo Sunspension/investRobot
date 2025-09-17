@@ -42,6 +42,8 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
                 current_price=snapshot['current_price'],
                 hide_inactive_time=hide_inactive,
             )
+            # Принудительно сбрасываем relayout, чтобы Plotly применил rangebreaks немедленно
+            fig._layout_obj[u"uirevision"] = f"toggle_{'hide' if hide_inactive else 'show'}"
 
             # Списки сигналов
             signals_list = ui_components.create_signals_list(snapshot['signals_data'])
@@ -55,14 +57,19 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
                 'main': 'Основная сессия',
                 'evening': 'Вечерняя сессия',
                 'weekend': 'Выходная сессия',
+                'clearing': 'Клиринг',
             }.get(session_type, 'Торговая сессия')
 
             if is_trading:
                 time_text = market_status_service.countdown_to_close_text(session_type) if market_status_service else ""
                 enhanced_market_status = f"🟢 Открыт • {session_name}"
             else:
-                time_text = market_status_service.countdown_to_open_text() if market_status_service else ""
-                enhanced_market_status = "🔴 Рынок закрыт"
+                if session_type == 'clearing':
+                    time_text = market_status_service.countdown_to_close_text(session_type) if market_status_service else ""
+                    enhanced_market_status = "🟡 Клиринг"
+                else:
+                    time_text = market_status_service.countdown_to_open_text() if market_status_service else ""
+                    enhanced_market_status = "🔴 Рынок закрыт"
 
             # Портфель
             portfolio_data = snapshot.get('portfolio_data', {})

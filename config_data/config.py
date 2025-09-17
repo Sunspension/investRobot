@@ -17,6 +17,10 @@ class TCSClient:
 @dataclass
 class Config:
     tcs_client: TCSClient
+    clearing_day_start: str
+    clearing_day_end: str
+    clearing_evening_start: str
+    clearing_evening_end: str
 
 
 def load_config(path: str = None) -> Config:
@@ -32,5 +36,17 @@ def load_config(path: str = None) -> Config:
         rate_limit_post_rps=float(env('TCS_RATE_POST_RPS', 2.0)),
         rate_limit_post_burst=int(env('TCS_RATE_POST_BURST', 4)),
     )
-    return Config(tcs_client=client)
+    # Clearing windows (HH:MM) — configurable
+    clearing_day_start = env('CLEARING_DAY_START', '14:00')
+    clearing_day_end = env('CLEARING_DAY_END', '14:05')
+    clearing_evening_start = env('CLEARING_EVENING_START', '18:50')
+    clearing_evening_end = env('CLEARING_EVENING_END', '19:05')
+
+    return Config(
+        tcs_client=client,
+        clearing_day_start=clearing_day_start,
+        clearing_day_end=clearing_day_end,
+        clearing_evening_start=clearing_evening_start,
+        clearing_evening_end=clearing_evening_end,
+    )
                                     

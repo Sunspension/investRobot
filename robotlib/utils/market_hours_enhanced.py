@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 
 from robotlib.utils.logger import get_logger
 from robotlib.utils.tinkoff_market_hours import get_market_status_api, is_trading_time_api
+from config_data.config import load_config
 
 
 class MarketHoursProvidable(ABC):
@@ -137,6 +138,42 @@ class EnhancedMarketHours:
         current_time = dt.time()
         
         return evening_start <= current_time <= evening_end
+
+    def _is_clearing_time(self, dt: Optional[datetime] = None) -> bool:
+        """
+        Возвращает True во время клиринга для фьючерсов (ФОРТС):
+        - дневной клиринг: 14:00–14:05 МСК (пн–пт)
+        - вечерний клиринг: 18:50–19:05 МСК (пн–пт)
+        """
+        if dt is None:
+            dt = datetime.now(self._moscow_tz)
+        elif dt.tzinfo is None:
+            dt = self._moscow_tz.localize(dt)
+        else:
+            dt = dt.astimezone(self._moscow_tz)
+
+        weekday = dt.weekday()  # 0=понедельник, 6=воскресенье
+        if weekday > 4:
+            # В выходные нет клиринга между сессиями
+            return False
+
+        cfg = load_config()
+        def _parse_hhmm(s: str) -> time:
+            h, m = s.split(":")
+            return time(int(h), int(m))
+        day_start = _parse_hhmm(cfg.clearing_day_start)
+        day_end = _parse_hhmm(cfg.clearing_day_end)
+        eve_start = _parse_hhmm(cfg.clearing_evening_start)
+        eve_end = _parse_hhmm(cfg.clearing_evening_end)
+
+        current_time = dt.time()
+        # Дневной клиринг
+        if day_start <= current_time < day_end:
+            return True
+        # Вечерний клиринг
+        if eve_start <= current_time < eve_end:
+            return True
+        return False
     
     async def is_trading_time_enhanced(self, dt: Optional[datetime] = None) -> bool:
         """
@@ -191,12 +228,17 @@ class EnhancedMarketHours:
         else:
             dt = dt.astimezone(self._moscow_tz)
         
+        # Определяем клиринг до вычисления статуса
+        is_clearing = self._is_clearing_time(dt)
+
         # Проверяем торговое время (выходные торги проверяются первыми)
-        is_trading = await self.is_trading_time_enhanced(dt)
+        is_trading = False if is_clearing else await self.is_trading_time_enhanced(dt)
         
         # Определяем тип торговой сессии
         session_type = "closed"
-        if is_trading:
+        if is_clearing:
+            session_type = "clearing"
+        elif is_trading:
             if self._is_weekend_trading_time(dt):
                 session_type = "weekend"
             elif self._is_evening_trading_time(dt):
@@ -216,6 +258,7 @@ class EnhancedMarketHours:
             'is_trading': is_trading,
             'current_time': dt,
             'session_type': session_type,
+            'is_clearing': is_clearing,
             'is_weekend_trading': self._is_weekend_trading_time(dt),
             'is_evening_trading': self._is_evening_trading_time(dt),
             'message': self._get_status_message(session_type, is_trading)
@@ -242,6 +285,8 @@ class EnhancedMarketHours:
     def _get_status_message(self, session_type: str, is_trading: bool) -> str:
         """Возвращает сообщение о статусе рынка"""
         if not is_trading:
+            if session_type == 'clearing':
+                return "Клиринг"
             return "Рынок закрыт"
         
         messages = {

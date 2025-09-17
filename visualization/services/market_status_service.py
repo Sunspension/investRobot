@@ -32,9 +32,19 @@ class MarketStatusService:
             now_msk = datetime.now(msk)
 
             if session_type == 'main':
-                session_end = now_msk.replace(hour=18, minute=45, second=0, microsecond=0)
+                # До дневного клиринга или до конца основной сессии (в зависимости от времени вызова)
+                if now_msk.time() < _time(14, 0):
+                    session_end = now_msk.replace(hour=14, minute=0, second=0, microsecond=0)
+                else:
+                    session_end = now_msk.replace(hour=18, minute=50, second=0, microsecond=0)
             elif session_type == 'evening':
                 session_end = now_msk.replace(hour=23, minute=50, second=0, microsecond=0)
+            elif session_type == 'clearing':
+                # Динамически: если это дневной клиринг — до 14:05, если вечерний — до 19:05
+                if _time(14, 0) <= now_msk.time() < _time(14, 5):
+                    session_end = now_msk.replace(hour=14, minute=5, second=0, microsecond=0)
+                else:
+                    session_end = now_msk.replace(hour=19, minute=5, second=0, microsecond=0)
             elif session_type == 'weekend':
                 session_end = now_msk.replace(hour=18, minute=0, second=0, microsecond=0)
             else:
