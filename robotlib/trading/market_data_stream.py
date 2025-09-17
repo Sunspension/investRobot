@@ -15,6 +15,7 @@ from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
 from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.utils.backoff import compute_backoff_delay
 
 
 class TinkoffStreamAdapter:
@@ -257,8 +258,21 @@ class MarketDataStream(MarketDataStreamable):
                         break
                     else:
                         self._logger.error(f"Ошибка в стриме: {stream_error}")
-                        # Пытаемся переподключиться
-                        await asyncio.sleep(5)
+                        # Пытаемся переподключиться с backoff + jitter
+                        retries = 0
+                        while self._is_running:
+                            delay = compute_backoff_delay(retries, base_seconds=0.5, max_seconds=30.0, jitter="full")
+                            self._logger.info(f"Повторное подключение через {delay:.2f}с (попытка {retries+1})")
+                            await asyncio.sleep(delay)
+                            try:
+                                ok = await self.start()
+                                if ok:
+                                    self._logger.info("Переподключение успешно")
+                                    return
+                            except Exception as e:
+                                self._logger.warning(f"Не удалось переподключиться: {e}")
+                            retries += 1
+                        break
                         break
                         
         except Exception as e:

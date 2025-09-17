@@ -51,6 +51,7 @@ python scripts/main.py
 - [Документация стратегий](strategy_interface.md)
 - [Управление аккаунтами](account.md)
 - [Использование TinkoffAPIClientable](tinkoff_api_interface_usage.md)
+ - [Rate limiting и backoff](rate_limiting_backoff.md)
 
 ### История изменений
 - [📝 Changelog](CHANGELOG.md) - **ИСТОРИЯ ИЗМЕНЕНИЙ**
@@ -97,3 +98,5 @@ python scripts/main.py
 
 - [Модуль money](money.md) - работа с денежными типами
 - [Модуль visualizer](visualizer.md) - визуализация торговых данных
+
+Подробнее см. `rate_limiting_backoff.md`.

@@ -69,3 +69,24 @@ class Money:
 
     def __str__(self) -> str:
         return f'<Money units={self.units} nano={self.nano}>'
+
+
+# --- Helpers for MoneyValue conversions (shared across the project) ---
+def money_value_to_float(value: MoneyValue | None) -> float:
+    """Safely convert MoneyValue to float; returns 0.0 on None."""
+    if value is None:
+        return 0.0
+    return float(value.units) + float(value.nano) / Money.MOD
+
+
+def float_to_money_value(
+    amount: float,
+    *,
+    currency: str = "rub",
+) -> MoneyValue:
+    """Convert float to MoneyValue with given currency.
+    Uses truncation toward zero for compatibility with legacy expectations.
+    """
+    units = int(amount)  # truncates toward zero (e.g., -100.5 -> -100)
+    nano = int((amount - units) * Money.MOD)
+    return MoneyValue(currency=currency, units=units, nano=nano)

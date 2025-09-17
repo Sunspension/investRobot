@@ -154,7 +154,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_check_market.return_value = False
         
         # Мокаем services
-        self.api_client.services = Mock()
+        self.api_client._services = Mock()
         
         result = await self.api_client.check_market_availability()
         
@@ -180,7 +180,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_accounts_response.accounts = [mock_account]
         mock_users.get_accounts = AsyncMock(return_value=mock_accounts_response)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         self.api_client.client = Mock()  # Устанавливаем client
         
         result = await self.api_client.check_market_availability()
@@ -231,7 +231,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_order_status.initial_commission = MoneyValue(currency="rub", units=0, nano=10000000)
         mock_get_order_status.return_value = mock_order_status
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.buy_market("FUTIMOEXF000", 1)
         
@@ -257,7 +257,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         # Мокаем исключение
         mock_sandbox.post_sandbox_order = AsyncMock(side_effect=Exception("API Error"))
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.buy_market("FUTIMOEXF000", 1)
         
@@ -296,7 +296,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_order_status.initial_commission = MoneyValue(currency="rub", units=0, nano=10000000)
         mock_get_order_status.return_value = mock_order_status
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.sell_market("FUTIMOEXF000", 1)
         
@@ -323,7 +323,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         
         mock_sandbox.get_sandbox_portfolio = AsyncMock(return_value=mock_response)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.get_portfolio()
         
@@ -343,7 +343,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         # Мокаем исключение
         mock_sandbox.get_sandbox_portfolio = AsyncMock(side_effect=Exception("Portfolio Error"))
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.get_portfolio()
         
@@ -368,7 +368,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         
         mock_instruments.get_futures_margin = AsyncMock(return_value=mock_response)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.get_futures_margin("FUTIMOEXF000")
         
@@ -391,7 +391,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         # Мокаем исключение
         mock_instruments.get_futures_margin = AsyncMock(side_effect=Exception("Margin Error"))
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.get_futures_margin("FUTIMOEXF000")
         
@@ -411,7 +411,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_response = Mock()
         mock_sandbox.get_sandbox_operations = AsyncMock(return_value=mock_response)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         from_date = datetime.now() - timedelta(days=1)
         to_date = datetime.now()
@@ -445,7 +445,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_response = Mock()
         mock_operations.get_operations = AsyncMock(return_value=mock_response)
         
-        prod_client.services = mock_services
+        prod_client._services = mock_services
         
         from_date = datetime.now() - timedelta(days=1)
         to_date = datetime.now()
@@ -475,7 +475,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_market_data.get_candles = AsyncMock(return_value=mock_response)
         
         self.api_client.client = Mock()  # Добавляем client
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         from_date = datetime.now() - timedelta(days=1)
         to_date = datetime.now()
@@ -503,7 +503,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         # Мокаем исключение
         mock_market_data.get_candles = AsyncMock(side_effect=Exception("Candles Error"))
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         from_date = datetime.now() - timedelta(days=1)
         to_date = datetime.now()
@@ -522,7 +522,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_market_data_stream = Mock()
         mock_services.create_market_data_stream = Mock(return_value=mock_market_data_stream)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.create_market_data_stream()
         
@@ -543,7 +543,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_response = Mock()
         mock_users.get_accounts = AsyncMock(return_value=mock_response)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.get_accounts()
         
@@ -564,7 +564,7 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_response = Mock()
         mock_users.get_info = AsyncMock(return_value=mock_response)
         
-        self.api_client.services = mock_services
+        self.api_client._services = mock_services
         
         result = await self.api_client.get_user_info()
         
@@ -602,7 +602,7 @@ class TestTinkoffAPIClientIntegration(unittest.TestCase):
             
             # Проверяем, что клиент инициализирован
             self.assertIsNotNone(api_client.client)
-            self.assertIsNotNone(api_client.services)
+            self.assertIsNotNone(api_client._services)
             self.assertTrue(api_client.is_sandbox)
         
         # Проверяем, что __aexit__ был вызван
