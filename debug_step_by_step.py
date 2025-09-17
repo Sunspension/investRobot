@@ -35,7 +35,6 @@ async def debug_step_by_step():
         print('4️⃣ Собираем торговую систему...')
         trading_system = await container.build_trading_system(host="127.0.0.1", port=8050, start_server=True)
         print('✅ Система собрана успешно!')
-        print(f'🚌 EventBus: {type(trading_system["event_bus"]).__name__}')
         print(f'📊 Визуализация: {"включена" if trading_system["visualizer"] else "отключена"}')
         
         print('5️⃣ Получаем SessionController...')

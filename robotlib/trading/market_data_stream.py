@@ -13,7 +13,7 @@ from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
-from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.visualization_interfaces import TradingEventSinkable
 from robotlib.utils.backoff import compute_backoff_delay
 from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
@@ -86,14 +86,14 @@ class MarketDataStream(MarketDataStreamable):
         self._stream_adapter: Optional[TinkoffStreamAdapter] = None
         self._is_running = False
         self._current_price: Optional[float] = None
-        self._sink: Optional[VisualizationSinkable] = None
+        self._sink: Optional[TradingEventSinkable] = None
         self._last_candle_at: Optional[datetime] = None
         # Watchdog config (injected)
         self._watchdog_enabled = watchdog_enabled
         self._watchdog_stale_seconds = watchdog_stale_seconds
         self._watchdog_require_open_market = watchdog_require_open_market
 
-    def set_visualization_sink(self, sink: VisualizationSinkable) -> None:
+    def set_visualization_sink(self, sink: TradingEventSinkable) -> None:
         """Устанавливает приемник визуализации."""
         self._sink = sink
     

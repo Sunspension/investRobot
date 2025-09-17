@@ -19,7 +19,7 @@ from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
 from visualization.dash_event_visualizer import DashEventVisualizer
-from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.visualization_interfaces import TradingEventSinkable
 from robotlib.ingestion.db_sink import DBIngestionSink
 from config_data.config import load_config
 
@@ -121,7 +121,7 @@ class TradingSystemContainer:
         if 'signal_manager' not in self._instances:
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             self._instances['signal_manager'] = SignalManager(
-                visualization_sink=visualizer if isinstance(visualizer, VisualizationSinkable) else None
+                visualization_sink=visualizer if isinstance(visualizer, TradingEventSinkable) else None
             )
         return self._instances['signal_manager']
     
@@ -171,7 +171,7 @@ class TradingSystemContainer:
             )
             # Инжектим sink в поток рыночных данных
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
-            if isinstance(visualizer, VisualizationSinkable):
+            if isinstance(visualizer, TradingEventSinkable):
                 self._instances['market_data_stream'].set_visualization_sink(visualizer)
             # Подключаем стратегии к потоку свечей (генерация сигналов)
             try:

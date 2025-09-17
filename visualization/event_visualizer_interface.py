@@ -4,6 +4,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Protocol, Dict, Any, runtime_checkable
 from robotlib.trading.events import TradingEvent, EventType
+from robotlib.visualization_interfaces import TradingEventSinkable
 
 
 class EventVisualizerable(ABC):
@@ -55,19 +56,6 @@ class EventVisualizerable(ABC):
         pass
 
 
-@runtime_checkable
-class VisualizationSinkable(Protocol):
-    """Легковесный интерфейс-приемник для прямых вызовов из ядра (без EventBus)."""
-
-    async def on_candle(self, candle: Any, price: float, figi: str) -> None:
-        pass
-
-    async def on_signal(self, signal: Any, figi: str, price: float) -> None:
-        pass
-
-    async def on_market_status(self, status: Dict[str, Any]) -> None:
-        pass
-
 
 class EventVisualizer(EventVisualizerable):
     """Базовый визуализатор событий"""
@@ -76,7 +64,6 @@ class EventVisualizer(EventVisualizerable):
         pass
         self._running = False
     
-    # EventBus подписки удалены
     
     async def start(self) -> None:
         """Запускает визуализатор"""
@@ -123,7 +110,6 @@ class MockEventVisualizer(EventVisualizerable):
         self._running = False
         self._handled_events: List[TradingEvent] = []
     
-    # EventBus подписки удалены
     
     async def start(self) -> None:
         self._running = True

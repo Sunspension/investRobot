@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from robotlib.signal_types import Signal
-from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.visualization_interfaces import TradingEventSinkable
 
 
 class SignalDispatchable(Protocol):
@@ -11,9 +11,9 @@ class SignalDispatchable(Protocol):
 
 
 class VisualizationSignalDispatcher:
-    """Dispatcher that forwards signals to a VisualizationSinkable."""
+    """Dispatcher that forwards signals to a TradingEventSinkable."""
 
-    def __init__(self, sink: VisualizationSinkable) -> None:
+    def __init__(self, sink: TradingEventSinkable) -> None:
         self._sink = sink
 
     async def dispatch_signal(self, signal: Signal, figi: str, price: float) -> None:

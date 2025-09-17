@@ -5,7 +5,7 @@ from robotlib.indicators import IncrementalMACD, IncrementalATR, MACDPoint
 from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
-from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.visualization_interfaces import TradingEventSinkable
 from robotlib.signal_types import Signal
 import asyncio
 
@@ -26,7 +26,7 @@ class SignalManager:
         lookback_min=6,
         lookback_max=20,
         peak_prominence=0.2,
-        visualization_sink: VisualizationSinkable | None = None,
+        visualization_sink: TradingEventSinkable | None = None,
     ):
         self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
         

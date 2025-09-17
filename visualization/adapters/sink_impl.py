@@ -4,12 +4,12 @@ from datetime import datetime
 from typing import Any
 
 from robotlib.utils.logger import get_logger
-from robotlib.utils.money import Money
+from robotlib.visualization_interfaces import TradingEventSinkable
 from visualization.formatters import to_moscow_time
 
 
-class VisualizationSinkAdapter:
-    """Адаптер VisualizationSinkable: обновляет DataManager и рассылает WS.
+class VisualizationSinkAdapter(TradingEventSinkable):
+    """Адаптер TradingEventSinkable: обновляет DataManager и рассылает WS.
 
     Выделяет on_candle/on_signal/on_market_status из визуализатора.
     """
@@ -56,7 +56,3 @@ class VisualizationSinkAdapter:
             self._broadcast({"type": "market_status", "is_trading": status.get('is_trading', False)})
         except Exception as e:
             self._logger.error(f"Ошибка on_market_status: {e}")
-
-    # Утилита перенесена в visualization.formatters.to_moscow_time
-
-

@@ -6,7 +6,8 @@ import threading
 import json
 from typing import Any, Dict
 from datetime import datetime
-from visualization.event_visualizer_interface import EventVisualizerable, VisualizationSinkable
+from visualization.event_visualizer_interface import EventVisualizerable
+from robotlib.visualization_interfaces import TradingEventSinkable
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
 from visualization.ui_components import UIComponents
@@ -25,7 +26,7 @@ from visualization.adapters.sink_impl import VisualizationSinkAdapter
 from dash import Dash, html
 
 
-class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
+class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
     """Dash визуализатор событий торговой системы"""
     
     def __init__(

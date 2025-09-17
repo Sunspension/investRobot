@@ -8,10 +8,10 @@ from tinkoff.invest import Candle, HistoricCandle
 from robotlib.utils.logger import get_logger
 from robotlib.utils.sql_schema import init_db
 from robotlib.utils.sql_repository import DBCandle, upsert_candles, insert_orders, outbox_enqueue_order
-from visualization.event_visualizer_interface import VisualizationSinkable
+from robotlib.visualization_interfaces import TradingEventSinkable
 
 
-class DBIngestionSink(VisualizationSinkable):
+class DBIngestionSink(TradingEventSinkable):
     """Приёмник визуализации, сохраняющий свечи в SQLite в фоне.
 
     Предполагается инжектировать в `MarketDataStream`, чтобы исторические

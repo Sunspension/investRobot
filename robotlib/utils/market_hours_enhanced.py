@@ -327,9 +327,6 @@ class EnhancedMarketHours:
         """Форматирует время до открытия в читаемый вид"""
         time_diff = next_open - current_time
         
-        # Подробное логирование для отладки
-        self._logger.info(f"Форматирование времени: current_time={current_time.strftime('%Y-%m-%d %H:%M:%S')}, next_open={next_open.strftime('%Y-%m-%d %H:%M:%S')}, time_diff={time_diff}, days={time_diff.days}, seconds={time_diff.seconds}")
-        
         if time_diff.days > 0:
             hours = time_diff.seconds // 3600
             minutes = (time_diff.seconds % 3600) // 60
@@ -338,8 +335,7 @@ class EnhancedMarketHours:
             hours = time_diff.seconds // 3600
             minutes = (time_diff.seconds % 3600) // 60
             formatted_time = f"{hours:02d}:{minutes:02d}"
-        
-        self._logger.info(f"Результат форматирования: '{formatted_time}'")
+            
         return formatted_time
 
 
