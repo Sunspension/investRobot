@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Protocol, Optional, List, Dict, Any, runtime_checkable
 from dataclasses import dataclass
 
-from robotlib.signal_types import Signal, Order
+from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution
 from robotlib.trading.order_executor import OrderResult
 from robotlib.trading.portfolio_manager import Portfolio, Position

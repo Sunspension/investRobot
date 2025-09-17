@@ -451,58 +451,66 @@ def _systemd_menu():
 def main() -> int:
     while True:
         print("\n=== investRobot — Мастер-скрипт ===")
+        print("\n📈 ТОРГОВЛЯ:")
         print("  1) Запустить торговую систему")
         print("  2) Запустить торговую систему (ограниченное время)")
         print("  3) Многоаккаунтный режим")
+        print("\n📊 ДАННЫЕ:")
         print("  4) Сбор рыночных данных → SQLite")
         print("  5) Сбор данных → запустить в фоне (detached)")
-        print("  6) Оптимизация параметров")
-        print("  7) Тесты (pytest)")
-        print("  8) Песочница: пополнение счёта")
+        print("  6) Сбор данных → остановить (stop)")
+        print("  7) Сбор данных → статус")
+        print("  8) Загрузка исторических данных")
         print("  9) Просмотр БД (последние записи)")
-        print("  10) Загрузка исторических данных")
-        print("  11) Сбор данных → остановить (stop)")
-        print("  12) Сбор данных → статус")
-        print("  13) Outbox → запустить в фоне")
-        print("  14) Outbox → остановить")
-        print("  15) Outbox → статус")
-        print("  16) Linux: сервисы (systemd)")
-        print("  0) Выход")
+        print("\n⚙️ СИСТЕМА:")
+        print("  10) Outbox → запустить в фоне")
+        print("  11) Outbox → остановить")
+        print("  12) Outbox → статус")
+        print("  13) Linux: сервисы (systemd)")
+        print("\n🔧 РАЗРАБОТКА:")
+        print("  14) Оптимизация параметров")
+        print("  15) Тесты (pytest)")
+        print("  16) Песочница: пополнение счёта")
+        print("\n  0) Выход")
 
         choice = input("> ").strip()
         try:
+            # ТОРГОВЛЯ
             if choice == "1":
                 return asyncio.run(_start_trading()) or 0
             if choice == "2":
                 return asyncio.run(_start_trading_limited()) or 0
             if choice == "3":
                 _multi_account_menu()
+            # ДАННЫЕ
             elif choice == "4":
                 _run_market_ingestor()
             elif choice == "5":
                 _run_market_ingestor_daemon()
             elif choice == "6":
-                _run_optimization()
+                _stop_market_ingestor_daemon()
             elif choice == "7":
-                _run_tests_pytest()
+                _status_market_ingestor_daemon()
             elif choice == "8":
-                _sandbox_payin()
+                _load_historical()
             elif choice == "9":
                 _view_db_summary()
+            # СИСТЕМА
             elif choice == "10":
-                _load_historical()
-            elif choice == "11":
-                _stop_market_ingestor_daemon()
-            elif choice == "12":
-                _status_market_ingestor_daemon()
-            elif choice == "13":
                 _run_outbox_daemon()
-            elif choice == "14":
+            elif choice == "11":
                 _stop_outbox_daemon()
-            elif choice == "15":
+            elif choice == "12":
                 _status_outbox_daemon()
-            elif choice == "16":
+            elif choice == "13":
                 _systemd_menu()
+            # РАЗРАБОТКА
+            elif choice == "14":
+                _run_optimization()
+            elif choice == "15":
+                _run_tests_pytest()
+            elif choice == "16":
+                _sandbox_payin()
             elif choice == "0":
                 return 0
             else:

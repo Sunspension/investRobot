@@ -20,18 +20,3 @@ class Signal:
     candle: Candle | HistoricCandle = None
 
 
-@dataclass
-class Order:
-    """Старый класс Order - оставляем для обратной совместимости"""
-    type: str = None
-    price: float = None
-    marker_price: float = None
-    quantity: int = None
-    date: Optional[str] = None
-    profit: int = None
-    
-    def __str__(self):
-        if self.profit is None:
-            return f"Order(type='{self.type}', price={self.price}, marker_price={self.marker_price}, quantity={self.quantity}, date={self.date})"
-        else:
-            return f"Order(type='{self.type}', price={self.price}, marker_price={self.marker_price}, quantity={self.quantity}, date={self.date}, profit: {self.profit})"

@@ -6,7 +6,7 @@ from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
 from visualization.event_visualizer_interface import VisualizationSinkable
-from robotlib.signal_types import Signal, Order
+from robotlib.signal_types import Signal
 import asyncio
 
 

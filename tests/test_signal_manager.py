@@ -7,7 +7,7 @@ from unittest.mock import Mock, MagicMock
 from datetime import datetime
 from collections import deque
 
-from robotlib.signal_manager import SignalManager, Signal, Order
+from robotlib.signal_manager import SignalManager, Signal
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle, Quotation
 
@@ -272,54 +272,6 @@ class TestSignal(unittest.TestCase):
         self.assertIsNone(signal.candle)
 
 
-class TestOrder(unittest.TestCase):
-    """Тесты для класса Order"""
-
-    def test_order_creation(self):
-        """Тест создания приказа"""
-        order = Order(
-            type="buy",
-            price=100.5,
-            quantity=10,
-            date=datetime.now()
-        )
-        
-        self.assertEqual(order.type, "buy")
-        self.assertEqual(order.price, 100.5)
-        self.assertEqual(order.quantity, 10)
-        self.assertIsNotNone(order.date)
-        self.assertIsNone(order.profit)
-
-    def test_order_str_without_profit(self):
-        """Тест строкового представления без прибыли"""
-        order = Order(
-            type="buy",
-            price=100.5,
-            quantity=10,
-            date=datetime(2024, 1, 1, 12, 0)
-        )
-        
-        str_repr = str(order)
-        self.assertIn("buy", str_repr)
-        self.assertIn("100.5", str_repr)
-        self.assertIn("10", str_repr)
-        self.assertNotIn("profit", str_repr)
-
-    def test_order_str_with_profit(self):
-        """Тест строкового представления с прибылью"""
-        order = Order(
-            type="sell",
-            price=105.0,
-            quantity=10,
-            date=datetime(2024, 1, 1, 12, 0),
-            profit=50
-        )
-        
-        str_repr = str(order)
-        self.assertIn("sell", str_repr)
-        self.assertIn("105.0", str_repr)
-        self.assertIn("10", str_repr)
-        self.assertIn("profit: 50", str_repr)
 
 
 if __name__ == '__main__':

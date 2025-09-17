@@ -15,7 +15,7 @@ sys.path.insert(0, str(project_root))
 
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
-from robotlib.signal_manager import Signal, Order
+from robotlib.signal_manager import Signal
 from robotlib.trading.portfolio_manager import Portfolio, Position
 from robotlib.utils.money import Money
 

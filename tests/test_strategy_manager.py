@@ -8,7 +8,8 @@ import asyncio
 from datetime import datetime
 
 from robotlib.strategies.strategy_manager import StrategyManager
-from robotlib.signal_manager import Signal, Order
+from robotlib.signal_manager import Signal
+from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
 from robotlib.strategies.long import LongStrategy
 from tests.mocks import MockRiskManager, MockPortfolioManager
 
@@ -110,7 +111,13 @@ class TestStrategyManager(unittest.TestCase):
         mock_candle.close = 100.0
         
         # Мокаем стратегии, чтобы они возвращали заказы на закрытие
-        mock_order = Order(type='sell', price=105.0, quantity=1, date=datetime.now())
+        mock_order = OrderIntent(
+            figi="FUTIMOEXF000",
+            direction=OrderDirection.SELL,
+            order_type=OrderType.MARKET,
+            quantity=1,
+            price=105.0
+        )
         for strategy in self.strategy_manager._strategies:
             strategy.close_position = Mock(return_value=mock_order)
         
@@ -124,8 +131,20 @@ class TestStrategyManager(unittest.TestCase):
         """Тест печати заказов"""
         # Создаем тестовые заказы
         test_orders = [
-            Order(type='buy', price=100.0, quantity=1, date=datetime.now()),
-            Order(type='sell', price=105.0, quantity=1, date=datetime.now())
+            OrderIntent(
+                figi="FUTIMOEXF000",
+                direction=OrderDirection.BUY,
+                order_type=OrderType.MARKET,
+                quantity=1,
+                price=100.0
+            ),
+            OrderIntent(
+                figi="FUTIMOEXF000",
+                direction=OrderDirection.SELL,
+                order_type=OrderType.MARKET,
+                quantity=1,
+                price=105.0
+            )
         ]
         
         # Добавляем заказы в переменную экземпляра
@@ -141,8 +160,20 @@ class TestStrategyManager(unittest.TestCase):
         """Тест свойства trades"""
         # Создаем тестовые заказы
         test_orders = [
-            Order(type='buy', price=100.0, quantity=1, date=datetime.now()),
-            Order(type='sell', price=105.0, quantity=1, date=datetime.now())
+            OrderIntent(
+                figi="FUTIMOEXF000",
+                direction=OrderDirection.BUY,
+                order_type=OrderType.MARKET,
+                quantity=1,
+                price=100.0
+            ),
+            OrderIntent(
+                figi="FUTIMOEXF000",
+                direction=OrderDirection.SELL,
+                order_type=OrderType.MARKET,
+                quantity=1,
+                price=105.0
+            )
         ]
         
         # Добавляем заказы в переменную экземпляра

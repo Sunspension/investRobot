@@ -20,10 +20,10 @@ class StrategyInterface(ABC):
     def position(self) -> int:
         """Возвращает текущую позицию стратегии"""
         
-    def execute(self, signal: Signal) -> List[Order]:
+    def execute(self, signal: Signal) -> List[OrderIntent]:
         """Выполняет торговую логику на основе сигнала"""
         
-    def close_position(self, candle: Candle | HistoricCandle) -> Order | None:
+    def close_position(self, candle: Candle | HistoricCandle) -> OrderIntent | None:
         """Закрывает все открытые позиции"""
         
     @property
@@ -102,11 +102,11 @@ class MyCustomStrategy(StrategyInterface):
         self._income = 0.0
         # ... остальная инициализация
         
-    def execute(self, signal: Signal) -> List[Order]:
+    def execute(self, signal: Signal) -> List[OrderIntent]:
         # Ваша торговая логика
         pass
         
-    def close_position(self, candle) -> Order | None:
+    def close_position(self, candle) -> OrderIntent | None:
         # Логика закрытия позиций
         pass
         

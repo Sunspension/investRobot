@@ -5,7 +5,7 @@ from dataclasses import asdict
 from pandas import DataFrame
 
 from robotlib.signal_manager import SignalManager
-from robotlib.signal_types import Signal, Order
+from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution
 from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.strategies.long import LongStrategy
