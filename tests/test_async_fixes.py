@@ -13,11 +13,21 @@ from robotlib.signal_manager import SignalManager
 
 
 @pytest.fixture
-def market_data_stream():
-    """Фикстура для MarketDataStream"""
-    api_client = Mock()
+def api_client():
+    class _Dummy:
+        services = None
+    return _Dummy()
+
+
+@pytest.fixture
+def stream(api_client):
     figi = "FUTIMOEXF000"
-    return MarketDataStream(api_client, figi)
+    return MarketDataStream(api_client, figi, cache_size=100, watchdog_enabled=False, watchdog_stale_seconds=120, watchdog_require_open_market=True)
+
+
+@pytest.fixture
+def market_data_stream(stream: MarketDataStream) -> MarketDataStream:
+    return stream
 
 
 @pytest.mark.asyncio

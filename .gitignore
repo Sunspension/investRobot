@@ -2,6 +2,10 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python,pycharm+all,virtualenv,macos
 # Edit at https://www.toptal.com/developers/gitignore?templates=python,pycharm+all,virtualenv,macos
 
+
+# exclude pid file
+market_recorder.pid
+
 # Visual Studio
 .vscode
 

@@ -108,6 +108,14 @@ class DBIngestionSink(VisualizationSinkable):
             # Гарантируем наличие схемы даже если рабочий со свечами ещё не стартовал
             await init_db(self._db_path)
             await insert_orders(self._db_path, [order])
+            try:
+                oid = order.get('order_id')
+                typ = order.get('type')
+                prc = order.get('price')
+                qty = order.get('quantity')
+                self._logger.info(f"Ордер записан в БД: id={oid} type={typ} price={prc} qty={qty}")
+            except Exception:
+                pass
             # Пишем в outbox событие для идемпотентной доставки
             try:
                 await outbox_enqueue_order(

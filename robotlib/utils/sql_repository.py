@@ -151,7 +151,11 @@ async def outbox_enqueue_order(
                 account_id,
                 figi,
                 order_id,
-                json.dumps(payload, ensure_ascii=False),
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    default=lambda o: o.isoformat() if isinstance(o, datetime) else str(o),
+                ),
             ),
         )
         await conn.commit()

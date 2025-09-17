@@ -48,9 +48,6 @@ class OrderExecutor:
         self.logger.info(f"Выполнение ордера: {order_intent}")
         
         try:
-            # Генерируем уникальный ID для ордера
-            order_id = str(uuid.uuid4())
-            
             # Выполняем ордер в зависимости от типа
             if order_intent.order_type == OrderType.MARKET:
                 result = await self._execute_market_order(order_intent)
@@ -59,6 +56,9 @@ class OrderExecutor:
             else:
                 raise ValueError(f"Неподдерживаемый тип ордера: {order_intent.order_type}")
             
+            # Идентификатор приказа из биржи (если есть), иначе генерируем
+            order_id = getattr(result, 'order_id', None) or str(uuid.uuid4())
+
             # Создаем OrderExecution
             if order_intent.direction == OrderDirection.BUY:
                 dir_text = "лонг" if (result.executed_quantity or 0) > 0 else "покупка"

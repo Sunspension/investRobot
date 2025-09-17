@@ -2,8 +2,6 @@
 import asyncio
 import json
 import os
-from datetime import datetime
-from typing import Optional
 
 from robotlib.utils.logger import get_logger
 from robotlib.utils.sql_schema import init_db

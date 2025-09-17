@@ -5,13 +5,10 @@
 import unittest
 import pytest
 import asyncio
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timedelta
-
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.utils.money import Money
-from tinkoff.invest import OrderDirection, OrderType
-from tinkoff.invest.schemas import MoneyValue, Quotation
+from tinkoff.invest.schemas import MoneyValue
 
 
 class TestOrderResult(unittest.TestCase):
@@ -146,12 +143,12 @@ class TestTinkoffAPIClient(unittest.TestCase):
         # Проверяем, что __aexit__ был вызван
         mock_client_instance.__aexit__.assert_called_once()
 
-    @patch('robotlib.trading.tinkoff_api_client.check_market_open')
+    @patch('robotlib.trading.tinkoff_api_client.is_trading_time_with_api', new_callable=AsyncMock)
     @pytest.mark.asyncio
 
-    async def test_check_market_availability_market_closed(self, mock_check_market):
+    async def test_check_market_availability_market_closed(self, mock_is_trading_time):
         """Тест проверки доступности рынка - рынок закрыт"""
-        mock_check_market.return_value = False
+        mock_is_trading_time.return_value = False
         
         # Мокаем services
         self.api_client._services = Mock()
@@ -159,14 +156,14 @@ class TestTinkoffAPIClient(unittest.TestCase):
         result = await self.api_client.check_market_availability()
         
         self.assertFalse(result)
-        mock_check_market.assert_called_once()
+        mock_is_trading_time.assert_called_once()
 
-    @patch('robotlib.trading.tinkoff_api_client.check_market_open')
+    @patch('robotlib.trading.tinkoff_api_client.is_trading_time_with_api', new_callable=AsyncMock)
     @pytest.mark.asyncio
 
-    async def test_check_market_availability_market_open(self, mock_check_market):
+    async def test_check_market_availability_market_open(self, mock_is_trading_time):
         """Тест проверки доступности рынка - рынок открыт"""
-        mock_check_market.return_value = True
+        mock_is_trading_time.return_value = True
         
         # Мокаем services и client
         mock_services = Mock()
@@ -186,14 +183,14 @@ class TestTinkoffAPIClient(unittest.TestCase):
         result = await self.api_client.check_market_availability()
         
         self.assertTrue(result)
-        mock_check_market.assert_called_once()
+        mock_is_trading_time.assert_called_once()
 
-    @patch('robotlib.trading.tinkoff_api_client.check_market_open')
+    @patch('robotlib.trading.tinkoff_api_client.is_trading_time_with_api', new_callable=AsyncMock)
     @pytest.mark.asyncio
 
-    async def test_check_market_availability_no_client(self, mock_check_market):
+    async def test_check_market_availability_no_client(self, mock_is_trading_time):
         """Тест проверки доступности рынка - клиент не инициализирован"""
-        mock_check_market.return_value = True
+        mock_is_trading_time.return_value = True
         
         # Не устанавливаем services
         result = await self.api_client.check_market_availability()

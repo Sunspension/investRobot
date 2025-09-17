@@ -34,7 +34,7 @@ from robotlib.trading.clients.tinkoff.instruments_api import (
 from robotlib.utils.logger import get_logger
 from robotlib.utils.rate_limiter import TokenBucket
 
-from robotlib.utils.market_hours import check_market_open
+from robotlib.utils.market_hours import is_trading_time_with_api
 from robotlib.utils.money import money_value_to_float, float_to_money_value
 import time
 
@@ -132,27 +132,38 @@ class TinkoffAPIClient:
             True если рынок доступен, False иначе
         """
         try:
-            # Проверяем торговые часы
-            if not check_market_open():
+            # 1) Проверяем торговые часы (асинхронно)
+            try:
+                is_open = await is_trading_time_with_api()
+            except Exception:
+                return False
+            if not is_open:
                 self._logger.warning("Рынок закрыт - торговля недоступна")
                 return False
-            
-            # Проверяем подключение к API
+
+            # 2) Проверяем подключение к API
             if not self._client:
                 self._logger.error("Клиент API не инициализирован")
                 return False
-            
-            # Проверяем доступность счета
-            await self._limiter_get.acquire()
-            accounts = await self._services.users.get_accounts()
-            account_exists = any(acc.id == self._account_id for acc in accounts.accounts)
-            
-            if not account_exists:
-                self._logger.error(f"Счет {self._account_id} не найден")
+
+            # 3) Проверяем доступность счета: users.get_accounts (или sandbox.get_sandbox_accounts как запасной вариант)
+            try:
+                await self._limiter_get.acquire()
+                account_exists = False
+                if getattr(self._services, 'users', None) and hasattr(self._services.users, 'get_accounts'):
+                    accounts = await self._services.users.get_accounts()
+                    account_exists = any(acc.id == self._account_id for acc in getattr(accounts, 'accounts', []))
+                elif getattr(self._services, 'sandbox', None) and hasattr(self._services.sandbox, 'get_sandbox_accounts'):
+                    accounts = await self._services.sandbox.get_sandbox_accounts()
+                    account_exists = any(acc.id == self._account_id for acc in getattr(accounts, 'accounts', []))
+                if not account_exists:
+                    self._logger.error(f"Счет {self._account_id} не найден")
+                    return False
+                self._logger.info("Рынок доступен для торговли")
+                return True
+            except Exception as e:
+                self._logger.error(f"Ошибка проверки аккаунта: {e}")
                 return False
-            
-            self._logger.info("Рынок доступен для торговли")
-            return True
             
         except Exception as e:
             self._logger.error(f"Ошибка проверки доступности рынка: {e}")
@@ -252,8 +263,10 @@ class TinkoffAPIClient:
                     await asyncio.sleep(check_interval)
                     continue
                 
-                # Проверяем статус приказа
-                if order_state.execution_report_status == "EXECUTION_REPORT_STATUS_FILL":
+                # Проверяем статус приказа (учитываем enum)
+                status = getattr(order_state, "execution_report_status", None)
+                status_name = getattr(status, "name", str(status))
+                if status_name == "EXECUTION_REPORT_STATUS_FILL":
                     # Приказ исполнен
                     return OrderResult(
                         success=True,
@@ -264,7 +277,7 @@ class TinkoffAPIClient:
                         order_status="FILL",
                         is_executed=True
                     )
-                elif order_state.execution_report_status == "EXECUTION_REPORT_STATUS_CANCELLED":
+                elif status_name == "EXECUTION_REPORT_STATUS_CANCELLED":
                     # Приказ отменен
                     return OrderResult(
                         success=False,
@@ -273,7 +286,7 @@ class TinkoffAPIClient:
                         order_status="CANCELLED",
                         is_executed=False
                     )
-                elif order_state.execution_report_status == "EXECUTION_REPORT_STATUS_REJECTED":
+                elif status_name == "EXECUTION_REPORT_STATUS_REJECTED":
                     # Приказ отклонен
                     return OrderResult(
                         success=False,
@@ -441,7 +454,6 @@ class TinkoffAPIClient:
             return _md_create_stream(self)
         except Exception as e:
             self._logger.error(f"Ошибка создания стрима рыночных данных: {e}")
-            # Не возвращаем None - это ошибка на уровне сборки
             raise RuntimeError(f"Не удалось создать стрим рыночных данных: {e}")
     
     async def get_futures_margin(self, figi: str) -> Optional[dict]:
@@ -510,6 +522,3 @@ class TinkoffAPIClient:
         except Exception as e:
             self._logger.error(f"Ошибка sandbox_pay_in: {e}")
             return False
-
-
- 

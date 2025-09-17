@@ -13,6 +13,7 @@ from robotlib.trading.portfolio_manager import PortfolioManager
 from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.trading.order_executor import OrderExecutor
 from robotlib.trading.market_data_stream import MarketDataStream
+from robotlib.trading.stream_config import StreamConfig
 from robotlib.trading.api_client_factory import APIClientFactory
 from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
@@ -20,7 +21,7 @@ from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
 from visualization.dash_event_visualizer import DashEventVisualizer
 from visualization.event_visualizer_interface import VisualizationSinkable
 from robotlib.ingestion.db_sink import DBIngestionSink
-
+from config_data.config import load_config
 
 class TradingSystemContainer:
     """DI контейнер для торговой системы"""
@@ -104,7 +105,9 @@ class TradingSystemContainer:
                     batch_size=200,
                     flush_interval_sec=1.0,
                 )
-            except Exception:
+                self._logger.info("DBIngestionSink для ордеров инициализирован")
+            except Exception as e:
+                self._logger.warning(f"DBIngestionSink недоступен, ордера не будут писаться: {e}")
                 order_sink = None
             
             self._instances['order_executor'] = OrderExecutor(
@@ -145,10 +148,26 @@ class TradingSystemContainer:
         if 'market_data_stream' not in self._instances:
             api_client = await self.get_api_client()
             
+            # Собираем StreamConfig. Если у TradingConfig в будущем появится ссылка,
+            # можно будет передавать её напрямую. Пока формируем из глобального .env
+            # либо используем дефолты (явно, через отдельный конфиг).
+            try:
+                env_cfg = load_config()
+                stream_cfg = StreamConfig(
+                    watchdog_enabled=getattr(env_cfg, 'watchdog_enabled', True),
+                    watchdog_stale_seconds=getattr(env_cfg, 'watchdog_stale_seconds', 120),
+                    watchdog_require_open_market=getattr(env_cfg, 'watchdog_require_open_market', True),
+                )
+            except Exception:
+                stream_cfg = StreamConfig()
+
             self._instances['market_data_stream'] = MarketDataStream(
                 api_client=api_client,
                 figi=self._config.figi,
-                cache_size=1000
+                cache_size=1000,
+                watchdog_enabled=stream_cfg.watchdog_enabled,
+                watchdog_stale_seconds=stream_cfg.watchdog_stale_seconds,
+                watchdog_require_open_market=stream_cfg.watchdog_require_open_market,
             )
             # Инжектим sink в поток рыночных данных
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)

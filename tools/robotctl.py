@@ -18,11 +18,22 @@ import os
 import sys
 import subprocess
 import asyncio
+import sqlite3
 from pathlib import Path
 from typing import Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+VENV_PY = PROJECT_ROOT / "env" / "bin" / "python"
+
+def _python_executable() -> str:
+    """Возвращает путь к python из venv, если он существует, иначе текущий интерпретатор."""
+    try:
+        if VENV_PY.exists():
+            return str(VENV_PY)
+    except Exception:
+        pass
+    return sys.executable
 
 
 def _run_subprocess(
@@ -96,13 +107,13 @@ def _multi_account_menu():
 
     choice = input("> ").strip()
     if choice == "1":
-        return _run_subprocess([sys.executable, "run_multi_account.py", "--create-config"])  # type: ignore[arg-type]
+        return _run_subprocess([_python_executable(), "run_multi_account.py", "--create-config"])  # type: ignore[arg-type]
     if choice == "2":
         config = _input_nonempty("Путь к accounts_config.json [./accounts_config.json]: ", default="./accounts_config.json")
-        return _run_subprocess([sys.executable, "run_multi_account.py", "--config", config, "--interactive"])  # type: ignore[arg-type]
+        return _run_subprocess([_python_executable(), "run_multi_account.py", "--config", config, "--interactive"])  # type: ignore[arg-type]
     if choice == "3":
         config = _input_nonempty("Путь к accounts_config.json [./accounts_config.json]: ", default="./accounts_config.json")
-        return _run_subprocess([sys.executable, "run_multi_account.py", "--config", config, "--daemon"])  # type: ignore[arg-type]
+        return _run_subprocess([_python_executable(), "run_multi_account.py", "--config", config, "--daemon"])  # type: ignore[arg-type]
     if choice == "4":
         pid_file = PROJECT_ROOT / "data" / "multi_robot.pid"
         if pid_file.exists():
@@ -167,23 +178,22 @@ def _run_market_ingestor():
     figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
     db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
     seconds = _input_nonempty("Секунд работать [0=беск.] [0]: ", default="0")
-    return _run_subprocess([sys.executable, "run_market_ingestor.py", "--figi", figi, "--db", db, "--seconds", seconds])  # type: ignore[arg-type]
+    return _run_subprocess([_python_executable(), "run_market_ingestor.py", "--figi", figi, "--db", db, "--seconds", seconds])  # type: ignore[arg-type]
 
 
 def _load_historical():
-    return _run_subprocess([sys.executable, "load_historical_data.py"])  # type: ignore[arg-type]
+    return _run_subprocess([_python_executable(), "load_historical_data.py"])  # type: ignore[arg-type]
 
 
 def _run_optimization():
-    return _run_subprocess([sys.executable, "optimization/optimizer.py", "--all"])  # type: ignore[arg-type]
+    return _run_subprocess([_python_executable(), "optimization/optimizer.py", "--all"])  # type: ignore[arg-type]
 
 
 def _run_tests_pytest():
-    return _run_subprocess([sys.executable, "-m", "pytest", "-q"])  # type: ignore[arg-type]
+    return _run_subprocess([_python_executable(), "-m", "pytest", "-q"])  # type: ignore[arg-type]
 
 
 def _view_db_summary():
-    import sqlite3
     db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
     if not Path(db).exists():
         print(f"БД не найдена: {db}")
@@ -268,7 +278,7 @@ def _run_market_ingestor_daemon():
     pid_path = PROJECT_ROOT / "data" / "market_recorder.pid"
 
     args = [
-        sys.executable,
+        _python_executable(),
         "run_market_ingestor.py",
         "--figi", figi,
         "--db", db,
@@ -338,7 +348,7 @@ def _run_outbox_daemon():
     pid_path = PROJECT_ROOT / "data" / "outbox_dispatcher.pid"
 
     args = [
-        sys.executable,
+        _python_executable(),
         "tools/outbox_dispatcher.py",
         "--db", db,
         "--interval", "1.0",
@@ -400,7 +410,7 @@ def _status_outbox_daemon():
 
 def _sandbox_payin():
     amount = _input_nonempty("Сумма пополнения (RUB) [100000]: ", default="100000")
-    return _run_subprocess([sys.executable, "tools/sandbox_cli.py", "payin", "--amount", amount])  # type: ignore[arg-type]
+    return _run_subprocess([_python_executable(), "tools/sandbox_cli.py", "payin", "--amount", amount])  # type: ignore[arg-type]
 
 
 def _systemd_menu():

@@ -6,8 +6,7 @@ from datetime import datetime, timedelta, timezone, time
 from typing import Callable, Optional, List
 from collections import deque
 import pytz
-
-from tinkoff.invest import Candle, SubscriptionInterval, MarketDataResponse, GetCandlesResponse, CandleInterval
+from tinkoff.invest import Candle, CandleInterval
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
 from robotlib.utils.logger import get_logger
@@ -16,6 +15,8 @@ from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
 from visualization.event_visualizer_interface import VisualizationSinkable
 from robotlib.utils.backoff import compute_backoff_delay
+from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
+from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 
 
 class TinkoffStreamAdapter:
@@ -57,7 +58,11 @@ class MarketDataStream(MarketDataStreamable):
         self, 
         api_client: TinkoffAPIClientable, 
         figi: str = "FUTIMOEXF000",
-        cache_size: int = 100
+        cache_size: int = 100,
+        *,
+        watchdog_enabled: bool,
+        watchdog_stale_seconds: int,
+        watchdog_require_open_market: bool,
     ):
         """
         Инициализация стрима рыночных данных
@@ -83,6 +88,10 @@ class MarketDataStream(MarketDataStreamable):
         self._current_price: Optional[float] = None
         self._sink: Optional[VisualizationSinkable] = None
         self._last_candle_at: Optional[datetime] = None
+        # Watchdog config (injected)
+        self._watchdog_enabled = watchdog_enabled
+        self._watchdog_stale_seconds = watchdog_stale_seconds
+        self._watchdog_require_open_market = watchdog_require_open_market
 
     def set_visualization_sink(self, sink: VisualizationSinkable) -> None:
         """Устанавливает приемник визуализации."""
@@ -153,7 +162,6 @@ class MarketDataStream(MarketDataStreamable):
             
             # Всегда подписываемся на поток свечей, независимо от статуса рынка
             try:
-                from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
                 request = MarketDataRequest(
                     subscribe_candles_request=SubscribeCandlesRequest(
                         subscription_action=SubscriptionAction.SUBSCRIPTION_ACTION_SUBSCRIBE,
@@ -178,13 +186,8 @@ class MarketDataStream(MarketDataStreamable):
             self._is_running = True
             asyncio.create_task(self._process_stream())
             # Запускаем сторож, чтобы восстановиться при тишине потока (по конфигу)
-            try:
-                from config_data.config import load_config
-                cfg = load_config()
-                if getattr(cfg, 'watchdog_enabled', True):
-                    asyncio.create_task(self._watchdog_stale_stream(cfg.watchdog_stale_seconds))
-            except Exception:
-                pass
+            if self._watchdog_enabled:
+                asyncio.create_task(self._watchdog_stale_stream(self._watchdog_stale_seconds))
             
             self._logger.info("Стрим рыночных данных запущен")
             return True
@@ -329,7 +332,19 @@ class MarketDataStream(MarketDataStreamable):
                 if self._last_candle_at is None:
                     continue
                 if (datetime.now() - self._last_candle_at).total_seconds() > stale_seconds:
-                    self._logger.warning("Watchdog: тишина >120с — перезапуск стрима")
+                    # Опционально: перезапускать только в торговые часы
+                    if self._watchdog_require_open_market:
+                        try:
+                            status = await get_market_status_enhanced()
+                            if not bool(status.get('is_trading', False)):
+                                self._logger.info(
+                                    f"Watchdog: тишина > {stale_seconds}с, рынок закрыт — перезапуск пропущен"
+                                )
+                                continue
+                        except Exception:
+                            # В случае ошибки проверки — позволяем перезапуск для надежности
+                            pass
+                    self._logger.warning(f"Watchdog: тишина > {stale_seconds}с — перезапуск стрима")
                     try:
                         if self._stream_adapter is not None:
                             self._stream_adapter.stop()

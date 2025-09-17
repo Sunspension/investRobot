@@ -1,14 +1,11 @@
 """
-Dash визуализатор событий торговой системы (чистая Event-Driven архитектура)
-с интеграцией богатого UI из TradingVisualizerAdapter
+Dash визуализатор событий торговой системы
 """
 import asyncio
 import threading
-import time
 import json
-import concurrent.futures
-from typing import Optional, Any, Dict, List
-from datetime import datetime, timedelta
+from typing import Any, Dict
+from datetime import datetime
 from visualization.event_visualizer_interface import EventVisualizerable, VisualizationSinkable
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
@@ -20,18 +17,16 @@ from visualization.callbacks.core_callbacks import register_core_callbacks
 from visualization.services.portfolio_loader import PortfolioLoader
 from visualization.services.historical_loader import HistoricalLoader
 from robotlib.utils.logger import get_logger
-from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent
 from visualization.adapters.sink_impl import VisualizationSinkAdapter
 
 # Dash импорты
-from dash import Dash, dcc, html, Input, Output, State, callback_context
-from plotly.graph_objects import Figure
+from dash import Dash, html
 
 
 class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
-    """Dash визуализатор событий торговой системы (чистая Event-Driven архитектура)"""
+    """Dash визуализатор событий торговой системы"""
     
     def __init__(
         self, 
@@ -40,7 +35,6 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
         port: int = 8050,
         start_server: bool = True
     ):
-        # EventBus удалён
         self._figi = figi
         self._host = host
         self._port = port
@@ -664,6 +658,45 @@ class DashEventVisualizer(EventVisualizerable, VisualizationSinkable):
                                 self._broadcast_ws({"type": "candle_gap_backfill"})
                         except Exception as __e:
                             self._logger.debug(f"Проверка/догрузка внутренних разрывов пропущена: {__e}")
+                    # Обновляем список ордеров из БД за текущий день для текущего FIGI
+                    try:
+                        import os as _os
+                        import sqlite3 as _sqlite3
+                        from datetime import datetime as _dt
+                        from visualization.formatters import to_moscow_time as _to_msk
+                        db_path_orders = _os.path.join(_os.getcwd(), "data", "market.db")
+                        with _sqlite3.connect(db_path_orders) as _conn:
+                            cur = _conn.cursor()
+                            rows = cur.execute(
+                                """
+                                SELECT time, type, price, quantity, strategy
+                                FROM orders
+                                WHERE figi = ?
+                                  AND date(time,'localtime') = date('now','localtime')
+                                ORDER BY time ASC
+                                LIMIT 500
+                                """,
+                                (self._figi,)
+                            ).fetchall()
+                        orders = []
+                        for t, typ, price, qty, strategy in rows:
+                            try:
+                                dtv = _dt.fromisoformat(t)
+                            except Exception:
+                                continue
+                            orders.append({
+                                'time': _to_msk(dtv),
+                                'type': (typ or '').lower(),
+                                'price': float(price),
+                                'quantity': int(qty) if qty is not None else 1,
+                                'strategy': strategy,
+                            })
+                        if orders:
+                            self._data_manager.update_orders(orders)
+                            # Тригерим обновление UI после синка ордеров
+                            self._broadcast_ws({"type": "orders_sync"})
+                    except Exception as __e:
+                        self._logger.debug(f"Обновление ордеров пропущено: {__e}")
                 except Exception as _e:
                     self._logger.debug(f"Автодогрузка пропусков пропущена: {_e}")
             except Exception as e:

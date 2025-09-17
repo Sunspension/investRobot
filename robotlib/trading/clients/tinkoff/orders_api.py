@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import uuid
 from typing import Optional
 import asyncio
 
@@ -11,7 +12,6 @@ from tinkoff.invest import (
     PostOrderRequest,
     CancelOrderRequest,
     OrderState,
-    GetOrdersRequest,
 )
 from tinkoff.invest.schemas import MoneyValue
 from robotlib.utils.money import Money
@@ -34,6 +34,7 @@ def float_to_money_value(value: float) -> MoneyValue:
 
 
 async def place_order(client, figi: str, direction: OrderDirection, quantity: int, price: Optional[float], order_type: OrderType) -> OrderResult:
+    client_order_id = str(uuid.uuid4())
     if client._sandbox_token:  # noqa: SLF001
         await client._limiter_post.acquire()  # noqa: SLF001
         response = await client._services.sandbox.post_sandbox_order(  # noqa: SLF001
@@ -43,7 +44,7 @@ async def place_order(client, figi: str, direction: OrderDirection, quantity: in
             direction=direction,
             account_id=client._account_id,  # noqa: SLF001
             order_type=order_type,
-            order_id=str(int(datetime.now().timestamp() * 1000)),
+            order_id=client_order_id,
         )
     else:
         request = PostOrderRequest(
@@ -53,7 +54,7 @@ async def place_order(client, figi: str, direction: OrderDirection, quantity: in
             direction=direction,
             account_id=client._account_id,  # noqa: SLF001
             order_type=order_type,
-            order_id=str(int(datetime.now().timestamp() * 1000)),
+            order_id=client_order_id,
         )
         await client._limiter_post.acquire()  # noqa: SLF001
         response = await client._services.orders.post_order(request)  # noqa: SLF001
@@ -64,17 +65,21 @@ async def place_order(client, figi: str, direction: OrderDirection, quantity: in
 
 
 async def get_order_status(client, order_id: str) -> Optional[OrderState]:
-    if client._sandbox_token:  # noqa: SLF001
-        await client._limiter_get.acquire()  # noqa: SLF001
-        response = await client._services.sandbox.get_sandbox_orders(account_id=client._account_id)  # noqa: SLF001
-    else:
-        request = GetOrdersRequest(account_id=client._account_id)  # noqa: SLF001
-        await client._limiter_get.acquire()  # noqa: SLF001
-        response = await client._services.orders.get_orders(request)  # noqa: SLF001
-    for order in response.orders:
-        if order.order_id == order_id:
-            return order
-    return None
+    try:
+        if client._sandbox_token:  # noqa: SLF001
+            await client._limiter_get.acquire()  # noqa: SLF001
+            return await client._services.sandbox.get_sandbox_order_state(  # noqa: SLF001
+                account_id=client._account_id,
+                order_id=order_id,
+            )
+        else:
+            await client._limiter_get.acquire()  # noqa: SLF001
+            return await client._services.orders.get_order_state(  # noqa: SLF001
+                account_id=client._account_id,
+                order_id=order_id,
+            )
+    except Exception:
+        return None
 
 
 async def wait_for_order_execution(client, order_id: str, *, max_wait_time: int = 30, check_interval: float = 1.0) -> OrderResult:
