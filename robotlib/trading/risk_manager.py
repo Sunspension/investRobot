@@ -2,8 +2,8 @@
 Модуль для управления рисками в торговле
 """
 
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
@@ -60,12 +60,17 @@ class RiskManager:
             risk_limits: Лимиты риска
         """
         self.portfolio_manager = portfolio_manager
-        self.risk_limits = risk_limits
-        self.logger = get_logger(__name__)
+        self._risk_limits = risk_limits
+        self._logger = get_logger(__name__)
         
         # История убытков
         self._daily_losses: Dict[str, float] = {}
         self._trade_history: List[Dict] = []
+    
+    @property
+    def risk_limits(self) -> RiskLimits:
+        """Возвращает лимиты рисков"""
+        return self._risk_limits
     
     async def check_trade_risk(
         self,
@@ -91,11 +96,11 @@ class RiskManager:
             portfolio = await self.portfolio_manager.get_portfolio()
             
             # Проверка 1: Максимальное количество лотов за сделку
-            if quantity > self.risk_limits.items_per_trade:
+            if quantity > self._risk_limits.items_per_trade:
                 return RiskCheck(
                     passed=False,
                     risk_level=RiskLevel.CRITICAL,
-                    message=f"Количество лотов {quantity} превышает лимит {self.risk_limits.items_per_trade}",
+                    message=f"Количество лотов {quantity} превышает лимит {self._risk_limits.items_per_trade}",
                     recommendation="Уменьшите количество лотов"
                 )
             
@@ -103,11 +108,11 @@ class RiskManager:
             current_position = await self.portfolio_manager.get_position(figi)
             if current_position:
                 new_position_value = abs(current_position.quantity + quantity) * price
-                if new_position_value > self.risk_limits.max_position_size:
+                if new_position_value > self._risk_limits.max_position_size:
                     return RiskCheck(
                         passed=False,
                         risk_level=RiskLevel.HIGH,
-                        message=f"Размер позиции {new_position_value:.2f} руб превышает лимит {self.risk_limits.max_position_size:.2f} руб",
+                        message=f"Размер позиции {new_position_value:.2f} руб превышает лимит {self._risk_limits.max_position_size:.2f} руб",
                         recommendation="Уменьшите размер позиции"
                     )
             
@@ -133,22 +138,22 @@ class RiskManager:
             
             # Проверка 5: Дневные убытки
             daily_loss = await self._get_daily_loss()
-            if daily_loss > self.risk_limits.max_daily_loss:
+            if daily_loss > self._risk_limits.max_daily_loss:
                 return RiskCheck(
                     passed=False,
                     risk_level=RiskLevel.CRITICAL,
-                    message=f"Дневные убытки {daily_loss:.2f} руб превышают лимит {self.risk_limits.max_daily_loss:.2f} руб",
+                    message=f"Дневные убытки {daily_loss:.2f} руб превышают лимит {self._risk_limits.max_daily_loss:.2f} руб",
                     recommendation="Прекратите торговлю на сегодня"
                 )
             
             # Проверка 6: Процент от депозита
             current_deposit = await self.portfolio_manager.get_deposit()
-            money_limit = current_deposit * (self.risk_limits.percent_from_deposit / 100)
+            money_limit = current_deposit * (self._risk_limits.percent_from_deposit / 100)
             if trade_value > money_limit:
                 return RiskCheck(
                     passed=False,
                     risk_level=RiskLevel.HIGH,
-                    message=f"Размер сделки {trade_value:.2f} руб превышает лимит {money_limit:.2f} руб ({self.risk_limits.percent_from_deposit}% от депозита)",
+                    message=f"Размер сделки {trade_value:.2f} руб превышает лимит {money_limit:.2f} руб ({self._risk_limits.percent_from_deposit}% от депозита)",
                     recommendation="Уменьшите размер сделки или увеличьте лимит"
                 )
             
@@ -163,7 +168,7 @@ class RiskManager:
             )
             
         except Exception as e:
-            self.logger.error(f"Ошибка проверки риска: {e}")
+            self._logger.error(f"Ошибка проверки риска: {e}")
             return RiskCheck(
                 passed=False,
                 risk_level=RiskLevel.CRITICAL,
@@ -190,7 +195,7 @@ class RiskManager:
             if position.average_price > 0:
                 loss_points = position.average_price - position.current_price
                 
-                if loss_points >= self.risk_limits.stop_loss_threshold:
+                if loss_points >= self._risk_limits.stop_loss_threshold:
                     return RiskCheck(
                         passed=False,
                         risk_level=RiskLevel.CRITICAL,
@@ -201,7 +206,7 @@ class RiskManager:
             return None
             
         except Exception as e:
-            self.logger.error(f"Ошибка проверки стоп-лосса: {e}")
+            self._logger.error(f"Ошибка проверки стоп-лосса: {e}")
             return None
     
     
@@ -235,17 +240,17 @@ class RiskManager:
                 'daily_loss': daily_loss,
                 'risky_positions': risky_positions,
                 'risk_limits': {
-                    'max_daily_loss': self.risk_limits.max_daily_loss,
-                    'max_position_size': self.risk_limits.max_position_size,
-                    'percent_from_deposit': self.risk_limits.percent_from_deposit,
-                    'items_per_trade': self.risk_limits.items_per_trade,
-                    'stop_loss_threshold': self.risk_limits.stop_loss_threshold
+                    'max_daily_loss': self._risk_limits.max_daily_loss,
+                    'max_position_size': self._risk_limits.max_position_size,
+                    'percent_from_deposit': self._risk_limits.percent_from_deposit,
+                    'items_per_trade': self._risk_limits.items_per_trade,
+                    'stop_loss_threshold': self._risk_limits.stop_loss_threshold
                 },
                 'recommendations': await self._get_risk_recommendations()
             }
             
         except Exception as e:
-            self.logger.error(f"Ошибка получения отчета о рисках: {e}")
+            self._logger.error(f"Ошибка получения отчета о рисках: {e}")
             return {}
     
     async def _get_daily_loss(self) -> float:
@@ -279,7 +284,7 @@ class RiskManager:
             return daily_loss
             
         except Exception as e:
-            self.logger.error(f"Ошибка расчета дневных убытков: {e}")
+            self._logger.error(f"Ошибка расчета дневных убытков: {e}")
             return 0.0
     
     
@@ -306,7 +311,7 @@ class RiskManager:
             return (position_value / portfolio.total_amount) * 100
             
         except Exception as e:
-            self.logger.error(f"Ошибка расчета риска позиции: {e}")
+            self._logger.error(f"Ошибка расчета риска позиции: {e}")
             return 0.0
     
     def _calculate_trade_risk_level(
@@ -352,7 +357,7 @@ class RiskManager:
             daily_loss = await self._get_daily_loss()
             
             # Рекомендации по дневным убыткам
-            if daily_loss > self.risk_limits.max_daily_loss * 0.8:
+            if daily_loss > self._risk_limits.max_daily_loss * 0.8:
                 recommendations.append("Приближаетесь к лимиту дневных убытков")
             
             # Рекомендации по концентрации
@@ -374,7 +379,7 @@ class RiskManager:
                         recommendations.append(f"Стоп-лосс по {position.figi}: {stop_loss_check.message}")
             
         except Exception as e:
-            self.logger.error(f"Ошибка получения рекомендаций: {e}")
+            self._logger.error(f"Ошибка получения рекомендаций: {e}")
         
         return recommendations
 

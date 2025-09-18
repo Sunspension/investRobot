@@ -14,6 +14,10 @@ from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.trading.order_executor import OrderExecutor
 from robotlib.trading.market_data_stream import MarketDataStream
 from robotlib.trading.stream_config import StreamConfig
+from robotlib.trading.position_sizing_service import PositionSizingService
+from robotlib.trading.position_sizing_config import PositionSizingConfig
+from robotlib.strategies.long import LongStrategy
+from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.api_client_factory import APIClientFactory
 from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
@@ -50,6 +54,30 @@ class TradingSystemContainer:
         
         self._logger.info("✅ Конфигурация торговой системы валидна")
     
+    async def _create_strategies(self):
+        """Создает стратегии с их зависимостями"""
+        # Создаем PositionSizingService
+        position_sizing_service = PositionSizingService(
+            risk_manager=await self.get_risk_manager(),
+            portfolio_manager=await self.get_portfolio_manager(),
+            config=PositionSizingConfig()
+        )
+        
+        # Создаем стратегии
+        strategies = [
+            LongStrategy(
+                risk_manager=await self.get_risk_manager(),
+                portfolio_manager=await self.get_portfolio_manager(),
+                position_sizing_service=position_sizing_service
+            ),
+            ShortStrategy(
+                risk_manager=await self.get_risk_manager(),
+                portfolio_manager=await self.get_portfolio_manager(),
+                position_sizing_service=position_sizing_service
+            )
+        ]
+        
+        return strategies
     
     def get_session_stats(self) -> SessionStats:
         """Получает статистику сессии"""
@@ -130,15 +158,16 @@ class TradingSystemContainer:
         if 'strategy_manager' not in self._instances:
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             dispatcher = VisualizationSignalDispatcher(visualizer) if visualizer else None
+            strategies = await self._create_strategies()
+            
             strategy_manager = StrategyManager(
                 signal_manager=self.get_signal_manager(),
                 risk_manager=await self.get_risk_manager(),
                 portfolio_manager=await self.get_portfolio_manager(),
                 order_executor=await self.get_order_executor(),
+                strategies=strategies,
                 signal_dispatcher=dispatcher
             )
-            
-            # Стратегии добавляются автоматически в StrategyManager
             
             self._instances['strategy_manager'] = strategy_manager
         return self._instances['strategy_manager']

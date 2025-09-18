@@ -1,18 +1,18 @@
 from typing import Optional
 from robotlib.utils.money import Money
+from robotlib.utils.logger import get_logger
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.strategies.strategy_interface import Strategyable
-from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable
+from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable, PositionSizingManageable
 from tinkoff.invest import Candle, HistoricCandle
-
-# Константы убраны - значения теперь получаются из API и передаются в initialize()
 
 class ShortStrategy(Strategyable):
     def __init__(
             self, 
             risk_manager: RiskManageable,
-            portfolio_manager: PortfolioManageable
+            portfolio_manager: PortfolioManageable,
+            position_sizing_service: PositionSizingManageable = None
     ):
             
         self._position = 0
@@ -22,6 +22,8 @@ class ShortStrategy(Strategyable):
         self._positions = []
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
+        self._position_sizing_service = position_sizing_service
+        self._logger = get_logger(__name__)
 
         self._wait_short_sell_cross = False
         self._wait_short_buy_cross = False
@@ -35,7 +37,12 @@ class ShortStrategy(Strategyable):
     def strategy_name(self) -> str:
         return self.__class__.__name__
     
-    async def initialize(self, figi: str = "FUTIMOEXF000", point_value: float = None, contracts_per_lot: int = None) -> None:
+    def initialize(
+        self, 
+        point_value: float,
+        contracts_per_lot: int,
+        figi: str = "FUTIMOEXF000"
+    ):
         """
         Инициализирует кэшированные значения при старте торговли
         
@@ -46,9 +53,9 @@ class ShortStrategy(Strategyable):
         """
         self._figi = figi
         
-        # Используем переданные значения или fallback к значениям по умолчанию
-        self._point_value = point_value if point_value and point_value > 0 else 10.0  # Fallback: 10 руб за пункт
-        self._contracts_per_lot = contracts_per_lot if contracts_per_lot and contracts_per_lot > 0 else 10  # Fallback: 10 контрактов в лоте
+        # Используем переданные значения
+        self._point_value = point_value
+        self._contracts_per_lot = contracts_per_lot
 
     async def execute(self, signal: Signal) -> list[OrderIntent]:
         """
@@ -90,7 +97,7 @@ class ShortStrategy(Strategyable):
 
         # Открыть short
         if (self._wait_short_sell_cross and is_crossed_down) or (self._position > 0 and is_trending_down):
-            items = await self._items_to_sell_short()
+            items = await self._items_to_sell_short(signal)
             if items > 0:
                 orders.append(
                     OrderIntent(
@@ -149,49 +156,47 @@ class ShortStrategy(Strategyable):
         else:
             return None
 
-    async def _items_to_sell_short(self, figi: str = "FUTIMOEXF000"):
-        # Получаем депозит из API
+    async def _items_to_sell_short(self, signal: Signal, figi: str = "FUTIMOEXF000"):
+        # Если есть PositionSizingService, используем его для динамического расчета
+        if self._position_sizing_service:
+            return await self._position_sizing_service.calculate_position_size(
+                signal=signal,
+                current_position=self._position,
+                figi=figi
+            )
+        
+        # Fallback к старой логике, если PositionSizingService не передан
         current_deposit = await self._portfolio_manager.get_deposit()
-        # Максимум можно открыть в шорт
         money_limit = current_deposit * (self._risk_manager.risk_limits.percent_from_deposit / 100)
         
-        # Получаем гарантийное обеспечение из API
         guarantee_deposit = await self._portfolio_manager.get_guarantee_deposit(figi)
         
-        # Проверяем, что гарантийное обеспечение больше нуля
         if guarantee_deposit <= 0:
-            self.logger.warning(f"Гарантийное обеспечение для {figi} равно нулю или отрицательно: {guarantee_deposit}")
+            self._logger.warning(f"Гарантийное обеспечение для {figi} равно нулю или отрицательно: {guarantee_deposit}")
             return 0
         
-        # Заморожено ГО за уже открытые позиции
         frozen_guarantee = self._position * guarantee_deposit
         money_left = money_limit - frozen_guarantee
-        # Сколько фьючерсов можем продать в шорт на оставшиеся деньги
         max_items = money_left // guarantee_deposit
         return int(min(max_items, self._risk_manager.risk_limits.items_per_trade))
 
     def _items_to_buy_short(self):
         return self._position
-
-    def _process_order(self, order: OrderIntent):
-        # Этот метод больше не используется для OrderIntent
-        # Вместо него используется _process_execution для OrderExecution
-        pass
     
     def _process_execution(self, execution: OrderExecution):
         """Обрабатывает исполнение ордера"""
-        if execution.intent.direction == OrderDirection.SELL:
+        if execution.direction == OrderDirection.SELL:
             # Открываем шорт
-            self._positions.append([execution.executed_price, execution.executed_quantity])
-            self._position += execution.executed_quantity
-            self._cost_basis += execution.executed_price * execution.executed_quantity
+            self._positions.append([execution.price, execution.filled_quantity])
+            self._position += execution.filled_quantity
+            self._cost_basis += execution.price * execution.filled_quantity
         else:
             # Закрываем шорт
             commission = execution.commission
             self._positions, profit, new_pos = self._fifo_buy_short(
                 self._positions, 
-                execution.executed_price, 
-                execution.executed_quantity, 
+                execution.price, 
+                execution.filled_quantity, 
                 commission
             )
             self._position = new_pos

@@ -1,9 +1,10 @@
 from typing import Optional
 from robotlib.utils.money import Money
+from robotlib.utils.logger import get_logger
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.strategies.strategy_interface import Strategyable
-from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable
+from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable, PositionSizingManageable
 from tinkoff.invest import Candle, HistoricCandle
 
 # Константы убраны - значения теперь получаются из API и передаются в initialize()
@@ -12,7 +13,8 @@ class LongStrategy(Strategyable):
     def __init__(
             self, 
             risk_manager: RiskManageable,
-            portfolio_manager: PortfolioManageable
+            portfolio_manager: PortfolioManageable,
+            position_sizing_service: PositionSizingManageable = None
     ):
             
         self._position = 0
@@ -22,6 +24,8 @@ class LongStrategy(Strategyable):
         self._positions = []  # список [price, quantity]
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
+        self._position_sizing_service = position_sizing_service
+        self._logger = get_logger(__name__)
 
         self._wait_buy_cross = False
         self._wait_sell_cross = False
@@ -35,7 +39,12 @@ class LongStrategy(Strategyable):
     def strategy_name(self) -> str:
         return self.__class__.__name__
     
-    async def initialize(self, figi: str = "FUTIMOEXF000", point_value: float = None, contracts_per_lot: int = None) -> None:
+    def initialize(
+        self, 
+        point_value: float, 
+        contracts_per_lot: int, 
+        figi: str = "FUTIMOEXF000"
+    ):
         """
         Инициализирует кэшированные значения при старте торговли
         
@@ -46,9 +55,9 @@ class LongStrategy(Strategyable):
         """
         self._figi = figi
         
-        # Используем переданные значения или fallback к значениям по умолчанию
-        self._point_value = point_value if point_value and point_value > 0 else 10.0  # Fallback: 10 руб за пункт
-        self._contracts_per_lot = contracts_per_lot if contracts_per_lot and contracts_per_lot > 0 else 10  # Fallback: 10 контрактов в лоте
+        # Используем переданные значения
+        self._point_value = point_value
+        self._contracts_per_lot = contracts_per_lot
     
     async def execute(self, signal: Signal) -> list[OrderIntent]:
         """
@@ -92,7 +101,7 @@ class LongStrategy(Strategyable):
 
         # Открыть позицию
         if (self._wait_buy_cross and is_crossed_up) or (self._position > 0 and is_trending_up):
-            items = await self._items_to_buy()
+            items = await self._items_to_buy(signal)
             if items > 0:
                 orders.append(
                     OrderIntent(
@@ -135,43 +144,43 @@ class LongStrategy(Strategyable):
         else:
             return None
 
-    async def _items_to_buy(self, figi: str = "FUTIMOEXF000"):
-        # Получаем депозит из API
+    async def _items_to_buy(self, signal: Signal, figi: str = "FUTIMOEXF000"):
+        # Если есть PositionSizingService, используем его для динамического расчета
+        if self._position_sizing_service:
+            return await self._position_sizing_service.calculate_position_size(
+                signal=signal,
+                current_position=self._position,
+                figi=figi
+            )
+        
+        # Fallback к старой логике, если PositionSizingService не передан
         current_deposit = await self._portfolio_manager.get_deposit()
         money_limit = current_deposit * (self._risk_manager.risk_limits.percent_from_deposit / 100)
         
-        # Получаем гарантийное обеспечение из API
         guarantee_deposit = await self._portfolio_manager.get_guarantee_deposit(figi)
         
-        # Заморожено ГО за уже открытые позиции
         frozen_guarantee = self._position * guarantee_deposit
         money_left = money_limit - frozen_guarantee
-        # Сколько фьючерсов можем купить на оставшиеся деньги
         max_items = money_left // guarantee_deposit
         return int(min(max_items, self._risk_manager.risk_limits.items_per_trade))
 
     def _items_to_sell(self):
         return self._position
 
-    def _process_order(self, order: OrderIntent):
-        # Этот метод больше не используется для OrderIntent
-        # Вместо него используется _process_execution для OrderExecution
-        pass
-    
     def _process_execution(self, execution: OrderExecution):
         """Обрабатывает исполнение ордера"""
-        if execution.intent.direction == OrderDirection.BUY:
+        if execution.direction == OrderDirection.BUY:
             # Открываем лонг
-            self._positions.append([execution.executed_price, execution.executed_quantity])
-            self._position += execution.executed_quantity
-            self._cost_basis += execution.executed_price * execution.executed_quantity
+            self._positions.append([execution.price, execution.filled_quantity])
+            self._position += execution.filled_quantity
+            self._cost_basis += execution.price * execution.filled_quantity
         else:
             # Закрываем лонг
             commission = execution.commission
             self._positions, profit, new_pos = self._fifo_sell(
                 self._positions, 
-                execution.executed_price, 
-                execution.executed_quantity, 
+                execution.price, 
+                execution.filled_quantity, 
                 commission
             )
             self._position = new_pos

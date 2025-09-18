@@ -8,8 +8,6 @@ from robotlib.signal_manager import SignalManager
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution
 from robotlib.strategies.strategy_interface import Strategyable
-from robotlib.strategies.long import LongStrategy
-from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.interfaces import StrategyManageable, OrderExecutable
 from robotlib.strategies.signal_dispatcher import SignalDispatchable, VisualizationSignalDispatcher
 from robotlib.utils.logger import get_logger
@@ -71,8 +69,8 @@ class StrategyManager(StrategyManageable):
         signal_manager: SignalManager, 
         risk_manager,
         portfolio_manager,
+        strategies: List[Strategyable],
         order_executor: OrderExecutable = None,
-        strategies: List[Strategyable] = None,
         signal_dispatcher: Optional[SignalDispatchable] = None,
     ):
         self._signal_manager = signal_manager
@@ -81,19 +79,9 @@ class StrategyManager(StrategyManageable):
         self._order_executor = order_executor
         self._signal_dispatcher = signal_dispatcher
         self._orders = []
-        self.logger = get_logger(__name__)
+        self._logger = get_logger(__name__)
         self._last_processed_bar_time = None
-        
-        # Если стратегии не переданы, создаем стандартные
-        if strategies is None:
-            self._strategies = [
-                LongStrategy(risk_manager=risk_manager, portfolio_manager=portfolio_manager),
-                ShortStrategy(risk_manager=risk_manager, portfolio_manager=portfolio_manager)
-            ]
-        else:
-            self._strategies = strategies
-        
-        # Инициализация стратегий завершена
+        self._strategies = strategies
 
     async def initialize(self, figi: str = "FUTIMOEXF000", point_value: float = None, contracts_per_lot: int = None) -> None:
         """
@@ -106,7 +94,7 @@ class StrategyManager(StrategyManageable):
         """
         for strategy in self._strategies:
             if hasattr(strategy, 'initialize'):
-                await strategy.initialize(figi, point_value, contracts_per_lot)
+                strategy.initialize(point_value=point_value, contracts_per_lot=contracts_per_lot, figi=figi)
 
     async def on_candle(self, candle: Candle | HistoricCandle):
         # Обрабатываем только закрытую свечу и не более одного раза на бар
@@ -145,10 +133,10 @@ class StrategyManager(StrategyManageable):
                         if hasattr(strategy, '_process_execution'):
                             strategy._process_execution(execution)
                         
-                        self.logger.info(f"Ордер выполнен: {execution}")
+                        self._logger.info(f"Ордер выполнен: {execution}")
                         
                     except Exception as e:
-                        self.logger.error(f"Ошибка выполнения ордера {order_intent}: {e}")
+                        self._logger.error(f"Ошибка выполнения ордера {order_intent}: {e}")
             else:
                 # Если нет OrderExecutor, просто сохраняем намерения
                 self._orders.extend(order_intents)
@@ -187,9 +175,10 @@ class StrategyManager(StrategyManageable):
             if order_intent:
                 self._orders.append(order_intent)
     
+    
     async def close_all_positions(self) -> None:
         """Закрывает все позиции во всех стратегиях"""
-        self.logger.info("Закрытие всех позиций через стратегии...")
+        self._logger.info("Закрытие всех позиций через стратегии...")
         
         for strategy in self._strategies:
             try:
@@ -205,23 +194,23 @@ class StrategyManager(StrategyManageable):
                             if hasattr(strategy, '_process_execution'):
                                 strategy._process_execution(execution)
                             
-                            self.logger.info(f"Позиция закрыта в стратегии {strategy.__class__.__name__}: {execution}")
+                            self._logger.info(f"Позиция закрыта в стратегии {strategy.__class__.__name__}: {execution}")
                             
                         except Exception as e:
-                            self.logger.error(f"Ошибка выполнения ордера закрытия позиции: {e}")
+                            self._logger.error(f"Ошибка выполнения ордера закрытия позиции: {e}")
                     else:
                         # Если нет OrderExecutor, просто сохраняем намерение
                         self._orders.append(order_intent)
-                        self.logger.info(f"Закрыта позиция в стратегии {strategy.__class__.__name__}")
+                        self._logger.info(f"Закрыта позиция в стратегии {strategy.__class__.__name__}")
                         
             except Exception as e:
-                self.logger.error(f"Ошибка при закрытии позиций в стратегии {strategy.__class__.__name__}: {e}")
+                self._logger.error(f"Ошибка при закрытии позиций в стратегии {strategy.__class__.__name__}: {e}")
         
-        self.logger.info("Все позиции закрыты через стратегии")
+        self._logger.info("Все позиции закрыты через стратегии")
 
     def print_trades(self):
         for order_intent in self._orders:
-            self.logger.info(str(order_intent))
+            self._logger.info(str(order_intent))
     
     def get_strategy_income(self, strategy_class: type) -> float:
         """Возвращает доход конкретной стратегии по классу"""

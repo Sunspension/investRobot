@@ -33,11 +33,16 @@ def test_warmup_no_dispatch_no_orders():
     sm = SignalManager()
     dispatcher = DummyDispatcher()
     executor = DummyExecutor()
+    
+    # Создаем пустой список стратегий
+    strategies = []
+    
     mgr = StrategyManager(
         signal_manager=sm,
         risk_manager=DummyRisk(),
         portfolio_manager=DummyPortfolio(),
         order_executor=executor,
+        strategies=strategies,
         signal_dispatcher=dispatcher,
     )
 

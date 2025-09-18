@@ -42,11 +42,20 @@ class StrategyInterface(ABC):
 
 ## Использование
 
-### Дефолтные стратегии
+### Создание StrategyManager
 
 ```python
-# Создает LongStrategy + ShortStrategy с дефолтными параметрами
-sm = StrategyManager()
+# StrategyManager теперь требует передачи стратегий явно
+strategies = [
+    LongStrategy(risk_manager=risk_manager, portfolio_manager=portfolio_manager),
+    ShortStrategy(risk_manager=risk_manager, portfolio_manager=portfolio_manager)
+]
+sm = StrategyManager(
+    signal_manager=signal_manager,
+    risk_manager=risk_manager,
+    portfolio_manager=portfolio_manager,
+    strategies=strategies
+)
 ```
 
 ### Кастомные стратегии

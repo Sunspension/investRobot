@@ -34,13 +34,28 @@ class PortfolioManageable(Protocol):
         pass
 
 
+class PositionSizingManageable(Protocol):
+    """Интерфейс для сервиса расчета размера позиции"""
+    
+    async def calculate_position_size(
+        self,
+        signal,
+        current_position: int,
+        figi: str = "FUTIMOEXF000"
+    ) -> int:
+        """Рассчитать рекомендуемый размер позиции"""
+        pass
+
+
 class StrategyDependencies:
     """Контейнер для зависимостей стратегии"""
     
     def __init__(
         self, 
         risk_manager: RiskManageable, 
-        portfolio_manager: PortfolioManageable
+        portfolio_manager: PortfolioManageable,
+        position_sizing_service: PositionSizingManageable = None
     ):
         self.risk_manager = risk_manager
         self.portfolio_manager = portfolio_manager
+        self.position_sizing_service = position_sizing_service

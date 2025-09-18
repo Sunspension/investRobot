@@ -100,10 +100,10 @@ async def backtest(
         )
         
         strategy_manager = StrategyManager(
-            signal_manager, 
-            risk_manager,
-            portfolio_manager,
-            [long_strategy, short_strategy]
+            signal_manager=signal_manager, 
+            risk_manager=risk_manager,
+            portfolio_manager=portfolio_manager,
+            strategies=[long_strategy, short_strategy]
         )
 
         for candle in training:

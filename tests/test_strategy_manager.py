@@ -26,10 +26,19 @@ class TestStrategyManager(unittest.TestCase):
             items_per_trade=20,
             stop_loss_threshold=8.0
         )
+        
+        # Создаем мок стратегии
+        self.mock_strategies = [Mock(), Mock()]
+        for strategy in self.mock_strategies:
+            strategy.execute = AsyncMock(return_value=[])
+            strategy.close_position = Mock(return_value=None)
+            strategy.income = 0.0
+        
         self.strategy_manager = StrategyManager(
             signal_manager=self.mock_signal_manager,
             risk_manager=self.mock_risk_manager,
-            portfolio_manager=self.mock_portfolio_manager
+            portfolio_manager=self.mock_portfolio_manager,
+            strategies=self.mock_strategies
         )
     
     def test_init(self):
@@ -187,9 +196,9 @@ class TestStrategyManager(unittest.TestCase):
     
     def test_income_property(self):
         """Тест свойства income"""
-        # Мокаем стратегии с доходом (используем приватный атрибут)
+        # Мокаем стратегии с доходом
         for strategy in self.strategy_manager._strategies:
-            strategy._income = 100.0
+            strategy.income = 100.0
         
         income = self.strategy_manager.income
         
@@ -199,10 +208,11 @@ class TestStrategyManager(unittest.TestCase):
     def test_get_strategy_income(self):
         """Тест получения дохода стратегии"""
         
-        # Мокаем первую стратегию (используем приватный атрибут)
-        self.strategy_manager._strategies[0]._income = 150.0
+        # Мокаем первую стратегию
+        self.strategy_manager._strategies[0].income = 150.0
         
-        income = self.strategy_manager.get_strategy_income(LongStrategy)
+        # Используем тип мок стратегии для поиска
+        income = self.strategy_manager.get_strategy_income(type(self.strategy_manager._strategies[0]))
         
         self.assertEqual(income, 150.0)
     

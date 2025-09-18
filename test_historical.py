@@ -116,8 +116,8 @@ async def test_historical_trading(
             signal_manager=signal_manager,
             risk_manager=risk_manager,
             portfolio_manager=portfolio_manager,
-            order_executor=order_executor,  # ✅ Передаем OrderExecutor
-            strategies=strategies
+            strategies=strategies,
+            order_executor=order_executor  # ✅ Передаем OrderExecutor
         )
         
         # Инициализируем стратегии
