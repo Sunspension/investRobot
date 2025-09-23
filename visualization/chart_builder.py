@@ -20,13 +20,12 @@ class ChartBuilder:
     def create_trading_chart(
         self, 
         candles_data: List[Dict[str, Any]], 
-        signals_data: List[Dict[str, Any]], 
         orders_data: List[Dict[str, Any]],
         current_price: float = 0.0,
         hide_inactive_time: bool = True
     ) -> Figure:
         """Создает график для торговли"""
-        self.logger.debug(f"ChartBuilder: создаем график с {len(candles_data)} свечами, {len(signals_data)} сигналами, {len(orders_data)} ордерами")
+        # self.logger.debug(f"ChartBuilder: создаем график с {len(candles_data)} свечами, {len(orders_data)} ордерами")
         fig = go.Figure()
         
         if not candles_data:
@@ -61,7 +60,7 @@ class ChartBuilder:
                 df = df.sort_values('time').reset_index(drop=True)
         except Exception:
             pass
-        self.logger.debug(f"DataFrame создан: {len(df)} строк, колонки: {list(df.columns)}")
+        # self.logger.debug(f"DataFrame создан: {len(df)} строк, колонки: {list(df.columns)}")
         
         # Свечи
         try:
@@ -77,7 +76,7 @@ class ChartBuilder:
                 increasing_fillcolor='#26a69a',
                 decreasing_fillcolor='#ef5350'
             ))
-            self.logger.debug("Свечи добавлены в график")
+            # self.logger.debug("Свечи добавлены в график")
         except Exception as e:
             self.logger.error(f"❌ Ошибка добавления свечей: {e}")
             # Создаем простой линейный график как fallback
@@ -101,9 +100,6 @@ class ChartBuilder:
                 annotation_font_color="#FF6B35",
                 annotation_font_size=12
             )
-        
-        # Сигналы покупки/продажи
-        self._add_signals_to_chart(fig, signals_data)
         
         # Ордера покупки/продажи
         self._add_orders_to_chart(fig, orders_data)
@@ -145,60 +141,17 @@ class ChartBuilder:
         except Exception:
             fig._layout_obj[u"uirevision"] = f"data_{len(df)}_{'hide' if hide_inactive_time else 'show'}"
 
-        self.logger.debug("График создан успешно")
+        # self.logger.debug("График создан успешно")
         return fig
 
-    def _add_signals_to_chart(self, fig: Figure, signals_data: List[Dict[str, Any]]) -> None:
-        """Добавляет сигналы на график"""
-        if not signals_data:
-            self.logger.debug("Нет сигналов для добавления на график")
-            return
-        
-        self.logger.debug(f"Добавляем {len(signals_data)} сигналов на график")
-        for signal in signals_data[-20:]:  # Последние 20 сигналов
-            color = '#00ff88' if signal['type'] == 'buy' else '#ff4444'
-            symbol = 'triangle-up' if signal['type'] == 'buy' else 'triangle-down'
-            
-            # Создаем текст с дополнительной информацией
-            signal_text = f"{'🟢 BUY' if signal['type'] == 'buy' else '🔴 SELL'}"
-            if 'reason' in signal:
-                signal_text += f"<br>{signal['reason']}"
-            if 'strength' in signal:
-                signal_text += f"<br>Сила: {signal['strength']:.3f}"
-            
-            fig.add_trace(go.Scatter(
-                x=[signal['time']],
-                y=[signal['price']],
-                mode='markers+text',
-                marker=dict(
-                    size=15, 
-                    color=color,
-                    symbol=symbol,
-                    line=dict(width=2, color='white')
-                ),
-                text=[signal_text],
-                textposition='top center',
-                name=signal['type'].title(),
-                showlegend=False,
-                hovertemplate=f"<b>{'Покупка' if signal['type'] == 'buy' else 'Продажа'}</b><br>" +
-                             f"Цена: {signal['price']:.2f} ₽<br>" +
-                             f"Время: %{{x}}<br>" +
-                             f"Причина: {signal.get('reason', 'N/A')}<br>" +
-                             (f"Количество: {signal.get('quantity', 'N/A')}<br>" if 'quantity' in signal else "") +
-                             (f"Стратегия: {signal.get('strategy', 'N/A')}<br>" if 'strategy' in signal else "") +
-                             (f"MACD: {signal.get('macd', 'N/A'):.3f}<br>" if 'macd' in signal else "") +
-                             (f"Сигнал: {signal.get('signal', 'N/A'):.3f}<br>" if 'signal' in signal else "") +
-                             (f"Сила: {signal.get('strength', 'N/A'):.3f}<br>" if 'strength' in signal else "") +
-                             "<extra></extra>"
-            ))
 
     def _add_orders_to_chart(self, fig: Figure, orders_data: List[Dict[str, Any]]) -> None:
         """Добавляет ордера на график"""
         if not orders_data:
-            self.logger.debug("Нет ордеров для добавления на график")
+            # self.logger.debug("Нет ордеров для добавления на график")
             return
             
-        self.logger.debug(f"Добавляем {len(orders_data)} ордеров на график")
+        # self.logger.debug(f"Добавляем {len(orders_data)} ордеров на график")
         
         # Небольшой вертикальный отступ для маркеров, чтобы не перекрывать свечи
         def _offset(price: float) -> float:
@@ -265,7 +218,7 @@ class ChartBuilder:
 
     def _configure_chart_layout(self, fig: Figure) -> None:
         """Настраивает макет графика"""
-        self.logger.debug("Настраиваем макет графика")
+        # self.logger.debug("Настраиваем макет графика")
         fig.update_layout(
             xaxis_title="Время",
             yaxis_title="Цена (₽)",
@@ -285,7 +238,7 @@ class ChartBuilder:
         )
         fig.update_yaxes(autorange=True)
         
-        self.logger.debug("Макет графика настроен")
+        # self.logger.debug("Макет графика настроен")
     
     def create_macd_chart(
         self, 

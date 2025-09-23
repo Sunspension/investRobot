@@ -3,13 +3,11 @@
 """
 import asyncio
 import multiprocessing
-import os
 import signal
-import sys
 import time
 from dataclasses import dataclass
 from typing import Optional
-from datetime import datetime
+import logging
 
 from robotlib.multiprocess.account_config import AccountConfig
 from robotlib.trading.trading_config import TradingConfig
@@ -139,7 +137,6 @@ class RobotProcess:
         # Настраиваем per-account логирование в дочернем процессе
         try:
             # Преобразуем текстовый уровень в численный
-            import logging
             level = getattr(logging, account_config.log_level.upper(), logging.INFO)
             setup_logging(level=level, log_file=account_config.get_log_file())
         except Exception:
@@ -196,10 +193,8 @@ class RobotProcess:
             
             logger.info(f"Торговая система создана для счёта {account_config.account_id}")
             
-            # Запускаем визуализатор, если включён
-            if trading_system['visualizer'] and account_config.enable_visualization:
-                await trading_system['visualizer'].start()
-                logger.info(f"Визуализатор запущен на порту {account_config.visualization_port}")
+            # Визуализатор будет запущен внутри SessionController.start()
+            # чтобы избежать двойного запуска
             
             # Получаем контроллер сессии
             session_controller = trading_system['session_controller']

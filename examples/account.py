@@ -18,7 +18,7 @@ from tinkoff.invest import AsyncClient, MoneyValue
 # Загружаем конфигурацию
 config = load_config()
 token = config.tcs_client.token
-account_id = config.tcs_client.id
+account_id = config.tcs_client.account_id
 sandbox_token = config.tcs_client.sandbox_token
 
 class AccountHelper:

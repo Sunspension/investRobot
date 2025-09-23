@@ -57,10 +57,11 @@ class TradingSystemContainer:
     async def _create_strategies(self):
         """Создает стратегии с их зависимостями"""
         # Создаем PositionSizingService
+        # Временно отключаем динамический сайзинг, чтобы исключить размер=0
         position_sizing_service = PositionSizingService(
             risk_manager=await self.get_risk_manager(),
             portfolio_manager=await self.get_portfolio_manager(),
-            config=PositionSizingConfig()
+            config=PositionSizingConfig(enable_dynamic_sizing=False, min_position_size=10)
         )
         
         # Создаем стратегии
@@ -138,9 +139,12 @@ class TradingSystemContainer:
                 self._logger.warning(f"DBIngestionSink недоступен, ордера не будут писаться: {e}")
                 order_sink = None
             
+            # Передаём portfolio_manager и data_manager для публикации портфеля после ордеров
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
-                order_sink=order_sink
+                order_sink=order_sink,
+                portfolio_manager=await self.get_portfolio_manager(),
+                data_manager=getattr(self.get_visualizer(), "_data_manager", None)
             )
         return self._instances['order_executor']
     
@@ -225,6 +229,12 @@ class TradingSystemContainer:
             # Используем единый API клиент
             api_client = await self.get_api_client()
 
+            # Визуализатор и его DataManager (если включен)
+            viz = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
+            # Требуем DataManager, если визуализация включена
+            dm = getattr(viz, "_data_manager", None)
+            if dm is None and self._config.enable_visualization:
+                raise RuntimeError("DataManager не инициализирован при включенной визуализации")
             self._instances['trading_dependencies'] = TradingDependencies(
                 api_client=api_client,
                 session_stats=self.get_session_stats(),
@@ -233,7 +243,8 @@ class TradingSystemContainer:
                 order_executor=await self.get_order_executor(),
                 market_data_stream=await self.get_market_data_stream(),
                 signal_manager=self.get_signal_manager(),
-                strategy_manager=await self.get_strategy_manager()
+                strategy_manager=await self.get_strategy_manager(),
+                data_manager=dm,
             )
         return self._instances['trading_dependencies']
     
@@ -265,7 +276,8 @@ class TradingSystemContainer:
                 order_executor=dependencies.order_executor,
                 market_data_stream=dependencies.market_data_stream,
                 signal_manager=dependencies.signal_manager,
-                strategy_manager=dependencies.strategy_manager
+                strategy_manager=dependencies.strategy_manager,
+                data_manager=dependencies.data_manager,
             )
             # Добавляем session_initializer как атрибут
             controller_dependencies.session_initializer = session_initializer
@@ -285,11 +297,20 @@ class TradingSystemContainer:
         
         if 'visualizer' not in self._instances:
             try:
+                from visualization.data_manager import DataManager
+                from visualization.chart_builder import ChartBuilder
+                from visualization.ui_components import UIComponents
+                dm = DataManager()
+                cb = ChartBuilder()
+                ui = UIComponents(self._config.figi, cb)
                 self._instances['visualizer'] = DashEventVisualizer(
                     figi=self._config.figi,
                     host=host,
                     port=port,
-                    start_server=start_server
+                    start_server=start_server,
+                    data_manager=dm,
+                    chart_builder=cb,
+                    ui_components=ui,
                 )
             except ImportError:
                 self._logger.warning("Dash визуализатор недоступен")

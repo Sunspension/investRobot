@@ -28,12 +28,10 @@ from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from robotlib.signal_manager import SignalManager
-from robotlib.trading.order_types import OrderDirection, OrderType, OrderStatus
 from robotlib.trading.risk_manager import RiskManager, RiskLimits
-from robotlib.trading.portfolio_manager import PortfolioManager
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from tests.mocks import MockOrderExecutor, MockAPIClient, MockPortfolioManager
-# Убрали импорты базы данных - используем только моки
+from tests.mocks.position_sizer_dummy import DummySizer
 import pytz
 
 logger = get_logger(__name__)
@@ -105,10 +103,10 @@ async def test_historical_trading(
         # Создаем менеджеры
         signal_manager = SignalManager()
         risk_manager = RiskManager(risk_limits=risk_limits, portfolio_manager=portfolio_manager)
-        
+
         strategies = [
-            LongStrategy(risk_manager, portfolio_manager),
-            ShortStrategy(risk_manager, portfolio_manager)
+            LongStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer()),
+            ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer()),
         ]
         
         # Создаем StrategyManager с OrderExecutor

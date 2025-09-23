@@ -24,7 +24,7 @@ async def main():
     try:
         config = load_config()
         token = config.tcs_client.token
-        account_id = config.tcs_client.id
+        account_id = config.tcs_client.account_id
         sandbox_token = config.tcs_client.sandbox_token
     except Exception as e:
         print(f"❌ Ошибка загрузки конфигурации: {e}")

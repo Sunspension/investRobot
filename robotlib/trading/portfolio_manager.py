@@ -55,6 +55,14 @@ class PortfolioManager:
         self._positions_cache: Dict[str, Position] = {}
         self._cache_timestamp: Optional[datetime] = None
         self._cache_ttl = 30  # Время жизни кэша в секундах
+        
+        # Кэш общих сумм портфеля
+        self._cached_total_amount = 0.0
+        self._cached_blocked_amount = 0.0
+        self._cached_available_amount = 0.0
+        self._cached_variation_margin = 0.0
+        self._cached_guarantee_deposit = 0.0
+        self._cached_pnl = 0.0
     
     async def get_portfolio(self, force_refresh: bool = False) -> Portfolio:
         """
@@ -134,6 +142,14 @@ class PortfolioManager:
                 pnl=total_pnl
             )
             
+            # Сохраняем кэшированные значения
+            self._cached_total_amount = total_amount
+            self._cached_blocked_amount = blocked_amount
+            self._cached_available_amount = available_amount
+            self._cached_variation_margin = variation_margin
+            self._cached_guarantee_deposit = guarantee_deposit_total
+            self._cached_pnl = total_pnl
+            
             self.logger.info(
                 f"Портфель обновлен: {total_amount:.2f} руб, "
                 f"доступно: {portfolio.available_amount:.2f} руб, "
@@ -203,16 +219,18 @@ class PortfolioManager:
             True если покупка возможна, False иначе
         """
         portfolio = await self.get_portfolio()
-        
-        # Проверяем доступные средства
-        required_amount = quantity * price
-        if required_amount > portfolio.available_amount:
+        # Для фьючерсов корректнее проверять по ГО, а не по цене * количество
+        guarantee_deposit = await self.get_guarantee_deposit(figi)
+        if guarantee_deposit <= 0:
+            # Если не смогли получить ГО, перестрахуемся и запретим покупку
+            self.logger.debug("ГО неизвестно, покупка запрещена")
+            return False
+        required_go = quantity * guarantee_deposit
+        if required_go > portfolio.available_amount:
             self.logger.debug(
-                f"Недостаточно средств для покупки: "
-                f"требуется {required_amount:.2f}, доступно {portfolio.available_amount:.2f}"
+                f"Недостаточно средств по ГО: требуется {required_go:.2f}, доступно {portfolio.available_amount:.2f}"
             )
             return False
-        
         return True
     
     async def can_sell(self, figi: str, quantity: int) -> bool:
@@ -315,7 +333,14 @@ class PortfolioManager:
             Список операций
         """
         try:
-            return await self._api_client.get_operations_history(from_date, to_date)
+            response = await self._api_client.get_operations_history(from_date, to_date)
+            if not response:
+                return []
+            # API может вернуть уже список операций (в моках теста) или объект с полем operations
+            if isinstance(response, list):
+                return response
+            ops = getattr(response, 'operations', None)
+            return list(ops) if ops else []
             
         except Exception as e:
             self.logger.error(f"Ошибка получения истории операций: {e}")
@@ -498,13 +523,13 @@ class PortfolioManager:
         positions = list(self._positions_cache.values())
         
         return Portfolio(
-            total_amount=0.0,  # TODO: Кэшировать общую сумму
-            blocked_amount=0.0,
-            available_amount=0.0,
+            total_amount=self._cached_total_amount,
+            blocked_amount=self._cached_blocked_amount,
+            available_amount=self._cached_available_amount,
             positions=positions,
-            variation_margin=0.0,
-            guarantee_deposit=0.0,
-            pnl=0.0
+            variation_margin=self._cached_variation_margin,
+            guarantee_deposit=self._cached_guarantee_deposit,
+            pnl=self._cached_pnl
         )
 
 
@@ -516,7 +541,7 @@ async def main():
     
     async with TinkoffAPIClient(
         token=config.tcs_client.token,
-        account_id=config.tcs_client.id,
+        account_id=config.tcs_client.account_id,
         sandbox_token=config.tcs_client.sandbox_token
     ) as api_client:
         

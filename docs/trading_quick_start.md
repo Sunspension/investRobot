@@ -87,7 +87,7 @@ python main_trading.py --live-trading --figi FUTIMOEXF000
 
 Убедитесь, что в `config_data/config.py` правильно настроены:
 - `tcs_client.token` - токен доступа к API
-- `tcs_client.id` - ID торгового счета
+- `tcs_client.account_id` - ID торгового счета
 - `tcs_client.sandbox_token` - токен песочницы (опционально)
 
 ## Важные предупреждения

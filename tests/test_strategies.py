@@ -15,9 +15,15 @@ sys.path.insert(0, str(project_root))
 
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
+from tests.mocks.position_sizer_dummy import DummySizer
 from robotlib.signal_manager import Signal
 from robotlib.trading.portfolio_manager import Portfolio, Position
 from robotlib.utils.money import Money
+
+
+class RaisingSizer:
+    async def calculate_position_size(self, signal, current_position: int, figi: str = "FUTIMOEXF000") -> int:
+        raise Exception("API Error")
 
 
 class TestLongStrategy(unittest.TestCase):
@@ -31,7 +37,8 @@ class TestLongStrategy(unittest.TestCase):
         self.mock_portfolio_manager = Mock()
         self.strategy = LongStrategy(
             risk_manager=self.mock_risk_manager,
-            portfolio_manager=self.mock_portfolio_manager
+            portfolio_manager=self.mock_portfolio_manager,
+            position_sizing_service=DummySizer(),
         )
     
     def test_init(self):
@@ -208,14 +215,11 @@ class TestLongStrategy(unittest.TestCase):
     
     async def test_items_to_buy_api_error(self):
         """Тест расчета количества при ошибке API"""
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_deposit = AsyncMock(side_effect=Exception("API Error"))
-            
-            # Ожидаем, что метод выбросит исключение
-            with self.assertRaises(Exception) as context:
-                await self.strategy._items_to_buy(100.0)
-            
-            self.assertIn("API Error", str(context.exception))
+        # Подменяем сайзер на выбрасывающий исключение
+        self.strategy._position_sizing_service = RaisingSizer()
+        with self.assertRaises(Exception) as context:
+            await self.strategy._items_to_buy(100.0)
+        self.assertIn("API Error", str(context.exception))
 
 
 class TestShortStrategy(unittest.TestCase):
@@ -229,7 +233,8 @@ class TestShortStrategy(unittest.TestCase):
         self.mock_portfolio_manager = Mock()
         self.strategy = ShortStrategy(
             risk_manager=self.mock_risk_manager,
-            portfolio_manager=self.mock_portfolio_manager
+            portfolio_manager=self.mock_portfolio_manager,
+            position_sizing_service=DummySizer(),
         )
     
     def test_init(self):
@@ -406,14 +411,11 @@ class TestShortStrategy(unittest.TestCase):
     
     async def test_items_to_sell_short_api_error(self):
         """Тест расчета количества при ошибке API"""
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_deposit = AsyncMock(side_effect=Exception("API Error"))
-            
-            # Ожидаем, что метод выбросит исключение
-            with self.assertRaises(Exception) as context:
-                await self.strategy._items_to_sell_short(100.0)
-            
-            self.assertIn("API Error", str(context.exception))
+        # Подменяем сайзер на выбрасывающий исключение
+        self.strategy._position_sizing_service = RaisingSizer()
+        with self.assertRaises(Exception) as context:
+            await self.strategy._items_to_sell_short(100.0)
+        self.assertIn("API Error", str(context.exception))
 
 
 # Функция для запуска асинхронных тестов

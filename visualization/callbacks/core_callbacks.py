@@ -17,27 +17,24 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
          Output('sell-signals-count', 'children'),
          Output('buy-orders-count', 'children'),
          Output('sell-orders-count', 'children'),
-         Output('signals-list', 'children'),
-         Output('recent-signals', 'children'),
+         Output('orders-list', 'children'),
+         Output('recent-orders', 'children'),
          Output('portfolio-balance', 'children'),
          Output('portfolio-pnl', 'children'),
          Output('portfolio-variation-margin', 'children'),
          Output('portfolio-guarantee-deposit', 'children')],
-        [Input('ws', 'message'),
-         Input('toggle-rangebreaks', 'value')],
-        [State('simulation-state', 'data')],
+        [Input('ws_events', 'message')],
         prevent_initial_call=False
     )
-    def update_display(ws_message, toggle_value, state):  # noqa: ANN001
+    def update_display(ws_message):  # noqa: ANN001
         try:
             logger.debug("Callback вызван по WebSocket сообщению")
             snapshot = data_manager.get_data_snapshot()
 
             # График
-            hide_inactive = bool(toggle_value and ('hide' in toggle_value))
+            hide_inactive = True
             fig = chart_builder.create_trading_chart(
                 candles_data=snapshot['candles_data'],
-                signals_data=snapshot['signals_data'],
                 orders_data=snapshot['orders_data'],
                 current_price=snapshot['current_price'],
                 hide_inactive_time=hide_inactive,
@@ -59,10 +56,6 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
                     fig._layout_obj[u"uirevision"] = f"backfill_{_time.time()}"
             except Exception:
                 pass
-
-            # Списки сигналов
-            signals_list = ui_components.create_signals_list(snapshot['signals_data'])
-            recent_signals = ui_components.create_recent_signals(snapshot['signals_data'])
 
             # Статус рынка и таймер
             ms = snapshot.get('market_status', {}) or {}
@@ -96,6 +89,9 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
 
             current_price = snapshot.get('current_price', 0.0) or 0.0
 
+            orders_list = ui_components.create_orders_list(snapshot['orders_data'])
+            recent_orders = ui_components.create_recent_orders(snapshot['orders_data'])
+
             return (
                 fig,
                 f"{float(current_price):.1f} ₽",
@@ -105,8 +101,8 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
                 str(snapshot['sell_count']),
                 str(snapshot.get('buy_orders_count', 0)),
                 str(snapshot.get('sell_orders_count', 0)),
-                signals_list,
-                recent_signals,
+                orders_list,
+                recent_orders,
                 portfolio_balance,
                 portfolio_pnl,
                 portfolio_variation_margin,
@@ -135,8 +131,8 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
 
     @app.callback(
         Output('portfolio-pnl', 'style'),
-        [Input('ws', 'message')],
-        prevent_initial_call=False,
+        [Input('ws_events', 'message')],
+        prevent_initial_call=True,
     )
     def update_pnl_color(_msg):  # noqa: ANN001
         try:
@@ -154,8 +150,8 @@ def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_man
 
     @app.callback(
         Output('portfolio-variation-margin', 'style'),
-        [Input('ws', 'message')],
-        prevent_initial_call=False,
+        [Input('ws_events', 'message')],
+        prevent_initial_call=True,
     )
     def update_variation_margin_color(_msg):  # noqa: ANN001
         try:

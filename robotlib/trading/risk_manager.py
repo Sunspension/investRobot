@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from robotlib.trading.portfolio_manager import PortfolioManager, Position
+from robotlib.utils.money import Money
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
@@ -277,8 +278,19 @@ class RiskManager:
             
             daily_loss = 0.0
             for operation in operations:
-                if operation.payment < 0:  # Убыточная операция
-                    daily_loss += abs(operation.payment)
+                try:
+                    payment = getattr(operation, 'payment', 0)
+                    # Приводим MoneyValue/Quotation к float
+                    payment_float = Money(payment).to_float()
+                except Exception:
+                    # Фолбэк: если тип неожиданный, пробуем напрямую
+                    try:
+                        payment_float = float(payment) if payment is not None else 0.0
+                    except Exception:
+                        payment_float = 0.0
+
+                if payment_float < 0:  # Убыточная операция
+                    daily_loss += abs(payment_float)
             
             self._daily_losses[today_str] = daily_loss
             return daily_loss
@@ -402,7 +414,7 @@ async def main():
     
     async with TinkoffAPIClient(
         token=config.tcs_client.token,
-        account_id=config.tcs_client.id,
+        account_id=config.tcs_client.account_id,
         sandbox_token=config.tcs_client.sandbox_token
     ) as api_client:
         

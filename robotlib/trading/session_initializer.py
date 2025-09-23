@@ -56,7 +56,7 @@ class SessionInitializer(SessionInitializable):
         contracts_per_lot = await self._get_contracts_per_lot()
         
         # Инициализируем стратегии
-        self.dependencies.strategy_manager.initialize(
+        await self.dependencies.strategy_manager.initialize(
             figi=self.config.figi,
             point_value=point_value,
             contracts_per_lot=contracts_per_lot

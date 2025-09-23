@@ -34,7 +34,7 @@ class TestModelDataIntegrity:
         config = Mock()
         config.tcs_client = Mock()
         config.tcs_client.token = "test_token"
-        config.tcs_client.id = "test_account"
+        config.tcs_client.account_id = "test_account"
         config.tcs_client.sandbox_token = "test_sandbox_token"
         return config
     

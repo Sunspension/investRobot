@@ -8,6 +8,14 @@ CLI для операций в песочнице Tinkoff Invest API.
 
 import asyncio
 import argparse
+import os
+import sys
+
+# Гарантируем, что корень проекта доступен для импортов при запуске скрипта напрямую
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from config_data.config import load_config
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 

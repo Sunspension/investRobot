@@ -5,8 +5,13 @@
 """
 
 import threading
+import sqlite3
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+
+import pandas as pd
+import pytz
+from visualization.formatters import to_moscow_time
 from robotlib.utils.logger import get_logger
 
 class DataManager:
@@ -101,7 +106,7 @@ class DataManager:
                 # Удаляем самые старые overflow
                 del self.candles_data[0:overflow]
             
-            self.logger.debug(f"Добавлена свеча: {candle_data['time']} @ {candle_data['close']:.2f} (всего: {len(self.candles_data)})")
+            # self.logger.debug(f"Добавлена свеча: {candle_data['time']} @ {candle_data['close']:.2f} (всего: {len(self.candles_data)})")
     
     def add_signal(self, signal_data: Dict[str, Any]) -> None:
         """Добавляет сигнал в данные"""
@@ -163,7 +168,10 @@ class DataManager:
         with self.data_lock:
             self.portfolio_data.update(portfolio_data)
             self.portfolio_data['last_update'] = datetime.now()
-            self.logger.debug(f"Обновлен портфель: баланс={portfolio_data.get('total_amount', 0):.2f}, PnL={portfolio_data.get('pnl', 0):.2f}")
+            self.logger.info(
+                f"Обновлен портфель: баланс={portfolio_data.get('total_amount', 0):.2f}, "
+                f"PnL={portfolio_data.get('pnl', 0):.2f}, позиций={len(self.portfolio_data.get('positions', []))}"
+            )
     
     def update_strategy_status(self, status: str) -> None:
         """Обновляет статус стратегий"""
@@ -211,22 +219,18 @@ class DataManager:
     def load_historical_candles(self, db_path: str, figi: str, limit: int = 200) -> None:
         """Загружает исторические свечи из базы данных"""
         try:
-            import sqlite3
-            import pandas as pd
-            from visualization.formatters import to_moscow_time
-            import pytz
-            
             with sqlite3.connect(db_path) as conn:
                 # Берём только текущий день (по локальному времени SQLite) и упорядочиваем по времени корректно
+                # Нормализуем ISO-время (с 'T') для корректной сортировки/фильтрации в SQLite
                 query = """
                 SELECT time, open, high, low, close, volume
                 FROM candles
                 WHERE figi = ?
-                  AND date(time, 'localtime') = date('now','localtime')
-                ORDER BY datetime(time) ASC
+                  AND date(replace(time, 'T', ' '), 'localtime') = date('now','localtime')
+                ORDER BY datetime(replace(time, 'T', ' ')) ASC
                 """
                 df = pd.read_sql_query(query, conn, params=(figi,))
-                
+
                 if not df.empty:
                     # Конвертируем данные в нужный формат
                     candles = []
@@ -252,10 +256,57 @@ class DataManager:
                         
                     self.logger.info(f"Загружено {len(candles)} исторических свечей для {figi}")
                 else:
-                    self.logger.warning(f"Исторические данные для {figi} не найдены")
+                    # Фолбэк: если текущий день пуст (формат времени не распарсен SQLite),
+                    # загружаем последние N свечей без фильтра по дате
+                    self.logger.debug(
+                        f"История за текущий день не найдена, выполняем фолбэк на последние {limit} свечей"
+                    )
+                    self.load_recent_candles(db_path=db_path, figi=figi, limit=limit)
                     
         except Exception as e:
             self.logger.error(f"Ошибка загрузки исторических данных: {e}")
+
+    def load_recent_candles(self, db_path: str, figi: str, limit: int = 300) -> None:
+        """Загружает последние N свечей без ограничения по дате (для первичной инициализации UI).
+
+        Свечи возвращаются в хронологическом порядке (старые → новые).
+        """
+        try:
+            with sqlite3.connect(db_path) as conn:
+                query = (
+                    "SELECT time, open, high, low, close, volume "
+                    "FROM candles WHERE figi = ? "
+                    "ORDER BY time DESC LIMIT ?"
+                )
+                df = pd.read_sql_query(query, conn, params=(figi, limit))
+
+                if not df.empty:
+                    # Разворачиваем в возрастающий порядок времени
+                    df = df.iloc[::-1].reset_index(drop=True)
+
+                    candles = []
+                    for _, row in df.iterrows():
+                        _dt = pd.to_datetime(row['time']).to_pydatetime()
+                        candle_data = {
+                            'time': to_moscow_time(_dt),
+                            'open': float(row['open']),
+                            'high': float(row['high']),
+                            'low': float(row['low']),
+                            'close': float(row['close']),
+                            'volume': int(row['volume'])
+                        }
+                        candles.append(candle_data)
+
+                    with self.data_lock:
+                        self.candles_data = candles
+                        if candles:
+                            self.current_price = candles[-1]['close']
+                            self.last_update = datetime.now()
+                    self.logger.info(f"Загружено {len(candles)} последних свечей для {figi}")
+                else:
+                    self.logger.warning(f"Свечи для {figi} не найдены в {db_path}")
+        except Exception as e:
+            self.logger.error(f"Ошибка загрузки последних свечей: {e}")
 
     def merge_historical_candles(self, db_path: str, figi: str, from_time: datetime, to_time: Optional[datetime] = None) -> None:
         """Догружает и сливает свечи из БД в заданном окне времени, не перезаписывая весь список.

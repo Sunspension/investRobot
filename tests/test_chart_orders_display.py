@@ -40,7 +40,6 @@ def test_orders_are_displayed_at_correct_times():
 
     fig = ChartBuilder().create_trading_chart(
         candles_data=candles,
-        signals_data=[],
         orders_data=orders,
         current_price=0.0,
     )

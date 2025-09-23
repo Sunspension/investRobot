@@ -107,8 +107,10 @@ class StrategyManager(StrategyManageable):
         if bar_time is not None and self._last_processed_bar_time == bar_time:
             return
 
+        self._logger.debug(f"on_candle: получена свеча {bar_time}")
         signal: Signal = self._signal_manager.add_candle(candle)
         if not signal:
+            # self._logger.debug("on_candle: сигнал не сформирован (нет условий)")
             return
         # Отправляем сигнал в диспетчер, если есть
         if self._signal_dispatcher is not None:
@@ -120,13 +122,16 @@ class StrategyManager(StrategyManageable):
 
         # Выполняем все стратегии
         for strategy in self._strategies:
+            self._logger.debug(f"execute: {strategy.__class__.__name__} processing signal hist={getattr(signal,'histogram',None)}")
             order_intents: list[OrderIntent] = await strategy.execute(signal)
+            self._logger.debug(f"execute: {strategy.__class__.__name__} вернул {len(order_intents)} намерений")
             
             # Если есть OrderExecutor, выполняем ордера и передаем результаты в стратегии
             if self._order_executor:
                 for order_intent in order_intents:
                     try:
                         # Выполняем ордер
+                        self._logger.info(f"OrderIntent → исполнение: {order_intent}")
                         execution = await self._order_executor.execute_order(order_intent)
                         
                         # Передаем результат исполнения в стратегию

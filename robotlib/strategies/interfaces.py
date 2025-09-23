@@ -54,7 +54,7 @@ class StrategyDependencies:
         self, 
         risk_manager: RiskManageable, 
         portfolio_manager: PortfolioManageable,
-        position_sizing_service: PositionSizingManageable = None
+        position_sizing_service: PositionSizingManageable
     ):
         self.risk_manager = risk_manager
         self.portfolio_manager = portfolio_manager

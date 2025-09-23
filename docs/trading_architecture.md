@@ -139,7 +139,7 @@ trading_config = TradingConfig(
 session = TradingSession(
     config=trading_config,
     token=config.tcs_client.token,
-    account_id=config.tcs_client.id
+    account_id=config.tcs_client.account_id
 )
 
 await session.start()

@@ -3,6 +3,7 @@
 Единый entry point для запуска торговой системы
 """
 import asyncio
+import contextlib
 import sys
 import os
 import argparse
@@ -16,7 +17,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from robotlib.trading.di_container import TradingSystemContainer
 from robotlib.trading.trading_config import TradingConfig
 # EventBus убран из основной системы - используется только для визуализации
-from robotlib.utils.logger import get_logger
+from robotlib.utils.logger import get_logger, setup_logging
+import logging
 
 
 def stop_previous_processes(port: int = 8050):
@@ -106,6 +108,13 @@ async def run_trading_system(
 ):
     """Запускает торговую систему с указанными параметрами"""
     
+    # Инициализируем логирование максимально рано
+    try:
+        setup_logging(level=logging.DEBUG, log_file='data/logs/debug.log')
+    except Exception:
+        # Не блокируем запуск при ошибке файлового логгера
+        pass
+
     logger = get_logger(__name__)
     logger.info("🚀 Запуск торговой системы")
     logger.info(f"📊 FIGI: {figi}")
@@ -121,6 +130,13 @@ async def run_trading_system(
     # Загружаем конфигурацию
     from config_data.config import load_config
     config = load_config()
+    try:
+        logger.info(
+            f"Start trading: account_id={getattr(config.tcs_client, 'account_id', 'unknown')}, "
+            f"sandbox={bool(getattr(config.tcs_client, 'sandbox_token', None))}"
+        )
+    except Exception:
+        pass
     
     # Создаем торговую конфигурацию
     trading_config = TradingConfig(
@@ -137,14 +153,6 @@ async def run_trading_system(
     
     logger.info("✅ Торговая система собрана через DI контейнер")
     
-    # Запускаем визуализатор (если включен и сервер нужен)
-    if trading_system['visualizer'] and start_server:
-        await trading_system['visualizer'].start()
-        logger.info("✅ Dash визуализатор событий запущен")
-    elif trading_system['visualizer']:
-        logger.info("✅ Dash визуализатор готов к запуску (сервер отключен)")
-    
-
     
     # Получаем SessionController
     session_controller = trading_system['session_controller']

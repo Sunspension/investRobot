@@ -63,19 +63,23 @@ async def _start_trading():
     enable_vis = _input_nonempty("Визуализация? (y/n) [y]: ", default="y").lower() == "y"
     start_server = _input_nonempty("Запуск веб-сервера? (y/n) [y]: ", default="y").lower() == "y"
 
-    sys.path.insert(0, str(PROJECT_ROOT))
-    from run_trading_system import run_trading_system  # type: ignore
+    args = [
+        _python_executable(),
+        "run_trading_system.py",
+        "--figi", figi,
+        "--host", host,
+        "--port", str(port),
+    ]
+    if not enable_vis:
+        args.append("--no-visualization")
+    if not start_server:
+        args.append("--no-server")
 
-    await run_trading_system(
-        figi=figi,
-        enable_visualization=enable_vis,
-        host=host,
-        port=port,
-        start_server=start_server,
-    )
+    return _run_subprocess(args)
 
 
 async def _start_trading_limited():
+    """Запуск торговой системы на ограниченное время через venv Python."""
     figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
     host = _input_nonempty("Host [127.0.0.1]: ", default="127.0.0.1")
     port = int(_input_nonempty("Port [8050]: ", default="8050"))
@@ -83,17 +87,20 @@ async def _start_trading_limited():
     start_server = _input_nonempty("Запуск веб-сервера? (y/n) [y]: ", default="y").lower() == "y"
     duration = int(_input_nonempty("Длительность, сек [60]: ", default="60"))
 
-    sys.path.insert(0, str(PROJECT_ROOT))
-    from run_trading_system_limited import run_trading_system_limited  # type: ignore
+    args = [
+        _python_executable(),
+        "run_trading_system_limited.py",
+        "--figi", figi,
+        "--host", host,
+        "--port", str(port),
+        "--seconds", str(duration),
+    ]
+    if not enable_vis:
+        args.append("--no-visualization")
+    if not start_server:
+        args.append("--no-server")
 
-    await run_trading_system_limited(
-        figi=figi,
-        enable_visualization=enable_vis,
-        host=host,
-        port=port,
-        start_server=start_server,
-        run_duration=duration,
-    )
+    return _run_subprocess(args)
 
 
 def _multi_account_menu():

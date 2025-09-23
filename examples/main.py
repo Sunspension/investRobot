@@ -32,7 +32,7 @@ from tests.mocks import MockAPIClient, MockPortfolioManager
 config = load_config()
 token = config.tcs_client.token
 sandbox_token = config.tcs_client.sandbox_token
-account_id = config.tcs_client.id
+account_id = config.tcs_client.account_id
 APP_NAME = "vk_trading_bot"
 
 async def backtest(

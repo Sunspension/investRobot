@@ -12,7 +12,7 @@ class ShortStrategy(Strategyable):
             self, 
             risk_manager: RiskManageable,
             portfolio_manager: PortfolioManageable,
-            position_sizing_service: PositionSizingManageable = None
+            position_sizing_service: PositionSizingManageable
     ):
             
         self._position = 0
@@ -78,24 +78,39 @@ class ShortStrategy(Strategyable):
         orders.extend(stop_loss_orders)
 
         hist_abs = abs(signal.histogram)
+        try:
+            self._logger.info(
+                f"Short.execute: pos={self._position} macd={getattr(signal,'macd',None):.4f} "
+                f"sig={getattr(signal,'signal',None):.4f} hist={getattr(signal,'histogram',None):.4f} "
+                f"peak={getattr(signal,'peak_detected',False)} trough={getattr(signal,'trough_detected',False)}"
+            )
+        except Exception:
+            pass
 
-        is_trending_down = signal.macd_prev is not None \
-            and signal.signal_prev is not None \
-            and signal.macd < signal.signal \
+        # Анализ тренда для увеличения шорта: если позиция открыта и тренд усиливается (цена падает)
+        is_trending_down = (
+            signal.macd_prev is not None
+            and signal.signal_prev is not None
+            and signal.macd < signal.signal
             and signal.macd_prev > signal.signal_prev
+        )
 
-        is_crossed_down = signal.macd_prev is not None \
-            and signal.signal_prev is not None \
-            and signal.macd_prev > signal.signal_prev \
-            and signal.macd < signal.signal \
+        is_crossed_down = (
+            signal.macd_prev is not None
+            and signal.signal_prev is not None
+            and signal.macd_prev > signal.signal_prev
+            and signal.macd < signal.signal
+            and hist_abs > 0.01
+        )
+        is_crossed_up = (
+            signal.macd_prev is not None
+            and signal.signal_prev is not None
+            and signal.macd_prev < signal.signal_prev
+            and signal.macd > signal.signal
             and hist_abs > 0.1
-        is_crossed_up = signal.macd_prev is not None \
-            and signal.signal_prev is not None \
-            and signal.macd_prev < signal.signal_prev \
-            and signal.macd > signal.signal \
-            and hist_abs > 0.1
+        )
 
-        # Открыть short
+        # Открыть short: ждём peak и пересечения вниз; увелечение шорта при тренде
         if (self._wait_short_sell_cross and is_crossed_down) or (self._position > 0 and is_trending_down):
             items = await self._items_to_sell_short(signal)
             if items > 0:
@@ -108,8 +123,11 @@ class ShortStrategy(Strategyable):
                     )
                 )
                 self._wait_short_sell_cross = False
+                self._logger.info(f"Short: SELL intent qty={items}")
+            else:
+                self._logger.info("Short: qty<=0, пропускаем SELL")
 
-        # Закрыть short
+        # Закрыть short: ждём trough и пересечения вверх
         if self._wait_short_buy_cross and is_crossed_up and self._position > 0:
             items = self._items_to_buy_short()
             if items > 0:
@@ -122,7 +140,12 @@ class ShortStrategy(Strategyable):
                     )
                 )
                 self._wait_short_buy_cross = False
+                self._logger.info(f"Short: BUY intent qty={items}")
+            else:
+                self._logger.info("Short: qty<=0, пропускаем BUY")
 
+        if not orders:
+            self._logger.info("Short: условий для входа/выхода нет")
         return orders
 
     
@@ -157,34 +180,19 @@ class ShortStrategy(Strategyable):
             return None
 
     async def _items_to_sell_short(self, signal: Signal, figi: str = "FUTIMOEXF000"):
-        # Если есть PositionSizingService, используем его для динамического расчета
-        if self._position_sizing_service:
-            return await self._position_sizing_service.calculate_position_size(
-                signal=signal,
-                current_position=self._position,
-                figi=figi
-            )
-        
-        # Fallback к старой логике, если PositionSizingService не передан
-        current_deposit = await self._portfolio_manager.get_deposit()
-        money_limit = current_deposit * (self._risk_manager.risk_limits.percent_from_deposit / 100)
-        
-        guarantee_deposit = await self._portfolio_manager.get_guarantee_deposit(figi)
-        
-        if guarantee_deposit <= 0:
-            self._logger.warning(f"Гарантийное обеспечение для {figi} равно нулю или отрицательно: {guarantee_deposit}")
-            return 0
-        
-        frozen_guarantee = self._position * guarantee_deposit
-        money_left = money_limit - frozen_guarantee
-        max_items = money_left // guarantee_deposit
-        return int(min(max_items, self._risk_manager.risk_limits.items_per_trade))
+        return await self._position_sizing_service.calculate_position_size(
+            signal=signal,
+            current_position=self._position,
+            figi=figi
+        )
 
     def _items_to_buy_short(self):
         return self._position
     
     def _process_execution(self, execution: OrderExecution):
         """Обрабатывает исполнение ордера"""
+        if not execution or (execution.filled_quantity or 0) <= 0:
+            return
         if execution.direction == OrderDirection.SELL:
             # Открываем шорт
             self._positions.append([execution.price, execution.filled_quantity])
@@ -203,6 +211,9 @@ class ShortStrategy(Strategyable):
             self._income += profit
 
     def _fifo_buy_short(self, positions, price, qty_to_buy, commission=0.0):
+        if qty_to_buy <= 0:
+            new_position_qty = sum(qty for _, qty in positions)
+            return positions, 0.0, new_position_qty
         remaining = qty_to_buy
         total_cost = 0.0
         new_positions = []

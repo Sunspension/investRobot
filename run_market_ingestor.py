@@ -25,7 +25,13 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
         account_id=cfg.tcs_client.account_id,
         sandbox_token=cfg.tcs_client.sandbox_token,
     ) as api_client:
-        stream = MarketDataStream(api_client=api_client, figi=figi)
+        stream = MarketDataStream(
+            api_client=api_client,
+            figi=figi,
+            watchdog_enabled=cfg.watchdog_enabled,
+            watchdog_stale_seconds=cfg.watchdog_stale_seconds,
+            watchdog_require_open_market=cfg.watchdog_require_open_market,
+        )
 
         # Attach DB ingestion sink
         sink = DBIngestionSink(db_path=db_path, figi=figi)

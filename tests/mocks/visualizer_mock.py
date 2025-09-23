@@ -5,7 +5,7 @@ from typing import Optional, Any
 from robotlib.utils.logger import get_logger
 
 class MockEventVisualizer:
-    """Мок визуализатора событий для тестирования"""
+    """Мок визуализатора событий для тестирования (без сигналов)"""
     
     def __init__(self, host: str = "127.0.0.1", port: int = 8050, start_server: bool = True):
         self.host = host
@@ -40,10 +40,6 @@ class MockEventVisualizer:
         """Флаг работы мок-визуализатора"""
         return self._running
     
-    def add_signal(self, signal_type: str, strength: float) -> None:
-        """Добавляет мок-сигнал"""
-        self._logger.info(f"🎭 Добавлен мок-сигнал: {signal_type} (сила: {strength:.4f})")
-    
     def add_candle(self, timestamp: str, price: float) -> None:
         """Добавляет мок-свечу"""
         self._logger.info(f"🎭 Добавлена мок-свеча: {timestamp} @ {price}")
@@ -51,7 +47,6 @@ class MockEventVisualizer:
     def get_stats(self) -> dict:
         """Возвращает мок-статистику"""
         return {
-            'signals_count': 42,
             'candles_count': 100,
             'is_running': self._running
         }

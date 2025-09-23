@@ -2,7 +2,7 @@
 Модуль для выполнения реальных торговых приказов через Tinkoff API
 """
 
-from typing import Optional
+from typing import Optional, Any
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
 from robotlib.ingestion.db_sink import DBIngestionSink
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
@@ -17,8 +17,12 @@ class OrderExecutor:
     """Класс для выполнения торговых приказов"""
     
     def __init__(
-        self, api_client: TinkoffAPIClient, 
-        order_sink: Optional[DBIngestionSink] = None
+        self,
+        api_client: TinkoffAPIClient,
+        order_sink: Optional[DBIngestionSink] = None,
+        *,
+        portfolio_manager: Optional[Any] = None,
+        data_manager: Optional[Any] = None,
     ):
         """
         Инициализация исполнителя приказов
@@ -30,6 +34,9 @@ class OrderExecutor:
         self.api_client = api_client
         self._order_sink = order_sink
         self.logger = get_logger(__name__)
+        # Опционально для публикации портфеля в UI по факту изменений
+        self._portfolio_manager = portfolio_manager
+        self._data_manager = data_manager
     
     async def check_market_availability(self) -> bool:
         """Проверяет доступность рынка для торговли"""
@@ -48,6 +55,22 @@ class OrderExecutor:
         self.logger.info(f"Выполнение ордера: {order_intent}")
         
         try:
+            # Защита: не отправляем нулевые ордера
+            if order_intent.quantity <= 0:
+                self.logger.warning("Пропуск ордера: количество лотов = 0")
+                return OrderExecution(
+                    order_id=str(uuid.uuid4()),
+                    figi=order_intent.figi,
+                    direction=order_intent.direction,
+                    quantity=0,
+                    filled_quantity=0,
+                    price=0.0,
+                    status=OrderStatus.REJECTED,
+                    timestamp=datetime.now(),
+                    error_message="Количество лотов = 0",
+                    commission=0.0,
+                    reason="некорректный размер"
+                )
             # Выполняем ордер в зависимости от типа
             if order_intent.order_type == OrderType.MARKET:
                 result = await self._execute_market_order(order_intent)
@@ -100,6 +123,15 @@ class OrderExecutor:
                     await self._order_sink.on_order(order_record)
                 except Exception as persist_err:
                     self.logger.warning(f"Не удалось сохранить исполненный ордер: {persist_err}")
+
+            # Публикуем обновлённый портфель в UI только при реальном изменении (успешный fill)
+            try:
+                if result.success and execution.status == OrderStatus.FILLED and self._portfolio_manager and self._data_manager:
+                    portfolio_data = await self._portfolio_manager.get_portfolio_data()
+                    self._data_manager.update_portfolio(portfolio_data)
+                    self.logger.info("Портфель обновлён в UI после исполнения ордера")
+            except Exception as pub_err:
+                self.logger.warning(f"Не удалось опубликовать портфель после ордера: {pub_err}")
             
             self.logger.info(f"Ордер выполнен: {execution}")
             return execution
@@ -204,7 +236,7 @@ async def main():
     
     async with TinkoffAPIClient(
         token=config.tcs_client.token,
-        account_id=config.tcs_client.id,
+        account_id=config.tcs_client.account_id,
         sandbox_token=config.tcs_client.sandbox_token
     ) as api_client:
         

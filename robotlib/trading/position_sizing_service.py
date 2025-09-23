@@ -16,11 +16,11 @@ class PositionSizingService:
         self, 
         risk_manager: RiskManageable,
         portfolio_manager: PortfolioManageable,
-        config: PositionSizingConfig = None
+        config: PositionSizingConfig
     ):
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
-        self._config = config or PositionSizingConfig()
+        self._config = config
         self._logger = get_logger(__name__)
     
     async def calculate_position_size(
@@ -44,13 +44,17 @@ class PositionSizingService:
         Returns:
             Рекомендуемый размер позиции
         """
-        # Если динамический расчет отключен, используем фиксированный лимит
+        # Минимальный размер всегда соблюдаем
+        min_size = self._config.min_position_size
+        # Если динамический расчет отключен, используем фиксированный лимит (не ниже минимума)
         if not self._config.enable_dynamic_sizing:
-            return self._calculate_fixed_position_size(current_position, figi)
+            return max(min_size, self._calculate_fixed_position_size(current_position, figi))
         
         # 1. Базовый расчет (текущий)
         base_size = await self._calculate_base_position_size(current_position, figi)
         if base_size <= 0:
+            # Недостаточно средств для открытия даже 1 лота
+            self._logger.info("Недостаточно средств для открытия позиции: базовый размер 0")
             return 0
         
         # 2. Коэффициент волатильности (0.5 - 2.0)
@@ -69,9 +73,9 @@ class PositionSizingService:
         dynamic_size = base_size * volatility_factor * signal_strength_factor * time_factor * risk_factor
         
         # 7. Ограничения
-        min_size = self._config.min_position_size
-        max_size = int(self._risk_manager.risk_limits.items_per_trade * 
-                      self._config.max_position_multiplier)
+        max_size = int(
+            self._risk_manager.risk_limits.items_per_trade * self._config.max_position_multiplier
+        )
         
         final_size = int(max(min_size, min(dynamic_size, max_size)))
         
@@ -90,15 +94,19 @@ class PositionSizingService:
         guarantee_deposit = await self._portfolio_manager.get_guarantee_deposit(figi)
         
         if guarantee_deposit <= 0:
-            return 0
+            # Если ГО неизвестно, не открываем нулевую позицию
+            return self._config.min_position_size
         
         frozen_guarantee = current_position * guarantee_deposit
         money_left = money_limit - frozen_guarantee
+        if money_left < guarantee_deposit:
+            # Не хватает средств на ГО даже для 1 лота
+            return 0
         return int(money_left // guarantee_deposit)
     
     def _calculate_fixed_position_size(self, current_position: int, figi: str) -> int:
         """Фиксированный расчет размера позиции (старая логика)"""
-        return self._risk_manager.risk_limits.items_per_trade
+        return max(self._config.min_position_size, self._risk_manager.risk_limits.items_per_trade)
     
     def _calculate_volatility_factor(self, signal: Signal) -> float:
         """Коэффициент волатильности на основе ATR или стандартного отклонения"""
@@ -150,6 +158,8 @@ class PositionSizingService:
         # Чем больше позиция, тем осторожнее
         max_allowed = int(self._risk_manager.risk_limits.items_per_trade * 
                          self._config.max_position_multiplier)
+        if max_allowed <= 0:
+            return 1.0
         position_ratio = current_position / max_allowed
         return max(self._config.risk_factor_min, 
                   self._config.risk_factor_max - position_ratio * 0.3)

@@ -101,34 +101,56 @@ class SessionController(SessionControllable):
             await self._initializer.initialize_components()
             self._is_initialized = True
             
+            # Пассивная загрузка исторических свечей для визуализатора (если есть)
+            try:
+                dm = self._dependencies.data_manager
+                # Загружаем последние N свечей без ограничения по дате
+                dm.load_recent_candles(
+                    db_path="data/market.db",
+                    figi=self._config.figi,
+                    limit=300,
+                )
+                self.logger.info(f"Начальные свечи загружены: {len(dm.candles_data)} шт.")
+            except Exception as e:
+                self.logger.warning(f"Не удалось загрузить начальные свечи для визуализатора: {e}")
+            
             # Запускаем визуализатор
             if self._visualizer:
                 await self._visualizer.start()
                 self.logger.info("✅ Dash визуализатор событий запущен")
+                # Одноразовая загрузка портфеля в UI на старте
+                try:
+                    portfolio_data = await self._dependencies.portfolio_manager.get_portfolio_data()
+                    dm = self._dependencies.data_manager
+                    if dm:
+                        dm.update_portfolio(portfolio_data)
+                        self.logger.info("Портфель опубликован в UI (старт)")
+                except Exception as e:
+                    self.logger.warning(f"Не удалось опубликовать портфель на старте: {e}")
             
             # Прогрев стратегий историческими барами из БД (за текущий день), без сигналов и без ордеров
             try:
-                if self._visualizer and _has_data_manager(self._visualizer):
-                    snapshot = self._visualizer.data_manager.get_data_snapshot()
-                    candles = snapshot.get('candles_data', [])
-                    if candles:
-                        # Берём последние 200 баров (или меньше)
-                        bars = [
-                            {
-                                'time': c['time'],
-                                'open': float(c['open']),
-                                'high': float(c['high']),
-                                'low': float(c['low']),
-                                'close': float(c['close']),
-                            }
-                            for c in candles[-200:]
-                        ]
-                        await self._dependencies.strategy_manager.warmup_with_bars(
-                            bars,
-                            dispatch_signals=False,
-                            place_orders=False,
-                        )
-                        self.logger.info(f"Прогрето стратегий барами: {len(bars)}")
+                dm = self._dependencies.data_manager
+                snapshot = dm.get_data_snapshot()
+                candles = snapshot.get('candles_data', [])
+                if candles:
+                    # Берём последние 200 баров (или меньше)
+                    bars = [
+                        {
+                            'time': c['time'],
+                            'open': float(c['open']),
+                            'high': float(c['high']),
+                            'low': float(c['low']),
+                            'close': float(c['close']),
+                        }
+                        for c in candles[-200:]
+                    ]
+                    await self._dependencies.strategy_manager.warmup_with_bars(
+                        bars,
+                        dispatch_signals=False,
+                        place_orders=False,
+                    )
+                    self.logger.info(f"Прогрето стратегий барами: {len(bars)}")
             except Exception as e:
                 self.logger.warning(f"Прогрев стратегий пропущен: {e}")
 
@@ -206,8 +228,7 @@ class SessionController(SessionControllable):
                     if candles:
                         # Обрабатываем свечи через стратегии
                         await self._process_candles(candles)
-                    
-                    # Обновляем статистику
+                    # Обновляем только статистику (без публикации портфеля на каждый тик)
                     await self._update_stats()
                     
                     # Небольшая пауза между итерациями
@@ -441,27 +462,17 @@ class SessionController(SessionControllable):
             portfolio = await self._dependencies.portfolio_manager.get_portfolio()
             current_balance = portfolio.total_amount
             
-            # Обновляем статистику
+            # Обновляем только статистику баланса
             self._stats.update_balance(current_balance)
             
-            # Обновляем визуализатор
-            if self._visualizer:
-                portfolio_data = {
-                    'total_amount': portfolio.total_amount,
-                    'positions': getattr(portfolio, 'positions', []),
-                    'pnl': getattr(portfolio, 'pnl', 0.0),
-                    'margin': getattr(portfolio, 'margin', 0.0),
-                    'free_margin': getattr(portfolio, 'free_margin', 0.0)
-                }
-                await self._visualizer.update_portfolio(portfolio_data)
-                
-                # Обновляем статус стратегий
-                if _has_data_manager(self._visualizer):
-                    try:
-                        strategy_status = "Стратегии работают нормально"
-                        self._visualizer.data_manager.update_strategy_status(strategy_status)
-                    except Exception as e:
-                        self.logger.error(f"Ошибка обновления статуса стратегий: {e}")
+            # Обновляем статус стратегий
+            try:
+                strategy_status = "Стратегии работают нормально"
+                dm = self._dependencies.data_manager
+                if dm:
+                    dm.update_strategy_status(strategy_status)
+            except Exception as e:
+                self.logger.error(f"Ошибка обновления статуса стратегий: {e}")
             
         except Exception as e:
             self.logger.error(f"Ошибка обновления статистики: {e}")
@@ -475,10 +486,11 @@ class SessionController(SessionControllable):
         self.logger.info(f"Время запуска: {self._stats.start_time}")
         
         # Обновляем статус стратегий в визуализаторе
-        if _has_data_manager(self.visualizer):
+        dm = self._dependencies.data_manager
+        if dm:
             try:
                 strategy_status = "Стратегии активны и готовы к торговле"
-                self.visualizer.data_manager.update_strategy_status(strategy_status)
+                dm.update_strategy_status(strategy_status)
                 self.logger.info("Статус стратегий обновлен в визуализаторе")
             except Exception as e:
                 self.logger.error(f"Ошибка обновления статуса стратегий: {e}")

@@ -168,7 +168,7 @@ async def test_with_api(
     # Загружаем конфигурацию
     config = load_config()
     token = config.tcs_client.token
-    account_id = config.tcs_client.id
+    account_id = config.tcs_client.account_id
     sandbox_token = config.tcs_client.sandbox_token
     
     from_time_dt = _to_msk_date(from_time)

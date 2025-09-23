@@ -209,6 +209,12 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_services = Mock()
         mock_sandbox = Mock()
         mock_services.sandbox = mock_sandbox
+        # Разрешаем проверку аккаунта в песочнице
+        mock_accounts_resp = Mock()
+        mock_acc = Mock()
+        mock_acc.id = self.account_id
+        mock_accounts_resp.accounts = [mock_acc]
+        mock_sandbox.get_sandbox_accounts = AsyncMock(return_value=mock_accounts_resp)
         
         # Мокаем ответ от API
         mock_response = Mock()
@@ -250,6 +256,12 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_services = Mock()
         mock_sandbox = Mock()
         mock_services.sandbox = mock_sandbox
+        # Разрешаем проверку аккаунта в песочнице
+        mock_accounts_resp = Mock()
+        mock_acc = Mock()
+        mock_acc.id = self.account_id
+        mock_accounts_resp.accounts = [mock_acc]
+        mock_sandbox.get_sandbox_accounts = AsyncMock(return_value=mock_accounts_resp)
         
         # Мокаем исключение
         mock_sandbox.post_sandbox_order = AsyncMock(side_effect=Exception("API Error"))
@@ -274,6 +286,12 @@ class TestTinkoffAPIClient(unittest.TestCase):
         mock_services = Mock()
         mock_sandbox = Mock()
         mock_services.sandbox = mock_sandbox
+        # Разрешаем проверку аккаунта в песочнице
+        mock_accounts_resp = Mock()
+        mock_acc = Mock()
+        mock_acc.id = self.account_id
+        mock_accounts_resp.accounts = [mock_acc]
+        mock_sandbox.get_sandbox_accounts = AsyncMock(return_value=mock_accounts_resp)
         
         # Мокаем ответ от API
         mock_response = Mock()

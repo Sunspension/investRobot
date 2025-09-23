@@ -6,6 +6,7 @@ from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
 from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.utils.logger import get_logger
 from robotlib.signal_types import Signal
 import asyncio
 
@@ -29,6 +30,7 @@ class SignalManager:
         visualization_sink: TradingEventSinkable | None = None,
     ):
         self._candles = deque(maxlen=2000)  # можно расширить, если нужно хранить сырые данные
+        self._logger = get_logger(__name__)
         
         self._macd = IncrementalMACD(
             fast_period=macd_fast,
@@ -64,7 +66,7 @@ class SignalManager:
             return self.add_candle(candle)
         return None
 
-    def add_candle(self, candle: Candle | HistoricCandle) -> Signal:
+    def add_candle(self, candle: Candle | HistoricCandle) -> Signal | None:
         price = Money(candle.close).to_float()
         # Инкрементальные обновления индикаторов
         macd_value = self._macd.update(price)
@@ -151,7 +153,16 @@ class SignalManager:
             trough_detected=any(idx in troughs for idx in recent_indices),
             candle=candle
         )
-        
+        # Логируем факт генерации сигнала (уровень INFO для видимости в проде)
+        try:
+            self._logger.info(
+                f"Signal emitted: hist={signal.histogram:.4f}, peak={signal.peak_detected}, "
+                f"trough={signal.trough_detected}, time={getattr(candle, 'time', None)}"
+            )
+        except Exception:
+            # Никогда не ломаем поток из-за логирования
+            pass
+
         # Возвращаем сигнал наверх (доставка во внешний sink выполняется на application-уровне)
         return signal
 

@@ -2,10 +2,13 @@
 Dash визуализатор событий торговой системы
 """
 import asyncio
+import logging
+import os
 import threading
 import json
 from typing import Any, Dict
 from datetime import datetime
+import pytz
 from visualization.event_visualizer_interface import EventVisualizerable
 from robotlib.visualization_interfaces import TradingEventSinkable
 from visualization.data_manager import DataManager
@@ -15,12 +18,11 @@ from visualization.logging_config import disable_verbose_logging, QuietFlaskServ
 from visualization.services.market_status_service import MarketStatusService
 from visualization.channels.ws import WebSocketHub
 from visualization.callbacks.core_callbacks import register_core_callbacks
-from visualization.services.portfolio_loader import PortfolioLoader
-from visualization.services.historical_loader import HistoricalLoader
 from robotlib.utils.logger import get_logger
 from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent
 from visualization.adapters.sink_impl import VisualizationSinkAdapter
+from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 
 # Dash импорты
 from dash import Dash, html
@@ -30,11 +32,15 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
     """Dash визуализатор событий торговой системы"""
     
     def __init__(
-        self, 
-        figi: str = "FUTIMOEXF000", 
-        host: str = "127.0.0.1", 
+        self,
+        figi: str = "FUTIMOEXF000",
+        host: str = "127.0.0.1",
         port: int = 8050,
-        start_server: bool = True
+        start_server: bool = True,
+        *,
+        data_manager: DataManager,
+        chart_builder: ChartBuilder,
+        ui_components: UIComponents,
     ):
         self._figi = figi
         self._host = host
@@ -43,10 +49,10 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         self._running = False
         self._logger = get_logger(__name__)
         
-        # Создаем компоненты визуализатора
-        self._data_manager = DataManager()
-        self._chart_builder = ChartBuilder()
-        self._ui_components = UIComponents(figi, self._chart_builder)
+        # Зависимости инъецируются извне
+        self._data_manager = data_manager
+        self._chart_builder = chart_builder
+        self._ui_components = ui_components
         
         # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
         self._init_portfolio()
@@ -71,7 +77,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         Plotly рендерит даты в часовом поясе браузера, поэтому используем naive-дату в МСК.
         """
         try:
-            import pytz
             msk = pytz.timezone('Europe/Moscow')
             if dt is None:
                 return datetime.now(msk).replace(tzinfo=None)
@@ -81,29 +86,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             return dt.astimezone(msk).replace(tzinfo=None)
         except Exception:
             return dt
-    
-    def _load_historical_data(self) -> None:
-        """Загружает исторические данные из базы"""
-        try:
-            import os
-            db_path = os.path.join(os.getcwd(), "data", "candles.db")
-            if os.path.exists(db_path):
-                self._logger.info(f"🔄 Загружаем исторические данные из {db_path}")
-                self._data_manager.load_historical_candles(db_path, self._figi, limit=200)
-                self._logger.info(f"✅ Загружено {len(self._data_manager.candles_data)} свечей")
-                self._logger.info(f"📊 Сигналы: BUY={self._data_manager.buy_count}, SELL={self._data_manager.sell_count}")
-            else:
-                self._logger.warning(f"⚠️ База данных не найдена: {db_path}")
-        except Exception as e:
-            self._logger.error(f"❌ Ошибка загрузки исторических данных: {e}")
-            import traceback
-            self._logger.error(f"Traceback: {traceback.format_exc()}")
-        
-        # Отключаем избыточные логи
-        self._disable_verbose_logging()
-        
-        # Настраиваем обработчики событий
-        self._setup_event_handlers()
     
     def _init_portfolio(self) -> None:
         """Инициализирует портфель с нулевыми значениями"""
@@ -123,130 +105,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             
         except Exception as e:
             self._logger.error(f"Ошибка инициализации портфеля: {e}")
-
-    async def _load_portfolio_from_api(self) -> None:
-        """Загружает данные портфеля от API"""
-        try:
-            from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
-            from robotlib.trading.portfolio_manager import PortfolioManager
-            from config_data.config import load_config
-            
-            config = load_config()
-            
-            async with TinkoffAPIClient(
-                token=config.tcs_client.token,
-                account_id=config.tcs_client.account_id,
-                sandbox_token=config.tcs_client.sandbox_token
-            ) as api_client:
-                portfolio_manager = PortfolioManager(api_client)
-                portfolio = await portfolio_manager.get_portfolio()
-                
-                # Конвертируем данные портфеля в формат для визуализатора
-                portfolio_data = {
-                    'total_amount': portfolio.total_amount,
-                    'positions': [
-                        {
-                            'figi': pos.figi,
-                            'quantity': pos.quantity,
-                            'average_price': pos.average_price,
-                            'current_price': pos.current_price,
-                            'unrealized_pnl': pos.unrealized_pnl,
-                            'realized_pnl': pos.realized_pnl
-                        }
-                        for pos in portfolio.positions
-                    ],
-                    'pnl': portfolio.pnl,
-                    'margin': portfolio.blocked_amount,
-                    'free_margin': portfolio.available_amount,
-                    'variation_margin': 0.0,  # Пока не реализовано в API
-                    'guarantee_deposit': 0.0,  # Пока не реализовано в API
-                    'last_update': datetime.now()
-                }
-                
-                self._data_manager.update_portfolio(portfolio_data)
-                self._logger.info(f"Портфель загружен от API: {portfolio.total_amount:.2f} ₽, {len(portfolio.positions)} позиций")
-                
-        except Exception as e:
-            self._logger.error(f"Ошибка загрузки портфеля от API: {e}")
-
-    def _add_demo_data(self) -> None:
-        """Добавляет демонстрационные данные"""
-        try:
-            # Добавляем демо-свечи
-            import random
-            from datetime import datetime, timedelta
-            
-            base_price = 2900.0
-            for i in range(50):  # 50 свечей
-                candle_time = datetime.now() - timedelta(minutes=50-i)
-                price_change = random.uniform(-5, 5)
-                open_price = base_price + price_change
-                high_price = open_price + random.uniform(0, 3)
-                low_price = open_price - random.uniform(0, 3)
-                close_price = open_price + random.uniform(-2, 2)
-                volume = random.randint(100, 1000)
-                
-                base_price = close_price
-                
-                candle_data = {
-                    'time': candle_time,
-                    'open': open_price,
-                    'high': high_price,
-                    'low': low_price,
-                    'close': close_price,
-                    'volume': volume
-                }
-                self._data_manager.add_candle(candle_data)
-            
-            # Добавляем демо-сигналы
-            for i in range(5):
-                signal_data = {
-                    'time': datetime.now() - timedelta(minutes=i*10),
-                    'type': 'buy' if i % 2 == 0 else 'sell',
-                    'strength': random.uniform(0.5, 2.0),
-                    'macd': random.uniform(-5, 5),
-                    'signal_line': random.uniform(-3, 3),
-                    'histogram': random.uniform(-2, 2),
-                    'price': base_price + random.uniform(-10, 10),  # Добавляем цену
-                    'reason': f'MACD сигнал #{i+1}',
-                    'quantity': random.randint(1, 10),
-                    'strategy': 'LongStrategy' if i % 2 == 0 else 'ShortStrategy'
-                }
-                self._data_manager.add_signal(signal_data)
-            
-            # Добавляем демо-портфель
-            portfolio_data = {
-                'total_amount': 100000.0,
-                'positions': [],
-                'pnl': 1250.50,
-                'margin': 5000.0,
-                'free_margin': 95000.0,
-                'variation_margin': 2500.0,  # Добавляем вариационную маржу
-                'guarantee_deposit': 10000.0,  # Добавляем гарантийное обеспечение
-                'last_update': datetime.now()
-            }
-            self._data_manager.update_portfolio(portfolio_data)
-            
-            # Добавляем демо-стратегии
-            strategies_data = [
-                {
-                    'name': 'LongStrategy',
-                    'position': 0,
-                    'income': 0.0
-                },
-                {
-                    'name': 'ShortStrategy', 
-                    'position': 0,
-                    'income': 0.0
-                }
-            ]
-            self._data_manager.update_strategies_data(strategies_data)
-            
-            self._logger.info("Демо-данные добавлены успешно")
-            
-        except Exception as e:
-            self._logger.error(f"Ошибка добавления демо-данных: {e}")
-    
     
     async def handle_candle_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие свечи"""
@@ -374,42 +232,18 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             await adapter.on_market_status(status)
         except Exception as e:
             self._logger.error(f"Ошибка on_market_status: {e}")
-    
-    def _disable_verbose_logging(self) -> None:
-        """Отключает избыточные логи"""
-        disable_verbose_logging(enable_debug_logs=True)
-        # Включаем логи для callback'ов
-        import logging
-        logging.getLogger('dash').setLevel(logging.INFO)
-        logging.getLogger('werkzeug').setLevel(logging.WARNING)
-    
+
     async def start(self) -> None:
         """Запускает визуализатор"""
         if self._running:
             self._logger.warning("Визуализатор уже запущен")
             return
-        
         try:
-            # До старта UI заполним DataManager актуальным статусом рынка, чтобы не было заглушек
             try:
-                from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
                 ms = await get_market_status_enhanced()
                 self._data_manager.update_market_status(ms)
             except Exception as e:
                 self._logger.warning(f"Не удалось предзаполнить статус рынка: {e}")
-
-            # Загружаем данные портфеля от API (через сервис)
-            try:
-                from config_data.config import load_config
-                cfg = load_config()
-                await PortfolioLoader().load_into(
-                    self._data_manager,
-                    token=cfg.tcs_client.token,
-                    account_id=cfg.tcs_client.account_id,
-                    sandbox_token=cfg.tcs_client.sandbox_token,
-                )
-            except Exception as e:
-                self._logger.warning(f"Не удалось загрузить портфель через сервис: {e}")
 
             # Устанавливаем флаг запуска, после предзаполнения данных
             self._running = True
@@ -437,8 +271,7 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             self._start_ticker()
             # Параллельно запускаем периодический опрос статуса рынка
             try:
-                import asyncio as _asyncio
-                _asyncio.create_task(self._periodic_market_status_refresh())
+                asyncio.create_task(self._periodic_market_status_refresh())
             except Exception as e:
                 self._logger.warning(f"Не удалось запустить опрос статуса рынка: {e}")
             
@@ -494,7 +327,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         app.scripts.config.serve_locally = True
         
         # Добавляем маршрут для статических файлов
-        import os
         assets_path = os.path.join(os.path.dirname(__file__), 'assets')
         if os.path.exists(assets_path):
             app.server.add_url_rule('/assets/<path:filename>', 'assets', 
@@ -566,11 +398,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         except Exception as e:
             self._logger.warning(f"Не удалось добавить диагностические эндпоинты: {e}")
         
-        # Начальная подгрузка исторических свечей из БД (больше окна)
-        try:
-            HistoricalLoader().load_into(self._data_manager, self._figi, limit=500)
-        except Exception as e:
-            self._logger.warning(f"Не удалось загрузить исторические данные: {e}")
 
         # Прогреем стратегии историческими барами из DataManager без размещения ордеров
         try:
@@ -583,10 +410,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             pass
         except Exception as e:
             self._logger.debug(f"Прогрев стратегий пропущен: {e}")
-        
-        # Убираем принудительный вызов callback'а - исправим основной callback
-        
-        # Убираем принудительный вызов callback'а - исправим основной callback
         
         return app
 
@@ -606,107 +429,13 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
                 ms = await get_market_status_enhanced()
                 self._data_manager.update_market_status(ms)
                 self._broadcast_ws({"type": "market_status", "is_trading": ms.get('is_trading', False)})
-                # Периодически обновляем портфель, чтобы баланс отражал последние сделки
-                try:
-                    from config_data.config import load_config
-                    cfg = load_config()
-                    await PortfolioLoader().load_into(
-                        self._data_manager,
-                        token=cfg.tcs_client.token,
-                        account_id=cfg.tcs_client.account_id,
-                        sandbox_token=cfg.tcs_client.sandbox_token,
-                    )
-                except Exception as _e:
-                    self._logger.debug(f"Обновление портфеля пропущено: {_e}")
-                # Автодогрузка пропущенных свечей из БД, если был разрыв
-                try:
-                    snapshot = self._data_manager.get_data_snapshot()
-                    candles = snapshot.get('candles_data', [])
-                    if candles:
-                        last_time = candles[-1]['time']
-                        from datetime import datetime, timedelta
-                        import os
-                        db_path = os.path.join(os.getcwd(), "data", "market.db")
-                        # если больше 3 минут без новых данных — догружаем из БД окно 15 минут
-                        if isinstance(last_time, datetime) and (datetime.now() - last_time) > timedelta(minutes=3):
-                            self._logger.info("Автодогрузка пропущенных свечей из БД")
-                            self._data_manager.merge_historical_candles(
-                                db_path=db_path,
-                                figi=self._figi,
-                                from_time=last_time,
-                                to_time=None,
-                            )
-                            self._broadcast_ws({"type": "candle_backfill"})
-                        # Поиск внутренних разрывов внутри последних 300 баров и догрузка этих окон
-                        try:
-                            window = candles[-300:] if len(candles) > 300 else candles
-                            gap_pairs = []
-                            for i in range(1, len(window)):
-                                t_prev = window[i-1]['time']
-                                t_curr = window[i]['time']
-                                if isinstance(t_prev, datetime) and isinstance(t_curr, datetime):
-                                    if (t_curr - t_prev).total_seconds() > 90:  # gap > 1.5 мин
-                                        gap_pairs.append((t_prev, t_curr))
-                            if gap_pairs:
-                                self._logger.info(f"Найдены разрывы свечей: {len(gap_pairs)}. Догружаем из БД…")
-                                for start, end in gap_pairs[:5]:  # ограничим до 5 окон за цикл
-                                    self._data_manager.merge_historical_candles(
-                                        db_path=db_path,
-                                        figi=self._figi,
-                                        from_time=start,
-                                        to_time=end,
-                                    )
-                                self._broadcast_ws({"type": "candle_gap_backfill"})
-                        except Exception as __e:
-                            self._logger.debug(f"Проверка/догрузка внутренних разрывов пропущена: {__e}")
-                    # Обновляем список ордеров из БД за текущий день для текущего FIGI
-                    try:
-                        import os as _os
-                        import sqlite3 as _sqlite3
-                        from datetime import datetime as _dt
-                        from visualization.formatters import to_moscow_time as _to_msk
-                        db_path_orders = _os.path.join(_os.getcwd(), "data", "market.db")
-                        with _sqlite3.connect(db_path_orders) as _conn:
-                            cur = _conn.cursor()
-                            rows = cur.execute(
-                                """
-                                SELECT time, type, price, quantity, strategy
-                                FROM orders
-                                WHERE figi = ?
-                                  AND date(time,'localtime') = date('now','localtime')
-                                ORDER BY time ASC
-                                LIMIT 500
-                                """,
-                                (self._figi,)
-                            ).fetchall()
-                        orders = []
-                        for t, typ, price, qty, strategy in rows:
-                            try:
-                                dtv = _dt.fromisoformat(t)
-                            except Exception:
-                                continue
-                            orders.append({
-                                'time': _to_msk(dtv),
-                                'type': (typ or '').lower(),
-                                'price': float(price),
-                                'quantity': int(qty) if qty is not None else 1,
-                                'strategy': strategy,
-                            })
-                        if orders:
-                            self._data_manager.update_orders(orders)
-                            # Тригерим обновление UI после синка ордеров
-                            self._broadcast_ws({"type": "orders_sync"})
-                    except Exception as __e:
-                        self._logger.debug(f"Обновление ордеров пропущено: {__e}")
-                except Exception as _e:
-                    self._logger.debug(f"Автодогрузка пропусков пропущена: {_e}")
             except Exception as e:
                 self._logger.debug(f"Ошибка обновления статуса рынка: {e}")
             # Обновляем раз в 30 секунд
             await asyncio.sleep(30)
     
     def _create_layout(self) -> html.Div:
-        """Создает макет приложения с богатым UI из TradingVisualizerAdapter"""
+        """Создает основной макет приложения с полным UI"""
         return self._ui_components._create_layout()
     
     def _setup_callbacks(self, app: Dash) -> None:

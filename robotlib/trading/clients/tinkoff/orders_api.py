@@ -61,6 +61,7 @@ async def place_order(client, figi: str, direction: OrderDirection, quantity: in
 
     if getattr(response, "order_id", None):
         return OrderResult(success=True, order_id=response.order_id, executed_price=price, executed_quantity=quantity)
+    # Если ответа нет или нет order_id, пробуем вытащить сообщение из метаданных/исключения (для песочницы обычно None)
     return OrderResult(success=False, error_message="Не удалось получить ID приказа")
 
 

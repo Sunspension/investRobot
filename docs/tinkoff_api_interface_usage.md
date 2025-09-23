@@ -88,7 +88,7 @@ async def main():
     # Создаем реальный API клиент
     api_client = TinkoffAPIClient(
         token=config.tcs_client.token,
-        account_id=config.tcs_client.id,
+        account_id=config.tcs_client.account_id,
         sandbox_token=config.tcs_client.sandbox_token
     )
     

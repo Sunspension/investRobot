@@ -38,7 +38,7 @@ class AccountConfig:
     
     # Настройки процесса
     process_name: Optional[str] = None
-    log_level: str = "INFO"
+    log_level: str = "DEBUG"
     
     def __post_init__(self):
         """Инициализация значений по умолчанию после создания"""
