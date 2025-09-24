@@ -512,6 +512,7 @@ class TinkoffAPIClient:
             self._logger.error(f"Ошибка получения истории операций: {e}")
             return None
     
+    
     # Методы для работы с инструментами
     async def get_instrument_by_figi(self, figi: str):
         """Получает информацию об инструменте по FIGI"""
@@ -581,7 +582,16 @@ class TinkoffAPIClient:
         """Получает список аккаунтов"""
         try:
             await self._limiter_get.acquire()
-            return await self._services.users.get_accounts()
+            # Сначала пробуем users.get_accounts (для совместимости тестов/моков)
+            try:
+                res_users = self._services.users.get_accounts()
+                return await res_users if inspect.isawaitable(res_users) else res_users
+            except Exception:
+                # В режиме песочницы пробуем sandbox variant
+                if self.is_sandbox:
+                    res_sb = self._services.sandbox.get_sandbox_accounts()
+                    return await res_sb if inspect.isawaitable(res_sb) else res_sb
+                raise
         except Exception as e:
             self._logger.error(f"Ошибка получения аккаунтов: {e}")
             return None

@@ -56,12 +56,23 @@ class TradingSystemContainer:
     
     async def _create_strategies(self):
         """Создает стратегии с их зависимостями"""
-        # Создаем PositionSizingService
-        # Временно отключаем динамический сайзинг, чтобы исключить размер=0
+        # Создаем PositionSizingService с динамикой, масштаб — от RiskManager
+        rm = await self.get_risk_manager()
+        pm = await self.get_portfolio_manager()
+        cfg = PositionSizingConfig(
+            enable_dynamic_sizing=True,
+            min_lots=1,
+            max_lots=100,
+        )
+        try:
+            cfg.system_state_scale = await rm.get_system_state_scale()
+            cfg.active_orders_go_estimate = rm.get_active_orders_go_estimate()
+        except Exception:
+            pass
         position_sizing_service = PositionSizingService(
-            risk_manager=await self.get_risk_manager(),
-            portfolio_manager=await self.get_portfolio_manager(),
-            config=PositionSizingConfig(enable_dynamic_sizing=False, min_position_size=10)
+            risk_manager=rm,
+            portfolio_manager=pm,
+            config=cfg,
         )
         
         # Создаем стратегии
@@ -114,8 +125,10 @@ class TradingSystemContainer:
             self._instances['risk_manager'] = RiskManager(
                 portfolio_manager=await self.get_portfolio_manager(),
                 risk_limits=RiskLimits(
-                    max_daily_loss=50000.0,  # Дефолтное значение
-                    max_position_size=100000.0  # Дефолтное значение
+                    max_daily_loss=50000.0,
+                    trading_enabled=True,
+                    max_position_go=None,
+                    max_open_positions=None,
                 )
             )
         return self._instances['risk_manager']
@@ -139,12 +152,19 @@ class TradingSystemContainer:
                 self._logger.warning(f"DBIngestionSink недоступен, ордера не будут писаться: {e}")
                 order_sink = None
             
-            # Передаём portfolio_manager и data_manager для публикации портфеля после ордеров
+            # Подключаем UI listener для ордеров
+            viz = self.get_visualizer()
+            dm = getattr(viz, "_data_manager", None)
+            if self._config.enable_visualization and dm is None:
+                raise RuntimeError("DataManager не инициализирован при включенной визуализации")
+            from visualization.adapters.sink_impl import VisualizationSinkAdapter
+            listeners = []
+            if dm is not None:
+                listeners.append(VisualizationSinkAdapter(dm, viz._broadcast_ws))
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
                 order_sink=order_sink,
-                portfolio_manager=await self.get_portfolio_manager(),
-                data_manager=getattr(self.get_visualizer(), "_data_manager", None)
+                listeners=listeners,
             )
         return self._instances['order_executor']
     
@@ -197,7 +217,7 @@ class TradingSystemContainer:
             self._instances['market_data_stream'] = MarketDataStream(
                 api_client=api_client,
                 figi=self._config.figi,
-                cache_size=1000,
+                cache_size=100,
                 watchdog_enabled=stream_cfg.watchdog_enabled,
                 watchdog_stale_seconds=stream_cfg.watchdog_stale_seconds,
                 watchdog_require_open_market=stream_cfg.watchdog_require_open_market,
@@ -205,7 +225,7 @@ class TradingSystemContainer:
             # Инжектим sink в поток рыночных данных
             visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             if isinstance(visualizer, TradingEventSinkable):
-                self._instances['market_data_stream'].set_visualization_sink(visualizer)
+                self._instances['market_data_stream'].set_event_sink(visualizer)
             # Подключаем стратегии к потоку свечей (генерация сигналов)
             try:
                 strategy_manager = await self.get_strategy_manager()

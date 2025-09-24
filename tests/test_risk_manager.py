@@ -8,7 +8,6 @@ import asyncio
 from datetime import datetime
 
 from robotlib.trading.risk_manager import RiskManager, RiskLimits, RiskCheck, RiskLevel
-from robotlib.trading.portfolio_manager import Portfolio, Position
 
 
 class TestRiskLimits(unittest.TestCase):
@@ -18,17 +17,13 @@ class TestRiskLimits(unittest.TestCase):
         """Тест создания RiskLimits"""
         limits = RiskLimits(
             max_daily_loss=2500,
-            max_position_size=50000,
-            percent_from_deposit=50,
-            items_per_trade=20,
-            stop_loss_threshold=8
+            trading_enabled=True,
+            max_position_go=None,
+            max_open_positions=None,
         )
         
         self.assertEqual(limits.max_daily_loss, 2500)
-        self.assertEqual(limits.max_position_size, 50000)
-        self.assertEqual(limits.percent_from_deposit, 50)
-        self.assertEqual(limits.items_per_trade, 20)
-        self.assertEqual(limits.stop_loss_threshold, 8)
+        self.assertTrue(hasattr(limits, 'trading_enabled'))
 
 
 class TestRiskCheck(unittest.TestCase):
@@ -69,10 +64,9 @@ class TestRiskManager(unittest.TestCase):
         """Настройка тестов"""
         self.limits = RiskLimits(
             max_daily_loss=2500,
-            max_position_size=50000,
-            percent_from_deposit=50,
-            items_per_trade=20,
-            stop_loss_threshold=8
+            trading_enabled=True,
+            max_position_go=None,
+            max_open_positions=None,
         )
         
         self.risk_manager = RiskManager(
@@ -105,7 +99,6 @@ class TestRiskManager(unittest.TestCase):
             result = await self.risk_manager.check_trade_risk(
                 figi="FUTIMOEXF000",
                 quantity=1,
-                price=100.0,
                 direction="buy"
             )
             
@@ -129,8 +122,7 @@ class TestRiskManager(unittest.TestCase):
             
             result = await self.risk_manager.check_trade_risk(
                 figi="FUTIMOEXF000",
-                quantity=100,  # Большое количество > items_per_trade (20)
-                price=100.0,
+                quantity=100,  # Большое количество
                 direction="buy"
             )
             
@@ -157,7 +149,7 @@ class TestRiskManager(unittest.TestCase):
             self.assertIn('portfolio_value', report)
             self.assertIn('available_funds', report)
             self.assertIn('daily_loss', report)
-            self.assertIn('percent_from_deposit', report['risk_limits'])
+            self.assertIn('max_daily_loss', report['risk_limits'])
             self.assertIn('risk_limits', report)
     
     @pytest.mark.asyncio

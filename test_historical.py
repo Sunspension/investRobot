@@ -94,10 +94,8 @@ async def test_historical_trading(
         # Создаем компоненты системы
         risk_limits = RiskLimits(
             max_daily_loss=40000,
-            max_position_size=200000,
-            percent_from_deposit=50,
-            items_per_trade=20,  # Убеждаемся, что не 0
-            stop_loss_threshold=5.0
+            trading_enabled=True,
+            max_position_go=200000,
         )
         
         # Создаем менеджеры

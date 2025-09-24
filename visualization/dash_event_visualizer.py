@@ -6,7 +6,7 @@ import logging
 import os
 import threading
 import json
-from typing import Any, Dict
+from typing import Dict, Callable, Any
 from datetime import datetime
 import pytz
 from visualization.event_visualizer_interface import EventVisualizerable
@@ -23,6 +23,8 @@ from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent
 from visualization.adapters.sink_impl import VisualizationSinkAdapter
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
+from robotlib.signal_types import Signal
+from tinkoff.invest import Candle, HistoricCandle
 
 # Dash импорты
 from dash import Dash, html
@@ -120,7 +122,7 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка обработки события свечи: {e}")
 
-    async def on_candle(self, candle: Any, price: float, figi: str) -> None:
+    async def on_candle(self, candle: Candle | HistoricCandle, price: float, figi: str) -> None:
         try:
             candle_time = getattr(candle, 'time', datetime.now())
             candle_data = {
@@ -154,7 +156,7 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка обработки события сигнала: {e}")
 
-    async def on_signal(self, signal: Any, figi: str, price: float) -> None:
+    async def on_signal(self, signal: Signal, figi: str, price: float) -> None:
         try:
             signal_data = {
                 'time': datetime.now(),
@@ -329,8 +331,11 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         # Добавляем маршрут для статических файлов
         assets_path = os.path.join(os.path.dirname(__file__), 'assets')
         if os.path.exists(assets_path):
-            app.server.add_url_rule('/assets/<path:filename>', 'assets', 
-                                  lambda filename: app.server.send_static_file(f'assets/{filename}'))
+            app.server.add_url_rule(
+                '/assets/<path:filename>',
+                'assets',
+                lambda filename: app.server.send_static_file(f'assets/{filename}')
+            )
         
         # Используем кастомный HTML шаблон из UIComponents
         app.index_string = self._ui_components._get_custom_html_template()
@@ -440,9 +445,6 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
     
     def _setup_callbacks(self, app: Dash) -> None:
         """Зарезервировано для совместимости; основные callbacks вынесены."""
-    
-    # Удалены устаревшие методы статуса рынка: используется MarketStatusService
-    
     
     def _get_strategy_status(self):
         """Получает статус стратегий"""

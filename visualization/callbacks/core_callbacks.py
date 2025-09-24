@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any, Dict
+from typing import Dict
 
 from dash import Dash, Input, Output, State, html
 from plotly.graph_objects import Figure
 
 
-def register_core_callbacks(app: Dash, *, ui_components, chart_builder, data_manager, logger, market_status_service=None):
+def register_core_callbacks(
+    app: Dash,
+    *,
+    ui_components,
+    chart_builder,
+    data_manager,
+    logger,
+    market_status_service=None
+):
     @app.callback(
         [Output('trading-graph', 'figure'),
          Output('current-price', 'children'),

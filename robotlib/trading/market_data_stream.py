@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone, time
 from typing import Callable, Optional, List
 from collections import deque
 import pytz
-from tinkoff.invest import Candle, CandleInterval
+from tinkoff.invest import Candle, HistoricCandle, CandleInterval
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
 from robotlib.utils.logger import get_logger
@@ -17,6 +17,7 @@ from robotlib.visualization_interfaces import TradingEventSinkable
 from robotlib.utils.backoff import compute_backoff_delay
 from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
+from robotlib.utils.money import Money
 
 
 class TinkoffStreamAdapter:
@@ -88,13 +89,12 @@ class MarketDataStream(MarketDataStreamable):
         self._current_price: Optional[float] = None
         self._sink: Optional[TradingEventSinkable] = None
         self._last_candle_at: Optional[datetime] = None
-        # Watchdog config (injected)
         self._watchdog_enabled = watchdog_enabled
         self._watchdog_stale_seconds = watchdog_stale_seconds
         self._watchdog_require_open_market = watchdog_require_open_market
 
-    def set_visualization_sink(self, sink: TradingEventSinkable) -> None:
-        """Устанавливает приемник визуализации."""
+    def set_event_sink(self, sink: TradingEventSinkable) -> None:
+        """Устанавливает приемник событий (candle/signal/market_status)."""
         self._sink = sink
     
     @property
@@ -114,8 +114,10 @@ class MarketDataStream(MarketDataStreamable):
     
     def _is_api_client_ready(self) -> bool:
         """Проверяет, готов ли API клиент к использованию"""
-        return (self._api_client is not None and 
-                self._api_client.services is not None)
+        return (
+            self._api_client is not None and 
+            self._api_client.services is not None
+        )
     
     async def start(self) -> bool:
         """
@@ -142,6 +144,13 @@ class MarketDataStream(MarketDataStreamable):
             
             # Создаем адаптер для убирания путаницы с названиями
             self._stream_adapter = TinkoffStreamAdapter(raw_stream_manager)
+            
+            # Gap-fill: если у нас есть последняя свеча, дозаполним пропуски REST'ом
+            try:
+                if self._last_candle_at is not None:
+                    asyncio.create_task(self._gap_fill_missing_candles())
+            except Exception:
+                pass
             
             # Проверяем статус рынка (расширенная логика с типом сессии и таймерами)
             market_status = await get_market_status_enhanced()
@@ -224,6 +233,49 @@ class MarketDataStream(MarketDataStreamable):
         """Сбрасывает флаг остановки для возможности перезапуска"""
         self._is_running = False
     
+    async def _gap_fill_missing_candles(self) -> None:
+        """Дозагружает недостающие свечи с момента последней полученной до текущего времени.
+        
+        Использует REST-метод get_candles, публикует их через sink.on_candle, сохраняя семантику пайплайна.
+        """
+        try:
+            if self._last_candle_at is None:
+                return
+            # Нормализуем к aware-UTC и сдвигаем старт на +1с, чтобы избежать дубликата
+            from_time = self._last_candle_at
+            if getattr(from_time, 'tzinfo', None) is None:
+                from_time = from_time.replace(tzinfo=timezone.utc)
+            else:
+                from_time = from_time.astimezone(timezone.utc)
+            from_time = from_time + timedelta(seconds=1)
+            to_time = datetime.now(timezone.utc)
+            # Защитимся от некорректного порядка
+            if to_time <= from_time:
+                return
+            candles = await self._api_client.get_candles(
+                self._figi,
+                from_time,
+                to_time,
+                CandleInterval.CANDLE_INTERVAL_1_MIN,
+            )
+            if not candles:
+                return
+            # Преобразуем и публикуем через sink для единообразия (и записи в БД, если sink=DBIngestionSink)
+            for c in candles:
+                try:
+                    # Расчет цены как в stream-пути
+                    price = float(getattr(c.close, 'units', 0) + getattr(c.close, 'nano', 0) / 1e9)
+                except Exception:
+                    try:
+                        price = Money(c.close).to_float()
+                    except Exception:
+                        price = 0.0
+                if self._sink is not None:
+                    asyncio.create_task(self._sink.on_candle(c, price, self._figi))
+            self._logger.info(f"Gap-fill: дозагружено {len(candles)} свечей с {from_time} по {to_time}")
+        except Exception as e:
+            self._logger.warning(f"Gap-fill: ошибка дозагрузки свечей: {e}")
+    
     async def _process_stream(self) -> None:
         """Обрабатывает данные из стрима"""
         try:
@@ -251,6 +303,11 @@ class MarketDataStream(MarketDataStreamable):
                     retries = 0
                     # Отключаем текущий цикл обработки
                     self._is_running = True  # позволяем циклу переподключений работать
+                    # Gap-fill перед попыткой реконнекта (асинхронно)
+                    try:
+                        asyncio.create_task(self._gap_fill_missing_candles())
+                    except Exception:
+                        pass
                     while self._is_running:
                         delay = compute_backoff_delay(retries, base_seconds=0.5, max_seconds=30.0, jitter="full")
                         self._logger.info(f"Повторное подключение через {delay:.2f}с (попытка {retries+1})")
@@ -277,8 +334,8 @@ class MarketDataStream(MarketDataStreamable):
             candle: Свеча от API
         """
         try:
-            if not candle:
-                self._logger.warning("Получена пустая свеча")
+            if not isinstance(candle, (Candle, HistoricCandle)):
+                self._logger.debug("Получено не-свечное сообщение, пропускаем")
                 return
                 
             # Проверяем, что свеча для нашего инструмента
@@ -289,7 +346,18 @@ class MarketDataStream(MarketDataStreamable):
             # Обновляем кэш и текущую цену
             self._cached_candles.append(candle)
             self._current_price = candle.close.units + candle.close.nano / 1_000_000_000
-            self._last_candle_at = datetime.now()
+            # Сохраняем время последней свечи как aware-UTC (fallback: now UTC)
+            try:
+                lc_time = getattr(candle, 'time', None)
+                if lc_time is None:
+                    self._last_candle_at = datetime.now(timezone.utc)
+                else:
+                    if getattr(lc_time, 'tzinfo', None) is None:
+                        self._last_candle_at = lc_time.replace(tzinfo=timezone.utc)
+                    else:
+                        self._last_candle_at = lc_time.astimezone(timezone.utc)
+            except Exception:
+                self._last_candle_at = datetime.now(timezone.utc)
             
             # Логируем получение свечи
             figi_info = getattr(candle, 'figi', self._figi)

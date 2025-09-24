@@ -27,13 +27,12 @@ class RiskLevel(Enum):
 class RiskLimits:
     """Лимиты риска"""
     # Глобальные лимиты (защита от системных рисков)
-    max_daily_loss: float        # Максимальная дневная потеря в рублях
-    max_position_size: float     # Максимальный размер позиции в рублях
-    
-    # Параметры стратегий (торговая логика)
-    percent_from_deposit: float = 50.0    # Процент от депозита для торговли
-    items_per_trade: int = 20             # Максимальное количество лотов за сделку
-    stop_loss_threshold: float = 8.0      # Стоп-лосс в пунктах
+    max_daily_loss: float # Максимальная дневная потеря (руб)
+    trading_enabled: bool = True # Глобальный выключатель торговли
+    # Опционально: потолок по суммарному ГО (руб) для инструмента/портфеля
+    max_position_go: float | None = None
+    # Опционально: максимум открытых позиций
+    max_open_positions: int | None = None
 
 
 @dataclass
@@ -43,6 +42,7 @@ class RiskCheck:
     risk_level: RiskLevel
     message: str
     recommendation: Optional[str] = None
+    code: Optional[str] = None  # машинно-читаемый код нарушения
 
 
 class RiskManager:
@@ -63,21 +63,61 @@ class RiskManager:
         self.portfolio_manager = portfolio_manager
         self._risk_limits = risk_limits
         self._logger = get_logger(__name__)
-        
         # История убытков
         self._daily_losses: Dict[str, float] = {}
         self._trade_history: List[Dict] = []
+        # Масштаб состояния системы [0..1] и оценка ГО активных заявок (если нет прямых данных)
+        self._system_state_scale: float = 1.0
+        self._active_orders_go_estimate: float = 0.0
     
     @property
     def risk_limits(self) -> RiskLimits:
         """Возвращает лимиты рисков"""
         return self._risk_limits
+
+    async def get_system_state_scale(self) -> float:
+        """Возвращает масштаб состояния системы [0..1] на основе дневной просадки.
+        1.0 — нормальный режим, 0.6 — умеренная просадка, 0.3 — сильная, 0.0 — стоп.
+        """
+        try:
+            # Если вручную задан (например, внешней политикой) и он не 1.0 — используем его
+            if self._system_state_scale != 1.0:
+                return max(0.0, min(1.0, self._system_state_scale))
+
+            max_daily = max(0.0, float(self._risk_limits.max_daily_loss))
+            if max_daily <= 0:
+                return 1.0
+            cur_loss = await self._get_daily_loss()
+            ratio = cur_loss / max_daily if max_daily > 0 else 0.0
+            if ratio >= 1.0:
+                return 0.0
+            if ratio >= 0.7:
+                return 0.3
+            if ratio >= 0.4:
+                return 0.6
+            return 1.0
+        except Exception:
+            return 1.0
+
+    def set_system_state_scale(self, value: float) -> None:
+        """Позволяет внешне задать масштаб состояния системы [0..1]."""
+        self._system_state_scale = max(0.0, min(1.0, float(value)))
+
+    def set_active_orders_go_estimate(self, value: float) -> None:
+        """Устанавливает оценку суммарного ГО, занятого активными заявками (руб)."""
+        try:
+            self._active_orders_go_estimate = max(0.0, float(value))
+        except Exception:
+            self._active_orders_go_estimate = 0.0
+
+    def get_active_orders_go_estimate(self) -> float:
+        """Возвращает оценку суммарного ГО, занятого активными заявками (руб)."""
+        return self._active_orders_go_estimate
     
     async def check_trade_risk(
         self,
         figi: str,
         quantity: int,
-        price: float,
         direction: str
     ) -> RiskCheck:
         """
@@ -86,86 +126,66 @@ class RiskManager:
         Args:
             figi: FIGI инструмента
             quantity: Количество лотов
-            price: Цена
             direction: Направление ("buy" или "sell")
             
         Returns:
             RiskCheck с результатом проверки
         """
         try:
-            trade_value = quantity * price
-            portfolio = await self.portfolio_manager.get_portfolio()
-            
-            # Проверка 1: Максимальное количество лотов за сделку
-            if quantity > self._risk_limits.items_per_trade:
+            # 0) Глобальный выключатель
+            if not self._risk_limits.trading_enabled:
                 return RiskCheck(
                     passed=False,
                     risk_level=RiskLevel.CRITICAL,
-                    message=f"Количество лотов {quantity} превышает лимит {self._risk_limits.items_per_trade}",
-                    recommendation="Уменьшите количество лотов"
+                    message="Торговля отключена",
+                    recommendation="Включите trading_enabled",
+                    code="trading_disabled",
                 )
-            
-            # Проверка 2: Максимальный размер позиции
-            current_position = await self.portfolio_manager.get_position(figi)
-            if current_position:
-                new_position_value = abs(current_position.quantity + quantity) * price
-                if new_position_value > self._risk_limits.max_position_size:
-                    return RiskCheck(
-                        passed=False,
-                        risk_level=RiskLevel.HIGH,
-                        message=f"Размер позиции {new_position_value:.2f} руб превышает лимит {self._risk_limits.max_position_size:.2f} руб",
-                        recommendation="Уменьшите размер позиции"
-                    )
-            
-            # Проверка 3: Достаточно средств для покупки
-            if direction == "buy":
-                if not await self.portfolio_manager.can_buy(figi, quantity, price):
-                    return RiskCheck(
-                        passed=False,
-                        risk_level=RiskLevel.HIGH,
-                        message="Недостаточно средств для покупки",
-                        recommendation="Пополните счет или уменьшите размер сделки"
-                    )
-            
-            # Проверка 4: Достаточно лотов для продажи
-            if direction == "sell":
-                if not await self.portfolio_manager.can_sell(figi, quantity):
-                    return RiskCheck(
-                        passed=False,
-                        risk_level=RiskLevel.HIGH,
-                        message="Недостаточно лотов для продажи",
-                        recommendation="Проверьте размер позиции"
-                    )
-            
-            # Проверка 5: Дневные убытки
+
+            # 1) Дневные убытки (kill switch)
             daily_loss = await self._get_daily_loss()
             if daily_loss > self._risk_limits.max_daily_loss:
                 return RiskCheck(
                     passed=False,
                     risk_level=RiskLevel.CRITICAL,
                     message=f"Дневные убытки {daily_loss:.2f} руб превышают лимит {self._risk_limits.max_daily_loss:.2f} руб",
-                    recommendation="Прекратите торговлю на сегодня"
+                    recommendation="Остановить торговлю на сегодня",
+                    code="daily_loss_limit_exceeded",
                 )
-            
-            # Проверка 6: Процент от депозита
-            current_deposit = await self.portfolio_manager.get_deposit()
-            money_limit = current_deposit * (self._risk_limits.percent_from_deposit / 100)
-            if trade_value > money_limit:
-                return RiskCheck(
-                    passed=False,
-                    risk_level=RiskLevel.HIGH,
-                    message=f"Размер сделки {trade_value:.2f} руб превышает лимит {money_limit:.2f} руб ({self._risk_limits.percent_from_deposit}% от депозита)",
-                    recommendation="Уменьшите размер сделки или увеличьте лимит"
-                )
-            
-            # Все проверки пройдены
-            risk_level = self._calculate_trade_risk_level(trade_value, portfolio)
-            
+
+            # 2) Потолок по суммарному ГО (если задан)
+            if self._risk_limits.max_position_go is not None:
+                per_lot_go = await self.portfolio_manager.get_guarantee_deposit(figi)
+                if per_lot_go > 0:
+                    current_pos = await self.portfolio_manager.get_position(figi)
+                    current_lots = abs(current_pos.quantity) if current_pos else 0
+                    new_go = (current_lots + abs(quantity)) * per_lot_go
+                    if new_go > float(self._risk_limits.max_position_go):
+                        return RiskCheck(
+                            passed=False,
+                            risk_level=RiskLevel.HIGH,
+                            message=f"ГО позиции {new_go:.2f} руб превышает лимит {float(self._risk_limits.max_position_go):.2f} руб",
+                            recommendation="Снизьте размер позиции",
+                            code="max_position_go_exceeded",
+                        )
+
+            # 3) Базовые проверки целостности (продажа больше позиции)
+            if direction == "sell":
+                if not await self.portfolio_manager.can_sell(figi, quantity):
+                    return RiskCheck(
+                        passed=False,
+                        risk_level=RiskLevel.HIGH,
+                        message="Недостаточно лотов для продажи",
+                        recommendation="Проверьте размер позиции",
+                        code="insufficient_position_for_sell",
+                    )
+
             return RiskCheck(
                 passed=True,
-                risk_level=risk_level,
-                message="Риски в пределах нормы",
-                recommendation="Операция разрешена"
+                risk_level=RiskLevel.LOW,
+                message="Риски в пределах норм",
+                recommendation="Разрешено",
+                code="ok",
             )
             
         except Exception as e:
@@ -176,39 +196,6 @@ class RiskManager:
                 message=f"Ошибка проверки риска: {e}",
                 recommendation="Проверьте настройки"
             )
-    
-    async def check_stop_loss(self, figi: str) -> Optional[RiskCheck]:
-        """
-        Проверяет необходимость срабатывания стоп-лосса
-        
-        Args:
-            figi: FIGI инструмента
-            
-        Returns:
-            RiskCheck или None если стоп-лосс не сработал
-        """
-        try:
-            position = await self.portfolio_manager.get_position(figi)
-            if not position or position.quantity == 0:
-                return None
-            
-            # Рассчитываем убыток в пунктах
-            if position.average_price > 0:
-                loss_points = position.average_price - position.current_price
-                
-                if loss_points >= self._risk_limits.stop_loss_threshold:
-                    return RiskCheck(
-                        passed=False,
-                        risk_level=RiskLevel.CRITICAL,
-                        message=f"Стоп-лосс сработал: убыток {loss_points:.2f} пунктов",
-                        recommendation="Немедленно закройте позицию"
-                    )
-            
-            return None
-            
-        except Exception as e:
-            self._logger.error(f"Ошибка проверки стоп-лосса: {e}")
-            return None
     
     
     async def get_risk_report(self) -> Dict:
@@ -241,11 +228,10 @@ class RiskManager:
                 'daily_loss': daily_loss,
                 'risky_positions': risky_positions,
                 'risk_limits': {
+                    'trading_enabled': self._risk_limits.trading_enabled,
                     'max_daily_loss': self._risk_limits.max_daily_loss,
-                    'max_position_size': self._risk_limits.max_position_size,
-                    'percent_from_deposit': self._risk_limits.percent_from_deposit,
-                    'items_per_trade': self._risk_limits.items_per_trade,
-                    'stop_loss_threshold': self._risk_limits.stop_loss_threshold
+                    'max_position_go': self._risk_limits.max_position_go,
+                    'max_open_positions': self._risk_limits.max_open_positions,
                 },
                 'recommendations': await self._get_risk_recommendations()
             }
@@ -383,13 +369,6 @@ class RiskManager:
                 if max_position_risk > 20:
                     recommendations.append("Высокая концентрация в одной позиции")
             
-            # Рекомендации по стоп-лоссам
-            for position in portfolio.positions:
-                if position.quantity != 0:
-                    stop_loss_check = await self.check_stop_loss(position.figi)
-                    if stop_loss_check and not stop_loss_check.passed:
-                        recommendations.append(f"Стоп-лосс по {position.figi}: {stop_loss_check.message}")
-            
         except Exception as e:
             self._logger.error(f"Ошибка получения рекомендаций: {e}")
         
@@ -404,12 +383,10 @@ async def main():
     
     # Настройки риска
     risk_limits = RiskLimits(
-        max_position_size=100000,  # 100k руб
-        max_daily_loss=5000,       # 5k руб
-        max_portfolio_risk=20,     # 20%
-        max_single_trade=10000,    # 10k руб
-        stop_loss_percent=5,       # 5%
-        take_profit_percent=10     # 10%
+        max_daily_loss=10000,       # 10k руб
+        trading_enabled=True,
+        max_position_go=100000,    # 100k руб
+        max_open_positions=20
     )
     
     async with TinkoffAPIClient(
@@ -425,7 +402,6 @@ async def main():
         risk_check = await risk_manager.check_trade_risk(
             figi="FUTIMOEXF000",
             quantity=1,
-            price=2500.0,
             direction="buy"
         )
         

@@ -304,7 +304,7 @@ class MarketDataStream:
     
     async def start(self) -> None
     async def stop(self) -> None
-    def set_visualization_sink(self, sink: VisualizationSinkable) -> None
+    def set_event_sink(self, sink: VisualizationSinkable) -> None
 ```
 
 **Особенности:**
@@ -327,7 +327,7 @@ class RiskManager:
     @property
     def risk_limits(self) -> RiskLimits
     
-    async def check_trade_risk(self, figi: str, quantity: int, price: float) -> RiskCheck
+    async def check_trade_risk(self, figi: str, quantity: int, direction: str) -> RiskCheck
     async def check_stop_loss(self, figi: str) -> Optional[RiskCheck]
     async def get_risk_report(self) -> Dict[str, Any]
 ```

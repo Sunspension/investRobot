@@ -33,12 +33,10 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
             watchdog_require_open_market=cfg.watchdog_require_open_market,
         )
 
-        # Attach DB ingestion sink
         sink = DBIngestionSink(db_path=db_path, figi=figi)
-        stream.set_visualization_sink(sink)
-
+        stream.set_event_sink(sink)
         stop_event = asyncio.Event()
-
+        
         def _handle_signal(signum, frame):  # type: ignore[no-redef]
             logger.info(f"Received signal {signum}, stopping ingestor...")
             stop_event.set()

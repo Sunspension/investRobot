@@ -3,7 +3,7 @@ from __future__ import annotations
 import aiosqlite
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncIterator, Iterable, List, Dict, Any, Optional
+from typing import AsyncIterator, Iterable, List, Dict, Optional, Any
 
 from tinkoff.invest import Candle, HistoricCandle
 import json

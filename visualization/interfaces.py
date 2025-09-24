@@ -15,7 +15,7 @@ class StrategyDataProvider(Protocol):
 
 @runtime_checkable
 class TradingSessionDataProvider(Protocol):
-    def __init__(self, session_controller: Any) -> None:  # noqa: ANN401 (Any by design for decoupling)
+    def __init__(self, session_controller) -> None:  # noqa: ANN401 (decoupling)
         ...
 
     def get_strategy_status(self) -> List[Dict[str, Any]]:

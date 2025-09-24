@@ -1,24 +1,13 @@
 """
-Модули для реальной торговли
-"""
-from .order_executor import OrderExecutor, OrderResult
-from .portfolio_manager import PortfolioManager, Position, Portfolio
-from .risk_manager import RiskManager, RiskLimits, RiskCheck, RiskLevel
-from .trading_session import TradingSession
-from .trading_config import TradingConfig
-from .market_data_stream import MarketDataStream
+Пакет торговли. Инициализация без тяжёлых импортов.
 
-__all__ = [
-    'OrderExecutor',
-    'OrderResult', 
-    'PortfolioManager',
-    'Position',
-    'Portfolio',
-    'RiskManager',
-    'RiskLimits',
-    'RiskCheck',
-    'RiskLevel',
-    'TradingSession',
-    'TradingConfig',
-    'MarketDataStream'
-]
+Содержимое доступно по прямым путям, например:
+- robotlib.trading.position_sizing_service
+- robotlib.trading.tinkoff_api_client
+и т.д.
+
+Сознательно не реэкспортируем тяжёлые классы, чтобы импорт подмодулей не тянул
+всю систему в тестах.
+"""
+
+__all__ = []

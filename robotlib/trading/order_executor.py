@@ -2,15 +2,22 @@
 Модуль для выполнения реальных торговых приказов через Tinkoff API
 """
 
-from typing import Optional, Any
+from typing import Optional, List, Protocol, runtime_checkable, Awaitable
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
 from robotlib.ingestion.db_sink import DBIngestionSink
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
 from datetime import datetime
+from robotlib.utils.money import Money
 import asyncio
 import uuid
+
+
+@runtime_checkable
+class OrderExecutionListener(Protocol):
+    async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> Awaitable[None]:
+        ...
 
 
 class OrderExecutor:
@@ -21,8 +28,7 @@ class OrderExecutor:
         api_client: TinkoffAPIClient,
         order_sink: Optional[DBIngestionSink] = None,
         *,
-        portfolio_manager: Optional[Any] = None,
-        data_manager: Optional[Any] = None,
+        listeners: Optional[List[OrderExecutionListener]] = None,
     ):
         """
         Инициализация исполнителя приказов
@@ -34,9 +40,7 @@ class OrderExecutor:
         self.api_client = api_client
         self._order_sink = order_sink
         self.logger = get_logger(__name__)
-        # Опционально для публикации портфеля в UI по факту изменений
-        self._portfolio_manager = portfolio_manager
-        self._data_manager = data_manager
+        self._listeners = listeners or []
     
     async def check_market_availability(self) -> bool:
         """Проверяет доступность рынка для торговли"""
@@ -71,6 +75,8 @@ class OrderExecutor:
                     commission=0.0,
                     reason="некорректный размер"
                 )
+            # Предторговая проверка ГО для фьючерсов (только FUT*)
+
             # Выполняем ордер в зависимости от типа
             if order_intent.order_type == OrderType.MARKET:
                 result = await self._execute_market_order(order_intent)
@@ -124,14 +130,14 @@ class OrderExecutor:
                 except Exception as persist_err:
                     self.logger.warning(f"Не удалось сохранить исполненный ордер: {persist_err}")
 
-            # Публикуем обновлённый портфель в UI только при реальном изменении (успешный fill)
-            try:
-                if result.success and execution.status == OrderStatus.FILLED and self._portfolio_manager and self._data_manager:
-                    portfolio_data = await self._portfolio_manager.get_portfolio_data()
-                    self._data_manager.update_portfolio(portfolio_data)
-                    self.logger.info("Портфель обновлён в UI после исполнения ордера")
-            except Exception as pub_err:
-                self.logger.warning(f"Не удалось опубликовать портфель после ордера: {pub_err}")
+            # Уведомляем подписчиков об успешном исполнении
+            if result.success and execution.status == OrderStatus.FILLED and self._listeners:
+                for listener in list(self._listeners):
+                    try:
+                        await listener.on_order_execution(execution, order_intent)
+                    except Exception as notify_err:
+                        self.logger.warning(f"Listener on_order_execution error: {notify_err}")
+
             
             self.logger.info(f"Ордер выполнен: {execution}")
             return execution
@@ -155,6 +161,62 @@ class OrderExecutor:
             )
             
             return execution
+
+    async def _check_futures_margin(self, order_intent: OrderIntent) -> tuple[bool, str]:
+        """Проверяет, достаточно ли свободных средств под ГО для фьючерсного ордера.
+
+        Возвращает (ok, details_text).
+        """
+        # Свободные RUB
+        free_cash_rub = 0.0
+        try:
+            positions = await self.api_client.get_positions()
+            monies = getattr(positions, 'money', []) or getattr(positions, 'money_positions', [])
+            for m in monies or []:
+                mv = getattr(m, 'amount', None) or m
+                currency = (getattr(m, 'currency', '') or getattr(mv, 'currency', '') or '').lower()
+                if currency in ('rub', 'rur'):
+                    try:
+                        free_cash_rub += Money(mv).to_float()
+                    except Exception:
+                        units = getattr(mv, 'units', None)
+                        nano = getattr(mv, 'nano', 0) or 0
+                        if units is not None:
+                            free_cash_rub += float(units) + float(nano) / 1e9
+        except Exception:
+            pass
+
+        # ГО на один лот по стороне
+        per_lot = 0.0
+        try:
+            fm = await self.api_client.get_futures_margin(order_intent.figi)
+            if fm is not None:
+                if order_intent.direction == OrderDirection.BUY:
+                    mv = fm.get('initial_margin_on_buy') if isinstance(fm, dict) else getattr(fm, 'initial_margin_on_buy', None)
+                else:
+                    mv = fm.get('initial_margin_on_sell') if isinstance(fm, dict) else getattr(fm, 'initial_margin_on_sell', None)
+                if mv is not None:
+                    try:
+                        per_lot = Money(mv).to_float()
+                    except Exception:
+                        units = getattr(mv, 'units', None)
+                        nano = getattr(mv, 'nano', 0) or 0
+                        if units is not None:
+                            per_lot = float(units) + float(nano) / 1e9
+        except Exception:
+            pass
+
+        go_active = 0.0
+
+        # Требуемое ГО на заявку
+        required = per_lot * float(order_intent.quantity)
+        available_for_new = max(0.0, free_cash_rub - go_active)
+        ok = available_for_new >= required and required > 0.0
+        details = (
+            f"free_cash={free_cash_rub:.2f} active_go={go_active:.2f} avail_for_new={available_for_new:.2f} "
+            f"per_lot={per_lot:.2f} qty={order_intent.quantity} required={required:.2f}"
+        )
+        return ok, details
     
     async def _execute_market_order(self, order_intent: OrderIntent) -> OrderResult:
         """Выполняет рыночный ордер"""

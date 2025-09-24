@@ -1,14 +1,6 @@
 """
-Модули для торговых стратегий
+Пакет стратегий. Не реэкспортируем тяжёлые модули, чтобы облегчить импорт.
+Используйте прямые импорты подмодулей при необходимости.
 """
-from .strategy_interface import Strategyable
-from .strategy_manager import StrategyManager
-from .long import LongStrategy
-from .short import ShortStrategy
 
-__all__ = [
-    'Strategyable',
-    'StrategyManager',
-    'LongStrategy',
-    'ShortStrategy'
-]
+__all__ = []

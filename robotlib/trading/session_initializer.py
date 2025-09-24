@@ -86,7 +86,6 @@ class SessionInitializer(SessionInitializable):
             risk_check = await self.dependencies.risk_manager.check_trade_risk(
                 figi=self.config.figi,
                 quantity=1,  # Минимальное количество для проверки
-                price=100.0,  # Фиктивная цена
                 direction="buy"
             )
             

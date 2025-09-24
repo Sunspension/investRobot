@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Callable, Dict, Any
 
 from robotlib.utils.logger import get_logger
 from robotlib.visualization_interfaces import TradingEventSinkable
+from visualization.interfaces import DataManagerable
+from tinkoff.invest import Candle, HistoricCandle
+from robotlib.signal_types import Signal
+from robotlib.trading.order_types import OrderExecution, OrderIntent
 from visualization.formatters import to_moscow_time
 
 
@@ -14,12 +18,12 @@ class VisualizationSinkAdapter(TradingEventSinkable):
     Выделяет on_candle/on_signal/on_market_status из визуализатора.
     """
 
-    def __init__(self, data_manager, ws_broadcast) -> None:
+    def __init__(self, data_manager: DataManagerable, ws_broadcast: Callable[[Dict[str, Any]], None]) -> None:
         self._data_manager = data_manager
         self._broadcast = ws_broadcast
         self._logger = get_logger(__name__)
 
-    async def on_candle(self, candle: Any, price: float, figi: str) -> None:
+    async def on_candle(self, candle: Candle | HistoricCandle, price: float, figi: str) -> None:
         try:
             candle_time = getattr(candle, 'time', datetime.now())
             candle_data = {
@@ -35,7 +39,7 @@ class VisualizationSinkAdapter(TradingEventSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка on_candle: {e}")
 
-    async def on_signal(self, signal: Any, figi: str, price: float) -> None:
+    async def on_signal(self, signal: Signal, figi: str, price: float) -> None:
         try:
             signal_data = {
                 'time': datetime.now(),
@@ -56,3 +60,21 @@ class VisualizationSinkAdapter(TradingEventSinkable):
             self._broadcast({"type": "market_status", "is_trading": status.get('is_trading', False)})
         except Exception as e:
             self._logger.error(f"Ошибка on_market_status: {e}")
+
+    async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
+        """Публикует исполненный ордер в DataManager и пушит короткое WS-сообщение."""
+        try:
+            ui_order = {
+                'order_id': execution.order_id,
+                'figi': intent.figi,
+                'time': execution.timestamp,
+                'type': 'buy' if intent.direction.name.lower() == 'buy' else 'sell',
+                'price': execution.price or 0.0,
+                'quantity': execution.filled_quantity or intent.quantity,
+                'strategy': getattr(intent, 'strategy', None),
+                'reason': execution.reason,
+            }
+            self._data_manager.add_order(ui_order)
+            self._broadcast({"type": "order", "side": ui_order['type'], "price": ui_order['price']})
+        except Exception as e:
+            self._logger.error(f"Ошибка on_order_execution: {e}")

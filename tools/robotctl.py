@@ -26,6 +26,16 @@ from typing import Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VENV_PY = PROJECT_ROOT / "env" / "bin" / "python"
 
+# Гарантируем, что корень проекта доступен для импорта модулей конфигурации/клиентов
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from config_data.config import load_config  # noqa: E402
+from robotlib.utils.money import Money  # noqa: E402
+
+# Избегаем импорта внутренних торговых модулей здесь, чтобы не тянуть лишние зависимости
+
+
 def _python_executable() -> str:
     """Возвращает путь к python из venv, если он существует, иначе текущий интерпретатор."""
     try:
@@ -415,9 +425,145 @@ def _status_outbox_daemon():
         print("Outbox worker: PID-файл есть, но процесс не найден")
         return 1
 
+
 def _sandbox_payin():
     amount = _input_nonempty("Сумма пополнения (RUB) [100000]: ", default="100000")
     return _run_subprocess([_python_executable(), "tools/sandbox_cli.py", "payin", "--amount", amount])  # type: ignore[arg-type]
+
+
+async def _show_portfolio() -> int:
+    """Печатает сводку портфеля и позиций напрямую через tinkoff.invest AsyncClient.
+    Избегаем импорта торговых модулей проекта, чтобы не тянуть лишние зависимости.
+    """
+    try:
+        from tinkoff.invest import AsyncClient  # локальный импорт
+        cfg = load_config()
+        async with AsyncClient(token=cfg.tcs_client.token, sandbox_token=cfg.tcs_client.sandbox_token) as client:
+            if cfg.tcs_client.sandbox_token:
+                pf = await client.sandbox.get_sandbox_portfolio(account_id=cfg.tcs_client.account_id)
+            else:
+                pf = await client.operations.get_portfolio(account_id=cfg.tcs_client.account_id)
+            print("\n=== ПОРТФЕЛЬ ===")
+            # В operations.get_portfolio используем total_amount_portfolio
+            total_raw = getattr(pf, 'total_amount_portfolio', None) or getattr(pf, 'total_amount', None)
+            try:
+                total = Money(total_raw).to_float()
+            except Exception:
+                total = 0.0
+            # Свободные деньги (RUB) по Positions API
+            try:
+                if cfg.tcs_client.sandbox_token:
+                    pos = await client.sandbox.get_sandbox_positions(account_id=cfg.tcs_client.account_id)
+                else:
+                    pos = await client.operations.get_positions(account_id=cfg.tcs_client.account_id)
+            except Exception:
+                pos = None
+            free_cash_rub = 0.0
+            try:
+                monies = getattr(pos, 'money', []) or getattr(pos, 'money_positions', [])
+                for m in monies or []:
+                    mv = getattr(m, 'amount', None) or m
+                    currency = (getattr(m, 'currency', '') or getattr(mv, 'currency', '') or '').lower()
+                    if currency in ('rub', 'rur'):
+                        try:
+                            free_cash_rub += Money(mv).to_float()
+                        except Exception:
+                            units = getattr(mv, 'units', None)
+                            nano = getattr(mv, 'nano', 0) or 0
+                            if units is not None:
+                                free_cash_rub += float(units) + float(nano) / 1e9
+            except Exception:
+                pass
+
+            # Оценим ГО как сумму по открытым фьючерсным позициям (initial margin × лоты)
+            positions = getattr(pf, 'positions', []) or []
+            go_sum = 0.0
+            for p in positions:
+                figi = getattr(p, 'figi', '')
+                q = getattr(p, 'quantity', None)
+                qty = getattr(q, 'units', q) or 0
+                try:
+                    qty = int(qty)
+                except Exception:
+                    continue
+                if not figi or qty == 0:
+                    continue
+                # Считаем ГО только для фьючерсов (FIGI обычно начинается с "FUT")
+                if not str(figi).startswith('FUT'):
+                    continue
+                try:
+                    fm = await client.instruments.get_futures_margin(figi=figi)
+                    buy_mv = getattr(fm, 'initial_margin_on_buy', None)
+                    sell_mv = getattr(fm, 'initial_margin_on_sell', None)
+                    per_lot = 0.0
+                    if buy_mv is not None:
+                        per_lot = max(per_lot, Money(buy_mv).to_float())
+                    if sell_mv is not None:
+                        per_lot = max(per_lot, Money(sell_mv).to_float())
+                    if per_lot > 0.0:
+                        go_sum += abs(qty) * per_lot
+                except Exception:
+                    continue
+
+            # ГО по активным заявкам (оценка)
+            go_active = 0.0
+            try:
+                if cfg.tcs_client.sandbox_token:
+                    orders_resp = await client.sandbox.get_sandbox_orders(account_id=cfg.tcs_client.account_id)
+                    orders = getattr(orders_resp, 'orders', [])
+                else:
+                    orders_resp = await client.orders.get_orders(account_id=cfg.tcs_client.account_id)
+                    orders = getattr(orders_resp, 'orders', [])
+                for o in orders or []:
+                    ofigi = getattr(o, 'figi', '')
+                    lots_req = getattr(o, 'lots_requested', 0)
+                    lots = getattr(lots_req, 'units', lots_req) or 0
+                    try:
+                        lots = int(lots)
+                    except Exception:
+                        lots = 0
+                    if not ofigi or lots <= 0:
+                        continue
+                    # ГО только для фьючерсов
+                    if not str(ofigi).startswith('FUT'):
+                        continue
+                    try:
+                        fm = await client.instruments.get_futures_margin(figi=ofigi)
+                        buy_mv = getattr(fm, 'initial_margin_on_buy', None)
+                        sell_mv = getattr(fm, 'initial_margin_on_sell', None)
+                        per_lot = 0.0
+                        if buy_mv is not None:
+                            per_lot = max(per_lot, Money(buy_mv).to_float())
+                        if sell_mv is not None:
+                            per_lot = max(per_lot, Money(sell_mv).to_float())
+                        if per_lot > 0.0:
+                            go_active += lots * per_lot
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # Доступно к открытию ≈ свободные деньги − ГО активных заявок
+            available_for_new = max(0.0, free_cash_rub - go_active)
+            print(f"Сумма портфеля: {total:.2f}")
+            print(f"Свободные деньги (RUB): {free_cash_rub:.2f}")
+            print(f"ГО по позициям (оценка): {go_sum:.2f}")
+            print(f"ГО по активным заявкам (оценка): {go_active:.2f}")
+            print(f"Доступно для новых позиций: {available_for_new:.2f}")
+            print(f"Позиции: {len(positions)}")
+            for p in positions[:20]:
+                figi = getattr(p, 'figi', '')
+                q = getattr(p, 'quantity', None)
+                qty = getattr(q, 'units', q)
+                try:
+                    avg = Money(getattr(p, 'average_position_price', None)).to_float() if hasattr(p, 'average_position_price') else 0.0
+                except Exception:
+                    avg = 0.0
+                print(f" - {figi}: qty={qty} avg={avg}")
+        return 0
+    except Exception as e:
+        print(f"Ошибка получения портфеля: {e}")
+        return 1
 
 
 def _systemd_menu():
@@ -478,6 +624,8 @@ def main() -> int:
         print("  14) Оптимизация параметров")
         print("  15) Тесты (pytest)")
         print("  16) Песочница: пополнение счёта")
+        print("\n👤 АККАУНТ:")
+        print("  17) Показать портфель")
         print("\n  0) Выход")
 
         choice = input("> ").strip()
@@ -518,6 +666,9 @@ def main() -> int:
                 _run_tests_pytest()
             elif choice == "16":
                 _sandbox_payin()
+            # АККАУНТ
+            elif choice == "17":
+                return asyncio.run(_show_portfolio()) or 0
             elif choice == "0":
                 return 0
             else:

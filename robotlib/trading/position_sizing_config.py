@@ -6,34 +6,26 @@ from dataclasses import dataclass
 
 @dataclass
 class PositionSizingConfig:
-    """Конфигурация для динамического расчета размера позиции"""
-    # Основные настройки
-    enable_dynamic_sizing: bool = True    # Включить динамический расчет
-    min_position_size: int = 1            # Минимальный размер позиции
-    max_position_multiplier: float = 2.0  # Максимальный множитель от items_per_trade
-    
-    # Пороги волатильности (ATR/цена)
-    volatility_threshold_high: float = 0.05   # Высокая волатильность
-    volatility_threshold_medium: float = 0.02  # Средняя волатильность
-    
-    # Пороги силы сигнала (абсолютное значение гистограммы)
-    signal_strength_threshold_strong: float = 0.3  # Сильный сигнал
-    signal_strength_threshold_medium: float = 0.2  # Средний сигнал
-    signal_strength_threshold_weak: float = 0.1   # Слабый сигнал
-    
-    # Коэффициенты для расчета
-    volatility_factor_high: float = 0.5      # Коэффициент при высокой волатильности
-    volatility_factor_medium: float = 0.8    # Коэффициент при средней волатильности
-    volatility_factor_low: float = 1.2       # Коэффициент при низкой волатильности
-    
-    signal_factor_strong: float = 1.5        # Коэффициент при сильном сигнале
-    signal_factor_medium: float = 1.2        # Коэффициент при среднем сигнале
-    signal_factor_weak: float = 1.0          # Коэффициент при слабом сигнале
-    signal_factor_very_weak: float = 0.7     # Коэффициент при очень слабом сигнале
-    
-    time_factor_close: float = 0.5           # Коэффициент перед закрытием
-    time_factor_last_hour: float = 0.7       # Коэффициент в последний час
-    time_factor_normal: float = 1.0          # Коэффициент в обычное время
-    
-    risk_factor_min: float = 0.7             # Минимальный коэффициент риска
-    risk_factor_max: float = 1.0             # Максимальный коэффициент риска
+    """Конфигурация для динамического расчета размера позиции (фьючерсы).
+
+    Основано на: волатильности (ATR), требовании ГО и состоянии системы/стратегии.
+    Старые параметры риска на сделку, лимиты по портфелю, time/signal-strength удалены.
+    """
+    # Общие
+    enable_dynamic_sizing: bool = True
+    min_lots: int = 1                  # Минимальный размер заявки
+    max_lots: int = 100                # Жесткий потолок лотов на сделку
+
+    # Волатильность (ATR/цена) → чем выше, тем меньше размер
+    volatility_threshold_high: float = 0.05
+    volatility_threshold_medium: float = 0.02
+    volatility_factor_high: float = 0.5      # при высокой волатильности
+    volatility_factor_medium: float = 0.75   # при средней волатильности
+    volatility_factor_low: float = 1.0       # при низкой волатильности
+
+    # Состояние системы/стратегии: внешний мультипликатор [0..1]
+    system_state_scale: float = 1.0
+
+    # Оценка ГО, зарезервированного активными заявками (если недоступно из API)
+    # Можно прокинуть через конфиг из внешнего слоя, иначе 0.
+    active_orders_go_estimate: float = 0.0

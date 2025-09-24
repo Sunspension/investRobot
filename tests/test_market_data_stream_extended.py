@@ -224,11 +224,11 @@ class TestMarketDataStreamExtended:
         assert price == 1000.0
     
     @pytest.mark.asyncio
-    async def test_set_visualization_sink(self, stream):
+    async def test_set_event_sink(self, stream):
         """Тест установки визуализационного sink"""
         sink = MockTradingEventSinkable()
         
-        stream.set_visualization_sink(sink)
+        stream.set_event_sink(sink)
         
         assert stream._sink == sink
     

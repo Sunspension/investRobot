@@ -260,7 +260,7 @@ class RiskManageable(Protocol):
         """Возвращает лимиты рисков"""
         pass
     
-    async def check_trade_risk(self, figi: str, quantity: int, price: float) -> RiskCheck:
+    async def check_trade_risk(self, figi: str, quantity: int, direction: str) -> RiskCheck:
         """Проверяет риск сделки"""
         pass
     

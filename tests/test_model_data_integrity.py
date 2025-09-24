@@ -371,27 +371,20 @@ class TestModelDataIntegrity:
         
         # Создаем лимиты риска
         risk_limits = RiskLimits(
-            max_position_size=1000.0,
             max_daily_loss=500.0,
-            percent_from_deposit=50.0,
-            items_per_trade=20,
-            stop_loss_threshold=8.0
+            trading_enabled=True,
+            max_position_go=1000.0,
+            max_open_positions=None,
         )
         
         # Проверяем целостность
-        assert risk_limits.max_position_size == 1000.0
         assert risk_limits.max_daily_loss == 500.0
-        assert risk_limits.percent_from_deposit == 50.0
-        assert risk_limits.items_per_trade == 20
-        assert risk_limits.stop_loss_threshold == 8.0
+        assert risk_limits.trading_enabled is True
+        assert risk_limits.max_position_go == 1000.0
         
         # Проверяем логическую целостность
-        assert risk_limits.max_position_size > 0
         assert risk_limits.max_daily_loss > 0
-        assert 0 < risk_limits.percent_from_deposit <= 100
-        assert risk_limits.items_per_trade > 0
-        assert risk_limits.stop_loss_threshold > 0
-        assert risk_limits.max_daily_loss < risk_limits.max_position_size
+        assert risk_limits.max_position_go > 0
     
     def test_cross_component_data_consistency(self):
         """Тест консистентности данных между компонентами"""

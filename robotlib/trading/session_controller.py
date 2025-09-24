@@ -2,14 +2,13 @@
 Класс для управления жизненным циклом торговой сессии
 """
 import asyncio
+import pytz
 from datetime import datetime, timedelta
 from typing import Optional
-
+from datetime import datetime, timedelta
 from robotlib.trading.interfaces import TradingDependencies
 from robotlib.trading.session_interfaces import SessionControllable, SessionStatsable
 from robotlib.trading.trading_config import TradingConfig
-from robotlib.trading.session_stats import SessionStats
-from robotlib.trading.session_initializer import SessionInitializer
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,16 +16,6 @@ if TYPE_CHECKING:
 from robotlib.utils.market_hours import get_market_status_with_api
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.logger import get_logger
-
-
-def _has_market_data_stream(dependencies: TradingDependencies) -> bool:
-    """Проверяет, есть ли market_data_stream в dependencies"""
-    return hasattr(dependencies, 'market_data_stream') and dependencies.market_data_stream is not None
-
-
-def _has_data_manager(visualizer: Optional['EventVisualizerable']) -> bool:
-    """Проверяет, есть ли data_manager у visualizer"""
-    return visualizer is not None and hasattr(visualizer, 'data_manager')
 
 
 class SessionController(SessionControllable):
@@ -43,12 +32,10 @@ class SessionController(SessionControllable):
         self._dependencies = dependencies
         self._force_start = force_start
         self._visualizer = visualizer
-        self.logger = get_logger(__name__)
-        
+        self._logger = get_logger(__name__)
         # Компоненты из зависимостей
         self._stats = dependencies.session_stats
         self._initializer = dependencies.session_initializer
-        
         # Состояние сессии
         self._is_running = False
         self._is_initialized = False
@@ -88,184 +75,167 @@ class SessionController(SessionControllable):
         """Визуализатор"""
         return self._visualizer
     
+    async def _load_initial_candles(self) -> None:
+        try:
+            dm = self._dependencies.data_manager
+            dm.load_recent_candles(
+                db_path="data/market.db",
+                figi=self._config.figi,
+                limit=300,
+            )
+            self._logger.info(f"Начальные свечи загружены: {len(dm.candles_data)} шт.")
+        except Exception as e:
+            self._logger.warning(f"Не удалось загрузить начальные свечи для визуализатора: {e}")
+
+    async def _publish_initial_portfolio(self) -> None:
+        try:
+            portfolio_data = await self._dependencies.portfolio_manager.get_portfolio_data()
+            dm = self._dependencies.data_manager
+            dm.update_portfolio(portfolio_data)
+            self._logger.info("Портфель опубликован в UI (старт)")
+                
+        except Exception as e:
+            self._logger.warning(f"Не удалось опубликовать портфель на старте: {e}")
+
+
+    async def _warmup_strategies(self) -> None:
+        try:
+            dm = self._dependencies.data_manager
+            snapshot = dm.get_data_snapshot()
+            candles = snapshot.get('candles_data', [])
+            if candles:
+                bars = [
+                    {
+                        'time': c['time'],
+                        'open': float(c['open']),
+                        'high': float(c['high']),
+                        'low': float(c['low']),
+                        'close': float(c['close']),
+                    }
+                    for c in candles[-200:]
+                ]
+                await self._dependencies.strategy_manager.warmup_with_bars(
+                    bars,
+                    dispatch_signals=False,
+                    place_orders=False,
+                )
+                self._logger.info(f"Прогрето стратегий барами: {len(bars)}")
+        except Exception as e:
+            self._logger.warning(f"Прогрев стратегий пропущен: {e}")
+
     async def start(self) -> bool:
         """Запускает торговую сессию"""
-        self.logger.info("Запуск торговой сессии...")
+        self._logger.info("Запуск торговой сессии...")
         
         try:
-            # Проверяем статус рынка
             if not await self._check_market_status():
                 return False
-            
-            # Инициализируем компоненты
             await self._initializer.initialize_components()
             self._is_initialized = True
-            
-            # Пассивная загрузка исторических свечей для визуализатора (если есть)
-            try:
-                dm = self._dependencies.data_manager
-                # Загружаем последние N свечей без ограничения по дате
-                dm.load_recent_candles(
-                    db_path="data/market.db",
-                    figi=self._config.figi,
-                    limit=300,
-                )
-                self.logger.info(f"Начальные свечи загружены: {len(dm.candles_data)} шт.")
-            except Exception as e:
-                self.logger.warning(f"Не удалось загрузить начальные свечи для визуализатора: {e}")
-            
-            # Запускаем визуализатор
+            await self._load_initial_candles()
+
             if self._visualizer:
                 await self._visualizer.start()
-                self.logger.info("✅ Dash визуализатор событий запущен")
-                # Одноразовая загрузка портфеля в UI на старте
-                try:
-                    portfolio_data = await self._dependencies.portfolio_manager.get_portfolio_data()
-                    dm = self._dependencies.data_manager
-                    if dm:
-                        dm.update_portfolio(portfolio_data)
-                        self.logger.info("Портфель опубликован в UI (старт)")
-                except Exception as e:
-                    self.logger.warning(f"Не удалось опубликовать портфель на старте: {e}")
-            
-            # Прогрев стратегий историческими барами из БД (за текущий день), без сигналов и без ордеров
-            try:
-                dm = self._dependencies.data_manager
-                snapshot = dm.get_data_snapshot()
-                candles = snapshot.get('candles_data', [])
-                if candles:
-                    # Берём последние 200 баров (или меньше)
-                    bars = [
-                        {
-                            'time': c['time'],
-                            'open': float(c['open']),
-                            'high': float(c['high']),
-                            'low': float(c['low']),
-                            'close': float(c['close']),
-                        }
-                        for c in candles[-200:]
-                    ]
-                    await self._dependencies.strategy_manager.warmup_with_bars(
-                        bars,
-                        dispatch_signals=False,
-                        place_orders=False,
-                    )
-                    self.logger.info(f"Прогрето стратегий барами: {len(bars)}")
-            except Exception as e:
-                self.logger.warning(f"Прогрев стратегий пропущен: {e}")
+                self._logger.info("✅ Dash визуализатор событий запущен")
+                await self._publish_initial_portfolio()
 
-            # Логируем информацию о сессии
+            await self._warmup_strategies()
             await self._log_session_info()
             
             self._is_running = True
-            self.logger.info("Торговая сессия успешно запущена")
+            self._logger.info("Торговая сессия успешно запущена")
             return True
-            
+        
         except Exception as e:
-            self.logger.error(f"Ошибка при запуске сессии: {e}")
+            self._logger.error(f"Ошибка при запуске сессии: {e}")
             return False
     
     async def stop(self) -> None:
         """Останавливает торговую сессию"""
-        self.logger.info("Остановка торговой сессии...")
-        
+        self._logger.info("Остановка торговой сессии...")
         try:
             # Закрываем все позиции если нужно
             if self._config.auto_close_positions:
                 await self._close_all_positions()
-            
             # Останавливаем визуализатор
             if self._visualizer:
                 await self._visualizer.stop()
-                self.logger.info("Визуализатор остановлен")
-            
-            # Останавливаем потоки данных
-            if _has_market_data_stream(self._dependencies):
-                await self._dependencies.market_data_stream.stop()
-            
+                self._logger.info("Визуализатор остановлен")
+            # Останавливаем поток данных (обязательная зависимость)
+            await self._dependencies.market_data_stream.stop()
             # Завершаем статистику
             self._stats.finish_session()
-            
             # Выводим финальную статистику
             self._stats.print_stats()
-            
             self._is_running = False
-            self.logger.info("Торговая сессия остановлена")
+            self._logger.info("Торговая сессия остановлена")
             
         except Exception as e:
-            self.logger.error(f"Ошибка при остановке сессии: {e}")
+            self._logger.error(f"Ошибка при остановке сессии: {e}")
     
+    async def _handle_grpc_cancelled(self, error_msg: str) -> None:
+        self._logger.warning(f"gRPC стрим отменен: {error_msg}")
+        self._logger.info("Перезапуск стрима...")
+        self._dependencies.market_data_stream.reset()
+        await asyncio.sleep(2)
+        await self._dependencies.market_data_stream.start()
+
+    async def _handle_generic_error_with_recovery(self, err: Exception) -> None:
+        self._logger.error(f"Ошибка в торговом цикле: {err}")
+        self._logger.info("Пауза торговли до восстановления...")
+        await self._wait_for_api_recovery()
+        self._logger.info("Торговля возобновлена")
+
+    async def _maybe_close_positions_eod(self) -> bool:
+        """Возвращает True, если день закрыт и позиции закрыты (нужно выйти из цикла)."""
+        if not self._config.end_of_day_close:
+            return False
+        time_to_close = await self._get_time_to_close()
+        if time_to_close <= 0:
+            self._logger.info("Конец торгового дня, закрываем позиции")
+            await self._close_all_positions()
+            return True
+        await self._check_close_warnings(time_to_close, set())
+        return False
+
+    async def _process_new_candles_tick(self) -> None:
+        candles = await self._get_new_candles()
+        if candles:
+            await self._process_candles(candles)
+        await self._update_stats()
+
     async def run_trading_loop(self) -> None:
         """Запускает основной торговый цикл"""
         if not self._is_running:
-            self.logger.error("Сессия не запущена")
+            self._logger.error("Сессия не запущена")
             return
         
-        self.logger.info("Запуск торгового цикла...")
-        
-        # Отслеживаем показанные предупреждения
-        shown_warnings = set()
+        self._logger.info("Запуск торгового цикла...")
         
         try:
             while self._is_running:
                 try:
-                    # Проверяем, нужно ли закрыть позиции в конце дня
-                    if self._config.end_of_day_close:
-                        time_to_close = await self._get_time_to_close()
-                        
-                        if time_to_close <= 0:
-                            # Время закрыть позиции
-                            self.logger.info("Конец торгового дня, закрываем позиции")
-                            await self._close_all_positions()
-                            break
-                        else:
-                            # Проверяем предупреждения
-                            await self._check_close_warnings(time_to_close, shown_warnings)
-                    
-                    # Получаем новые свечи
-                    candles = await self._get_new_candles()
-                    
-                    if candles:
-                        # Обрабатываем свечи через стратегии
-                        await self._process_candles(candles)
-                    # Обновляем только статистику (без публикации портфеля на каждый тик)
-                    await self._update_stats()
-                    
-                    # Небольшая пауза между итерациями
+                    if await self._maybe_close_positions_eod():
+                        break
+                    await self._process_new_candles_tick()
                     await asyncio.sleep(1)
-                    
                 except Exception as e:
                     error_msg = str(e)
-                    
-                    # Специальная обработка ошибок gRPC
                     if "CANCELLED" in error_msg or "RST_STREAM" in error_msg:
-                        self.logger.warning(f"gRPC стрим отменен: {error_msg}")
-                        self.logger.info("Перезапуск стрима...")
-                        
-                        # Перезапускаем стрим
-                        if _has_market_data_stream(self._dependencies):
-                            self._dependencies.market_data_stream.reset()
-                            await asyncio.sleep(2)
-                            await self._dependencies.market_data_stream.start()
+                        await self._handle_grpc_cancelled(error_msg)
                     else:
-                        self.logger.error(f"Ошибка в торговом цикле: {e}")
-                        self.logger.info("Пауза торговли до восстановления...")
-                        
-                        # Ждем восстановления
-                        await self._wait_for_api_recovery()
-                        self.logger.info("Торговля возобновлена")
-                
+                        await self._handle_generic_error_with_recovery(e)
         except KeyboardInterrupt:
-            self.logger.info("Получен сигнал остановки")
+            self._logger.info("Получен сигнал остановки")
             await self.stop()
         except Exception as e:
-            self.logger.error(f"Критическая ошибка в торговом цикле: {e}")
+            self._logger.error(f"Критическая ошибка в торговом цикле: {e}")
             await self.stop()
     
     async def _check_market_status(self) -> bool:
         """Проверяет статус рынка с поддержкой выходных торгов"""
         if self._force_start:
-            self.logger.info("Принудительный запуск (игнорируем статус рынка)")
+            self._logger.info("Принудительный запуск (игнорируем статус рынка)")
             return True
         
         try:
@@ -275,18 +245,18 @@ class SessionController(SessionControllable):
             if market_status['is_trading']:
                 session_type = market_status.get('session_type', 'unknown')
                 message = market_status.get('message', 'Рынок открыт')
-                self.logger.info(f"Рынок открыт ({session_type}): {message}")
+                self._logger.info(f"Рынок открыт ({session_type}): {message}")
                 return True
             else:
-                self.logger.info(f"Рынок закрыт: {market_status['message']}")
+                self._logger.info(f"Рынок закрыт: {market_status['message']}")
                 
                 # Ждем открытия рынка
                 await self._wait_for_market_open()
                 return True
                 
         except Exception as e:
-            self.logger.error(f"Ошибка проверки статуса рынка: {e}")
-            self.logger.info("Пауза торговли до восстановления API...")
+            self._logger.error(f"Ошибка проверки статуса рынка: {e}")
+            self._logger.info("Пауза торговли до восстановления API...")
             
             # Ждем восстановления API
             await self._wait_for_api_recovery()
@@ -294,22 +264,22 @@ class SessionController(SessionControllable):
     
     async def _wait_for_market_open(self) -> None:
         """Ждет открытия рынка"""
-        self.logger.info("Ожидание открытия рынка...")
+        self._logger.info("Ожидание открытия рынка...")
         
         while True:
             try:
                 market_status = await get_market_status_with_api()
                 
                 if market_status['is_trading']:
-                    self.logger.info("Рынок открылся!")
+                    self._logger.info("Рынок открылся!")
                     break
                 else:
-                    self.logger.info(f"Рынок закрыт: {market_status['message']}")
+                    self._logger.info(f"Рынок закрыт: {market_status['message']}")
                     await asyncio.sleep(60)  # Проверяем каждую минуту
                     
             except Exception as e:
-                self.logger.error(f"Ошибка при ожидании открытия рынка: {e}")
-                self.logger.info("Пауза торговли до восстановления API...")
+                self._logger.error(f"Ошибка при ожидании открытия рынка: {e}")
+                self._logger.info("Пауза торговли до восстановления API...")
                 
                 # Ждем восстановления API
                 await self._wait_for_api_recovery()
@@ -317,18 +287,18 @@ class SessionController(SessionControllable):
     
     async def _wait_for_api_recovery(self) -> None:
         """Ждет восстановления API"""
-        self.logger.info("Ожидание восстановления API...")
+        self._logger.info("Ожидание восстановления API...")
         
         while True:
             try:
                 # Проверяем доступность API
                 market_status = await get_market_status_with_api()
-                self.logger.info("API восстановлен!")
+                self._logger.info("API восстановлен!")
                 break
                 
             except Exception as e:
-                self.logger.warning(f"API все еще недоступен: {e}")
-                self.logger.info("Продолжаем ожидание...")
+                self._logger.warning(f"API все еще недоступен: {e}")
+                self._logger.info("Продолжаем ожидание...")
                 await asyncio.sleep(30)  # Проверяем каждые 30 секунд
     
     async def _get_time_to_close(self) -> int:
@@ -339,8 +309,6 @@ class SessionController(SessionControllable):
             Количество секунд до времени закрытия (0 или отрицательное = время закрыть)
         """
         try:
-            from datetime import datetime, timedelta
-            import pytz
             
             # Получаем текущее время в Москве
             moscow_tz = pytz.timezone('Europe/Moscow')
@@ -362,7 +330,7 @@ class SessionController(SessionControllable):
             return int(time_diff)
             
         except Exception as e:
-            self.logger.error(f"Ошибка вычисления времени до закрытия: {e}")
+            self._logger.error(f"Ошибка вычисления времени до закрытия: {e}")
             return 0  # В случае ошибки считаем, что время закрыть
     
     async def _check_close_warnings(self, time_to_close: int, shown_warnings: set) -> None:
@@ -386,33 +354,29 @@ class SessionController(SessionControllable):
                 else:
                     message = f"До закрытия позиций осталось {seconds} секунд"
                 
-                self.logger.warning(message)
+                self._logger.warning(message)
                 shown_warnings.add(warning_period)
                 break  # Показываем только одно предупреждение за раз
     
     async def _get_new_candles(self) -> list:
         """Получает новые свечи"""
         try:
-            if _has_market_data_stream(self._dependencies):
-                candles = await self._dependencies.market_data_stream.get_latest_candles()
-                
-                # Отправляем свечи в визуализатор
-                if self._visualizer and candles:
-                    for candle in candles:
-                        candle_data = {
-                            'time': candle.time,
-                            'open': candle.open.units + candle.open.nano / 1_000_000_000,
-                            'high': candle.high.units + candle.high.nano / 1_000_000_000,
-                            'low': candle.low.units + candle.low.nano / 1_000_000_000,
-                            'close': candle.close.units + candle.close.nano / 1_000_000_000,
-                            'volume': candle.volume
-                        }
-                        await self._visualizer.add_candle(candle_data)
-                
-                return candles
-            return []
+            candles = await self._dependencies.market_data_stream.get_latest_candles()
+            # Отправляем свечи в визуализатор
+            if self._visualizer and candles:
+                for candle in candles:
+                    candle_data = {
+                        'time': candle.time,
+                        'open': candle.open.units + candle.open.nano / 1_000_000_000,
+                        'high': candle.high.units + candle.high.nano / 1_000_000_000,
+                        'low': candle.low.units + candle.low.nano / 1_000_000_000,
+                        'close': candle.close.units + candle.close.nano / 1_000_000_000,
+                        'volume': candle.volume
+                    }
+                    await self._visualizer.add_candle(candle_data)
+            return candles
         except Exception as e:
-            self.logger.error(f"Ошибка получения свечей: {e}")
+            self._logger.error(f"Ошибка получения свечей: {e}")
             return []
     
     async def _process_candles(self, candles: list) -> None:
@@ -440,20 +404,20 @@ class SessionController(SessionControllable):
                 self._stats.add_signal()
                 
         except Exception as e:
-            self.logger.error(f"Ошибка обработки свечей: {e}")
+            self._logger.error(f"Ошибка обработки свечей: {e}")
     
     async def _close_all_positions(self) -> None:
         """Закрывает все открытые позиции через StrategyManager"""
-        self.logger.info("Закрытие всех позиций...")
+        self._logger.info("Закрытие всех позиций...")
         
         try:
             # Закрываем позиции через StrategyManager
             await self._dependencies.strategy_manager.close_all_positions()
             
-            self.logger.info("Все позиции закрыты")
+            self._logger.info("Все позиции закрыты")
             
         except Exception as e:
-            self.logger.error(f"Ошибка при закрытии позиций: {e}")
+            self._logger.error(f"Ошибка при закрытии позиций: {e}")
     
     async def _update_stats(self) -> None:
         """Обновляет статистику сессии"""
@@ -472,18 +436,18 @@ class SessionController(SessionControllable):
                 if dm:
                     dm.update_strategy_status(strategy_status)
             except Exception as e:
-                self.logger.error(f"Ошибка обновления статуса стратегий: {e}")
+                self._logger.error(f"Ошибка обновления статуса стратегий: {e}")
             
         except Exception as e:
-            self.logger.error(f"Ошибка обновления статистики: {e}")
+            self._logger.error(f"Ошибка обновления статистики: {e}")
     
     async def _log_session_info(self) -> None:
         """Логирует информацию о сессии"""
-        self.logger.info("=== ИНФОРМАЦИЯ О СЕССИИ ===")
-        self.logger.info(f"FIGI: {self.config.figi}")
-        self.logger.info(f"Автозакрытие позиций: {self.config.auto_close_positions}")
-        self.logger.info(f"Принудительный запуск: {self.force_start}")
-        self.logger.info(f"Время запуска: {self._stats.start_time}")
+        self._logger.info("=== ИНФОРМАЦИЯ О СЕССИИ ===")
+        self._logger.info(f"FIGI: {self.config.figi}")
+        self._logger.info(f"Автозакрытие позиций: {self.config.auto_close_positions}")
+        self._logger.info(f"Принудительный запуск: {self.force_start}")
+        self._logger.info(f"Время запуска: {self._stats.start_time}")
         
         # Обновляем статус стратегий в визуализаторе
         dm = self._dependencies.data_manager
@@ -491,9 +455,9 @@ class SessionController(SessionControllable):
             try:
                 strategy_status = "Стратегии активны и готовы к торговле"
                 dm.update_strategy_status(strategy_status)
-                self.logger.info("Статус стратегий обновлен в визуализаторе")
+                self._logger.info("Статус стратегий обновлен в визуализаторе")
             except Exception as e:
-                self.logger.error(f"Ошибка обновления статуса стратегий: {e}")
+                self._logger.error(f"Ошибка обновления статуса стратегий: {e}")
     
     async def get_session_status(self) -> dict:
         """Возвращает статус сессии"""
