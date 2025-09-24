@@ -157,10 +157,12 @@ class TradingSystemContainer:
             dm = getattr(viz, "_data_manager", None)
             if self._config.enable_visualization and dm is None:
                 raise RuntimeError("DataManager не инициализирован при включенной визуализации")
-            from visualization.adapters.sink_impl import VisualizationSinkAdapter
+            from visualization.adapters.sink_impl import DataManagerSink, WsEventBroadcaster, TradingToUIBridge
             listeners = []
             if dm is not None:
-                listeners.append(VisualizationSinkAdapter(dm, viz._broadcast_ws))
+                data_sink = DataManagerSink(dm)
+                ws = WsEventBroadcaster(viz._broadcast_ws)
+                listeners.append(TradingToUIBridge(data_sink, ws))
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
                 order_sink=order_sink,
@@ -320,9 +322,13 @@ class TradingSystemContainer:
                 from visualization.data_manager import DataManager
                 from visualization.chart_builder import ChartBuilder
                 from visualization.ui_components import UIComponents
+                from visualization.channels.ws import WebSocketHub
+                from visualization.services.market_status_service import MarketStatusService
                 dm = DataManager()
                 cb = ChartBuilder()
                 ui = UIComponents(self._config.figi, cb)
+                ws_hub = WebSocketHub()
+                ms_service = MarketStatusService()
                 self._instances['visualizer'] = DashEventVisualizer(
                     figi=self._config.figi,
                     host=host,
@@ -331,6 +337,8 @@ class TradingSystemContainer:
                     data_manager=dm,
                     chart_builder=cb,
                     ui_components=ui,
+                    ws_hub=ws_hub,
+                    market_status_service=ms_service,
                 )
             except ImportError:
                 self._logger.warning("Dash визуализатор недоступен")

@@ -25,15 +25,13 @@ class EventVisualizerable(ABC):
         """Проверяет, запущен ли визуализатор"""
         pass
     
-    @abstractmethod
     async def handle_candle_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие свечи"""
-        pass
+        """Необязательная обработка события свечи (по умолчанию — noop)."""
+        return None
     
-    @abstractmethod
     async def handle_signal_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие сигнала"""
-        pass
+        """Необязательная обработка события сигнала (по умолчанию — noop)."""
+        return None
     
     @abstractmethod
     async def handle_order_event(self, event: TradingEvent) -> None:
@@ -78,12 +76,10 @@ class EventVisualizer(EventVisualizerable):
         return self._running
     
     async def handle_candle_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие свечи"""
-        pass
+        return None
     
     async def handle_signal_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие сигнала"""
-        pass
+        return None
     
     async def handle_order_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие ордера"""

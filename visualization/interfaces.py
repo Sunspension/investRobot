@@ -64,3 +64,33 @@ class UIComponentsable(Protocol):
         ...
 
 
+@runtime_checkable
+class DataManagerSinkable(Protocol):
+    def add_candle(self, candle) -> None:  # Candle | HistoricCandle at runtime
+        ...
+
+    def add_signal(self, signal, price: float) -> None:  # Signal at runtime
+        ...
+
+    def add_market_status(self, status: Dict[str, Any]) -> None:
+        ...
+
+    def add_order(self, execution, intent) -> None:  # OrderExecution, OrderIntent at runtime
+        ...
+
+
+@runtime_checkable
+class WsEventBroadcasterable(Protocol):
+    def emit_candle(self, price: float, ts) -> None:
+        ...
+
+    def emit_signal(self, side: str, price: float) -> None:
+        ...
+
+    def emit_market_status(self, is_trading: bool) -> None:
+        ...
+
+    def emit_order(self, side: str, price: float) -> None:
+        ...
+
+

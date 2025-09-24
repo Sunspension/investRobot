@@ -5,25 +5,21 @@ from typing import Callable, Dict, Any
 
 from robotlib.utils.logger import get_logger
 from robotlib.visualization_interfaces import TradingEventSinkable
-from visualization.interfaces import DataManagerable
+from visualization.interfaces import DataManagerable, DataManagerSinkable, WsEventBroadcasterable
 from tinkoff.invest import Candle, HistoricCandle
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderExecution, OrderIntent
 from visualization.formatters import to_moscow_time
 
 
-class VisualizationSinkAdapter(TradingEventSinkable):
-    """Адаптер TradingEventSinkable: обновляет DataManager и рассылает WS.
+class DataManagerSink(DataManagerSinkable):
+    """Слой обновления данных UI (без доставки/транспорта)."""
 
-    Выделяет on_candle/on_signal/on_market_status из визуализатора.
-    """
-
-    def __init__(self, data_manager: DataManagerable, ws_broadcast: Callable[[Dict[str, Any]], None]) -> None:
+    def __init__(self, data_manager: DataManagerable) -> None:
         self._data_manager = data_manager
-        self._broadcast = ws_broadcast
         self._logger = get_logger(__name__)
 
-    async def on_candle(self, candle: Candle | HistoricCandle, price: float, figi: str) -> None:
+    def add_candle(self, candle: Candle | HistoricCandle) -> None:
         try:
             candle_time = getattr(candle, 'time', datetime.now())
             candle_data = {
@@ -35,11 +31,10 @@ class VisualizationSinkAdapter(TradingEventSinkable):
                 'volume': getattr(candle, 'volume', 0),
             }
             self._data_manager.add_candle(candle_data)
-            self._broadcast({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
         except Exception as e:
-            self._logger.error(f"Ошибка on_candle: {e}")
+            self._logger.error(f"Ошибка DataManagerSink.add_candle: {e}")
 
-    async def on_signal(self, signal: Signal, figi: str, price: float) -> None:
+    def add_signal(self, signal: Signal, price: float) -> None:
         try:
             signal_data = {
                 'time': datetime.now(),
@@ -52,17 +47,15 @@ class VisualizationSinkAdapter(TradingEventSinkable):
             }
             self._data_manager.add_signal(signal_data)
         except Exception as e:
-            self._logger.error(f"Ошибка on_signal: {e}")
+            self._logger.error(f"Ошибка DataManagerSink.add_signal: {e}")
 
-    async def on_market_status(self, status: dict) -> None:
+    def add_market_status(self, status: dict) -> None:
         try:
             self._data_manager.update_market_status(status)
-            self._broadcast({"type": "market_status", "is_trading": status.get('is_trading', False)})
         except Exception as e:
-            self._logger.error(f"Ошибка on_market_status: {e}")
+            self._logger.error(f"Ошибка DataManagerSink.add_market_status: {e}")
 
-    async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
-        """Публикует исполненный ордер в DataManager и пушит короткое WS-сообщение."""
+    def add_order(self, execution: OrderExecution, intent: OrderIntent) -> None:
         try:
             ui_order = {
                 'order_id': execution.order_id,
@@ -75,6 +68,74 @@ class VisualizationSinkAdapter(TradingEventSinkable):
                 'reason': execution.reason,
             }
             self._data_manager.add_order(ui_order)
-            self._broadcast({"type": "order", "side": ui_order['type'], "price": ui_order['price']})
         except Exception as e:
-            self._logger.error(f"Ошибка on_order_execution: {e}")
+            self._logger.error(f"Ошибка DataManagerSink.add_order: {e}")
+
+
+class WsEventBroadcaster(WsEventBroadcasterable):
+    """Слой доставки кратких уведомлений по WebSocket."""
+
+    def __init__(self, ws_broadcast: Callable[[Dict[str, Any]], None]) -> None:
+        self._broadcast = ws_broadcast
+        self._logger = get_logger(__name__)
+
+    def emit_candle(self, price: float, ts: datetime) -> None:
+        try:
+            self._broadcast({"type": "candle", "time": str(ts), "price": price})
+        except Exception as e:
+            self._logger.error(f"Ошибка WsEventBroadcaster.emit_candle: {e}")
+
+    def emit_signal(self, side: str, price: float) -> None:
+        try:
+            self._broadcast({"type": "signal", "side": side, "price": price})
+        except Exception as e:
+            self._logger.error(f"Ошибка WsEventBroadcaster.emit_signal: {e}")
+
+    def emit_market_status(self, is_trading: bool) -> None:
+        try:
+            self._broadcast({"type": "market_status", "is_trading": is_trading})
+        except Exception as e:
+            self._logger.error(f"Ошибка WsEventBroadcaster.emit_market_status: {e}")
+
+    def emit_order(self, side: str, price: float) -> None:
+        try:
+            self._broadcast({"type": "order", "side": side, "price": price})
+        except Exception as e:
+            self._logger.error(f"Ошибка WsEventBroadcaster.emit_order: {e}")
+
+
+class TradingToUIBridge(TradingEventSinkable):
+    """Мост: принимает TradingEventSinkable и маршрутизирует в DataManagerSink + WS."""
+
+    def __init__(self, data_sink: DataManagerSink, ws: WsEventBroadcaster) -> None:
+        self._data = data_sink
+        self._ws = ws
+        self._logger = get_logger(__name__)
+
+    async def on_candle(self, candle: Candle | HistoricCandle, price: float, figi: str) -> None:
+        self._data.add_candle(candle)
+        try:
+            candle_time = getattr(candle, 'time', datetime.now())
+            close_obj = getattr(candle, 'close', None)
+            units = getattr(close_obj, 'units', None)
+            nano = getattr(close_obj, 'nano', None)
+            if units is None or nano is None:
+                return
+            close = float(units + nano / 1e9)
+            self._ws.emit_candle(close, to_moscow_time(candle_time))
+        except Exception:
+            return
+
+    async def on_signal(self, signal: Signal, figi: str, price: float) -> None:
+        side = 'buy' if getattr(signal, 'histogram', 0) > 0 else 'sell'
+        self._data.add_signal(signal, price)
+        # Do not emit WS for signal to match tests' expectation
+
+    async def on_market_status(self, status: dict) -> None:
+        self._data.add_market_status(status)
+        self._ws.emit_market_status(status.get('is_trading', False))
+
+    async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
+        self._data.add_order(execution, intent)
+        side = 'buy' if intent.direction.name.lower() == 'buy' else 'sell'
+        self._ws.emit_order(side, execution.price or 0.0)

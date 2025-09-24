@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime
 from unittest.mock import Mock
 
-from visualization.adapters.sink_impl import VisualizationSinkAdapter
+from visualization.adapters.sink_impl import DataManagerSink, WsEventBroadcaster, TradingToUIBridge
 from visualization.data_manager import DataManager
 from visualization.formatters import to_moscow_time
 
@@ -27,7 +27,7 @@ class MockSignal:
 def test_sink_adapter_on_candle():
     data_manager = DataManager()
     broadcast_mock = Mock()
-    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    bridge = TradingToUIBridge(DataManagerSink(data_manager), WsEventBroadcaster(broadcast_mock))
     
     candle = MockCandle(
         time=datetime(2024, 1, 1, 12, 0, 0),
@@ -38,7 +38,7 @@ def test_sink_adapter_on_candle():
         volume=1000
     )
     
-    asyncio.run(adapter.on_candle(candle, 102.0, "TESTFIGI"))
+    asyncio.run(bridge.on_candle(candle, 102.0, "TESTFIGI"))
     
     # Проверяем, что данные добавились в DataManager через публичный API
     snapshot = data_manager.get_data_snapshot()
@@ -58,11 +58,11 @@ def test_sink_adapter_on_candle():
 def test_sink_adapter_on_signal():
     data_manager = DataManager()
     broadcast_mock = Mock()
-    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    bridge = TradingToUIBridge(DataManagerSink(data_manager), WsEventBroadcaster(broadcast_mock))
     
     signal = MockSignal(histogram=0.5, macd=1.2, signal=0.7)
     
-    asyncio.run(adapter.on_signal(signal, "TESTFIGI", 102.0))
+    asyncio.run(bridge.on_signal(signal, "TESTFIGI", 102.0))
     
     # Проверяем, что сигнал добавился в DataManager через публичный API
     snapshot = data_manager.get_data_snapshot()
@@ -78,11 +78,11 @@ def test_sink_adapter_on_signal():
 def test_sink_adapter_on_market_status():
     data_manager = DataManager()
     broadcast_mock = Mock()
-    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    bridge = TradingToUIBridge(DataManagerSink(data_manager), WsEventBroadcaster(broadcast_mock))
     
     status = {'is_trading': True, 'session': 'main'}
     
-    asyncio.run(adapter.on_market_status(status))
+    asyncio.run(bridge.on_market_status(status))
     
     # Проверяем, что статус обновился в DataManager через публичный API
     snapshot = data_manager.get_data_snapshot()
@@ -99,13 +99,13 @@ def test_sink_adapter_on_market_status():
 def test_sink_adapter_error_handling():
     data_manager = DataManager()
     broadcast_mock = Mock()
-    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    bridge = TradingToUIBridge(DataManagerSink(data_manager), WsEventBroadcaster(broadcast_mock))
     
     # Тестируем обработку ошибок в on_candle
     invalid_candle = Mock()
     invalid_candle.time = None  # Это вызовет ошибку при обработке
     
-    asyncio.run(adapter.on_candle(invalid_candle, 100.0, "TESTFIGI"))
+    asyncio.run(bridge.on_candle(invalid_candle, 100.0, "TESTFIGI"))
     
     # DataManager должен остаться пустым из-за ошибки через публичный API
     snapshot = data_manager.get_data_snapshot()
@@ -117,11 +117,11 @@ def test_sink_adapter_error_handling():
 def test_sink_adapter_on_signal_sell():
     data_manager = DataManager()
     broadcast_mock = Mock()
-    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    bridge = TradingToUIBridge(DataManagerSink(data_manager), WsEventBroadcaster(broadcast_mock))
     
     signal = MockSignal(histogram=-0.3, macd=-1.0, signal=-0.5)
     
-    asyncio.run(adapter.on_signal(signal, "TESTFIGI", 99.0))
+    asyncio.run(bridge.on_signal(signal, "TESTFIGI", 99.0))
     
     snapshot = data_manager.get_data_snapshot()
     assert len(snapshot['signals_data']) == 1
@@ -137,7 +137,7 @@ def test_sink_adapter_on_candle_broadcast_time_format_utc():
     import pytz
     data_manager = DataManager()
     broadcast_mock = Mock()
-    adapter = VisualizationSinkAdapter(data_manager, broadcast_mock)
+    bridge = TradingToUIBridge(DataManagerSink(data_manager), WsEventBroadcaster(broadcast_mock))
     
     utc_dt = pytz.utc.localize(datetime(2024, 1, 1, 12, 0, 0))
     candle = MockCandle(
@@ -149,7 +149,7 @@ def test_sink_adapter_on_candle_broadcast_time_format_utc():
         volume=1000
     )
     
-    asyncio.run(adapter.on_candle(candle, 102.0, "TESTFIGI"))
+    asyncio.run(bridge.on_candle(candle, 102.0, "TESTFIGI"))
     
     broadcast_mock.assert_called_once()
     call = broadcast_mock.call_args[0][0]
