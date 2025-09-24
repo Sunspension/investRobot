@@ -242,13 +242,14 @@ class SessionController(SessionControllable):
             # Используем расширенную проверку с поддержкой выходных торгов
             market_status = await get_market_status_enhanced()
             
-            if market_status['is_trading']:
+            if market_status.get('is_trading'):
                 session_type = market_status.get('session_type', 'unknown')
                 message = market_status.get('message', 'Рынок открыт')
                 self._logger.info(f"Рынок открыт ({session_type}): {message}")
                 return True
             else:
-                self._logger.info(f"Рынок закрыт: {market_status['message']}")
+                reason = market_status.get('message') or f"{market_status.get('session_type','unknown')} (нет message)"
+                self._logger.info(f"Рынок закрыт: {reason}")
                 
                 # Ждем открытия рынка
                 await self._wait_for_market_open()
@@ -270,11 +271,12 @@ class SessionController(SessionControllable):
             try:
                 market_status = await get_market_status_with_api()
                 
-                if market_status['is_trading']:
+                if market_status.get('is_trading'):
                     self._logger.info("Рынок открылся!")
                     break
                 else:
-                    self._logger.info(f"Рынок закрыт: {market_status['message']}")
+                    reason = market_status.get('message') or f"{market_status.get('session_type','unknown')} (no message)"
+                    self._logger.info(f"Рынок закрыт: {reason}")
                     await asyncio.sleep(60)  # Проверяем каждую минуту
                     
             except Exception as e:
@@ -284,6 +286,9 @@ class SessionController(SessionControllable):
                 # Ждем восстановления API
                 await self._wait_for_api_recovery()
                 break
+            except asyncio.CancelledError:
+                self._logger.info("Ожидание открытия рынка прервано")
+                return
     
     async def _wait_for_api_recovery(self) -> None:
         """Ждет восстановления API"""
@@ -300,6 +305,9 @@ class SessionController(SessionControllable):
                 self._logger.warning(f"API все еще недоступен: {e}")
                 self._logger.info("Продолжаем ожидание...")
                 await asyncio.sleep(30)  # Проверяем каждые 30 секунд
+            except asyncio.CancelledError:
+                self._logger.info("Ожидание восстановления API прервано")
+                return
     
     async def _get_time_to_close(self) -> int:
         """

@@ -84,13 +84,13 @@ class WsEventBroadcasterable(Protocol):
     def emit_candle(self, price: float, ts) -> None:
         ...
 
-    def emit_signal(self, side: str, price: float) -> None:
+    def emit_signal(self, type: str, price: float) -> None:
         ...
 
     def emit_market_status(self, is_trading: bool) -> None:
         ...
 
-    def emit_order(self, side: str, price: float) -> None:
+    def emit_order(self, type: str, price: float) -> None:
         ...
 
 

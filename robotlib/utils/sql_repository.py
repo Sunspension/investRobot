@@ -29,7 +29,7 @@ class DBCandle:
             high=Money(c.high).to_float(),
             low=Money(c.low).to_float(),
             close=Money(c.close).to_float(),
-            volume=int(Money(c.volume).to_float()),
+            volume=int(getattr(c, 'volume', 0) or 0),
         )
 
 
@@ -42,12 +42,21 @@ async def upsert_candles(db_path: str, candles: Iterable[DBCandle]) -> None:
         "close=excluded.close, volume=excluded.volume"
     )
     async with aiosqlite.connect(db_path) as conn:
+        def _to_utc_iso(ts: datetime) -> str:
+            try:
+                if ts.tzinfo is None:
+                    # Считаем timestamp уже в UTC, делаем явным
+                    return ts.replace(tzinfo=timezone.utc).isoformat()
+                return ts.astimezone(timezone.utc).isoformat()
+            except Exception:
+                return ts.isoformat()
+
         await conn.executemany(
             sql,
             [
                 (
                     c.figi,
-                    c.time.isoformat(),
+                    _to_utc_iso(c.time),
                     c.open,
                     c.high,
                     c.low,

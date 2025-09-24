@@ -17,10 +17,10 @@ class TradingEventSinkable(Protocol):
         """Обрабатывает событие сигнала"""
         pass
 
-    async def on_market_status(self, status: Dict[str, Any]) -> None:
-        """Обрабатывает событие статуса рынка"""
-        pass
-
     async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
         """Обрабатывает событие исполнения ордера"""
+        pass
+
+    async def on_market_status(self, status: Dict[str, Any]) -> None:
+        """Обрабатывает событие статуса рынка"""
         pass

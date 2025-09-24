@@ -2,24 +2,24 @@
 Dash визуализатор событий торговой системы
 """
 import asyncio
-import logging
 import os
 import threading
 import json
-from typing import Dict, Callable, Any, Optional
+from typing import Dict, Any
 from datetime import datetime
 import pytz
 from visualization.event_visualizer_interface import EventVisualizerable
 from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.trading.order_types import OrderExecution, OrderIntent
 from visualization.data_manager import DataManager
 from visualization.chart_builder import ChartBuilder
 from visualization.ui_components import UIComponents
 from visualization.logging_config import QuietFlaskServer
+from visualization.logging_config import disable_verbose_logging
 from visualization.services.market_status_service import MarketStatusService
 from visualization.channels.ws import WebSocketHub
 from visualization.callbacks.core_callbacks import register_core_callbacks
 from robotlib.utils.logger import get_logger
-from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.signal_types import Signal
@@ -144,6 +144,18 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка on_signal: {e}")
     
+    async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
+        pass
+    
+    async def on_market_status(self, status: Dict[str, Any]) -> None:
+        """Обрабатывает событие статуса рынка"""
+        try:
+            self._data_manager.update_market_status(status)
+            if self._running:
+                self._broadcast_ws({"type": "market_status", "is_trading": status.get('is_trading', False)})
+        except Exception as e:
+            self._logger.error(f"Ошибка on_market_status: {e}")
+    
     async def handle_order_event(self, event: TradingEvent) -> None:
         """Обрабатывает событие ордера"""
         if not self._running:
@@ -198,25 +210,17 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка обработки события статуса рынка: {e}")
 
-    async def on_market_status(self, status: Dict[str, Any]) -> None:
-        try:
-            # The VisualizationSinkAdapter is no longer used, so this block is effectively removed.
-            # The original code had this block, but the import was removed.
-            # If the intent was to remove the block entirely, this would be the correct change.
-            # However, the edit hint only mentioned removing the import, not the block.
-            # Therefore, I will keep the block as is, but the import is removed.
-            # This might lead to a NameError if VisualizationSinkAdapter is not defined elsewhere.
-            # But the edit hint only specified removing the import.
-            pass # This block is effectively removed as VisualizationSinkAdapter is no longer imported.
-        except Exception as e:
-            self._logger.error(f"Ошибка on_market_status: {e}")
-
     async def start(self) -> None:
         """Запускает визуализатор"""
         if self._running:
             self._logger.warning("Визуализатор уже запущен")
             return
         try:
+            # Настраиваем уровень логирования визуализатора при старте
+            try:
+                disable_verbose_logging(enable_debug_logs=True)
+            except Exception:
+                pass
             try:
                 ms = await get_market_status_enhanced()
                 self._data_manager.update_market_status(ms)

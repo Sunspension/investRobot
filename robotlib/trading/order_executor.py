@@ -8,7 +8,7 @@ from robotlib.ingestion.db_sink import DBIngestionSink
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
-from datetime import datetime
+from datetime import datetime, timezone
 from robotlib.utils.money import Money
 import asyncio
 import uuid
@@ -70,7 +70,7 @@ class OrderExecutor:
                     filled_quantity=0,
                     price=0.0,
                     status=OrderStatus.REJECTED,
-                    timestamp=datetime.now(),
+                    timestamp=datetime.now(timezone.utc),
                     error_message="Количество лотов = 0",
                     commission=0.0,
                     reason="некорректный размер"

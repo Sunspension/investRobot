@@ -107,7 +107,7 @@ class ShortStrategy(Strategyable):
             and signal.signal_prev is not None
             and signal.macd_prev < signal.signal_prev
             and signal.macd > signal.signal
-            and hist_abs > 0.1
+            and hist_abs > 0.01
         )
 
         # Открыть short: ждём peak и пересечения вниз; увелечение шорта при тренде
@@ -119,7 +119,8 @@ class ShortStrategy(Strategyable):
                         direction=OrderDirection.SELL,
                         quantity=items,
                         order_type=OrderType.MARKET,
-                        figi=self._figi
+                        figi=self._figi,
+                        strategy=self.strategy_name,
                     )
                 )
                 self._wait_short_sell_cross = False
@@ -136,7 +137,8 @@ class ShortStrategy(Strategyable):
                         direction=OrderDirection.BUY,
                         quantity=items,
                         order_type=OrderType.MARKET,
-                        figi=self._figi
+                        figi=self._figi,
+                        strategy=self.strategy_name,
                     )
                 )
                 self._wait_short_buy_cross = False
@@ -164,7 +166,8 @@ class ShortStrategy(Strategyable):
                     direction=OrderDirection.BUY,  # покрываем шорт
                     quantity=self._position,
                     order_type=OrderType.MARKET,  # рыночный ордер
-                    figi=self._figi
+                    figi=self._figi,
+                    strategy=self.strategy_name,
                 )
             else:
                 # Реальный API - только намерение
@@ -172,7 +175,8 @@ class ShortStrategy(Strategyable):
                     direction=OrderDirection.BUY,
                     quantity=self._position,
                     order_type=OrderType.MARKET,
-                    figi=self._figi
+                    figi=self._figi,
+                    strategy=self.strategy_name,
                 )
             
             return order_intent

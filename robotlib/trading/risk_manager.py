@@ -33,6 +33,8 @@ class RiskLimits:
     max_position_go: float | None = None
     # Опционально: максимум открытых позиций
     max_open_positions: int | None = None
+    # Порог стоп-лосса для стратегий (в пунктах/единицах стратегии)
+    stop_loss_threshold: float = 8.0
 
 
 @dataclass

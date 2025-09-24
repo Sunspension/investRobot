@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS orders (
     quantity INTEGER NOT NULL,
     status TEXT NOT NULL,       -- filled | cancelled | rejected | partially_filled
     commission REAL DEFAULT 0.0,
-    strategy TEXT
+    strategy TEXT,
+    reason TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_orders_figi_time ON orders(figi, time);
 
@@ -55,10 +56,18 @@ async def init_db(db_path: str):
         try:
             cursor = await conn.execute("PRAGMA table_info(orders);")
             cols = [row[1] async for row in cursor]
+            if 'order_id' not in cols:
+                await conn.execute("ALTER TABLE orders ADD COLUMN order_id TEXT;")
             if 'account_id' not in cols:
                 await conn.execute("ALTER TABLE orders ADD COLUMN account_id TEXT;")
             if 'commission' not in cols:
                 await conn.execute("ALTER TABLE orders ADD COLUMN commission REAL DEFAULT 0.0;")
+            if 'type' not in cols:
+                await conn.execute("ALTER TABLE orders ADD COLUMN type TEXT;")
+            if 'status' not in cols:
+                await conn.execute("ALTER TABLE orders ADD COLUMN status TEXT DEFAULT 'filled';")
+            if 'reason' not in cols:
+                await conn.execute("ALTER TABLE orders ADD COLUMN reason TEXT;")
             # Индексы
             if 'account_id' in cols:
                 await conn.execute("CREATE INDEX IF NOT EXISTS idx_orders_account_time ON orders(account_id, time);")

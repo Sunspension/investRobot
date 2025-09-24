@@ -136,6 +136,63 @@ class TradingToUIBridge(TradingEventSinkable):
         self._ws.emit_market_status(status.get('is_trading', False))
 
     async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
-        self._data.add_order(execution, intent)
-        side = 'buy' if intent.direction.name.lower() == 'buy' else 'sell'
-        self._ws.emit_order(side, execution.price or 0.0)
+        # Нормализуем временную метку и сторону, чтобы совпадали с форматом свечей/чарта
+        try:
+            # Обновляем DataManager с корректным временем (naive МСК)
+            if hasattr(execution, 'timestamp') and execution.timestamp is not None:
+                exec_time = to_moscow_time(execution.timestamp)
+                # Подменим временно timestamp на нормализованный для записи
+                temp_exec = execution
+                try:
+                    # Создаем простой объект-носитель, если нельзя переписать атрибут
+                    temp_exec = type('E', (), dict(**execution.__dict__))()
+                    setattr(temp_exec, 'timestamp', exec_time)
+                except Exception:
+                    pass
+                # Нормализуем цену исполнения: executed_price > price > intent.price
+                price_val = getattr(execution, 'executed_price', None)
+                if price_val is None or price_val == 0:
+                    price_val = getattr(execution, 'price', None)
+                if (price_val is None or price_val == 0) and hasattr(intent, 'price'):
+                    price_val = getattr(intent, 'price', 0.0)
+                try:
+                    price_val = float(price_val or 0.0)
+                except Exception:
+                    price_val = 0.0
+                # Присвоим во временный объект, если возможно
+                try:
+                    setattr(temp_exec, 'price', price_val)
+                except Exception:
+                    pass
+                self._data.add_order(temp_exec, intent)
+            else:
+                # Без нормализации времени — но нормализуем цену
+                price_val = getattr(execution, 'executed_price', None)
+                if price_val is None or price_val == 0:
+                    price_val = getattr(execution, 'price', None)
+                if (price_val is None or price_val == 0) and hasattr(intent, 'price'):
+                    price_val = getattr(intent, 'price', 0.0)
+                try:
+                    price_val = float(price_val or 0.0)
+                except Exception:
+                    price_val = 0.0
+                try:
+                    setattr(execution, 'price', price_val)
+                except Exception:
+                    pass
+                self._data.add_order(execution, intent)
+        except Exception:
+            # Фолбэк
+            self._data.add_order(execution, intent)
+
+        # Определяем сторону ордера по имени enum (на случай ORDER_DIRECTION_BUY/SELL)
+        dir_name = str(getattr(intent.direction, 'name', '')).lower()
+        side = 'buy' if ('buy' in dir_name) else 'sell'
+        try:
+            emit_price = getattr(execution, 'executed_price', None)
+            if emit_price is None or emit_price == 0:
+                emit_price = getattr(execution, 'price', 0.0)
+            emit_price = float(emit_price or 0.0)
+        except Exception:
+            emit_price = 0.0
+        self._ws.emit_order(side, emit_price)

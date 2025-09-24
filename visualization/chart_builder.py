@@ -60,6 +60,29 @@ class ChartBuilder:
                 df = df.sort_values('time').reset_index(drop=True)
         except Exception:
             pass
+        # Защита: приводим цены к числам и отбрасываем некорректные строки
+        try:
+            for col in ('open', 'high', 'low', 'close'):
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            if 'volume' in df.columns:
+                df['volume'] = pd.to_numeric(df['volume'], errors='coerce')
+            df = df.dropna(subset=['open', 'high', 'low', 'close'])
+        except Exception:
+            pass
+        if df.empty:
+            fig.update_layout(
+                title="📊 График цен - Нет валидных данных",
+                title_x=0.5,
+                xaxis_title="Время",
+                yaxis_title="Цена (₽)",
+                height=500,
+                showlegend=True,
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                font=dict(size=12)
+            )
+            return fig
         # self.logger.debug(f"DataFrame создан: {len(df)} строк, колонки: {list(df.columns)}")
         
         # Свечи
@@ -102,7 +125,7 @@ class ChartBuilder:
             )
         
         # Ордера покупки/продажи
-        self._add_orders_to_chart(fig, orders_data)
+        self._add_orders_to_chart(fig, orders_data, candles_data)
         
         # Настройка макета
         self._configure_chart_layout(fig)
@@ -145,7 +168,7 @@ class ChartBuilder:
         return fig
 
 
-    def _add_orders_to_chart(self, fig: Figure, orders_data: List[Dict[str, Any]]) -> None:
+    def _add_orders_to_chart(self, fig: Figure, orders_data: List[Dict[str, Any]], candles_data: Optional[List[Dict[str, Any]]] = None) -> None:
         """Добавляет ордера на график"""
         if not orders_data:
             # self.logger.debug("Нет ордеров для добавления на график")
@@ -162,12 +185,39 @@ class ChartBuilder:
             # ~0.02% от цены, минимум 0.05
             return max(abs(p) * 0.0002, 0.05)
 
+        # Визуальная нормализация (только для отрисовки):
+        # если ордерные цены сильно выбиваются относительно диапазона свечей, пробуем отмасштабировать ×/÷100
+        def _vis_price(pr: float) -> float:
+            return pr
+        try:
+            if candles_data:
+                _df = pd.DataFrame(candles_data)
+                if not _df.empty:
+                    lo = float(_df['low'].min())
+                    hi = float(_df['high'].max())
+                    def _vis_price(pr: float) -> float:  # type: ignore[no-redef]
+                        try:
+                            v = float(pr)
+                        except Exception:
+                            return pr
+                        # Используем более мягкое масштабирование ×/÷10
+                        scale = 10.0
+                        hi_band = hi * 2
+                        lo_band = lo / 2 if lo != 0 else 0.0
+                        if v > hi_band and (v / scale) > lo and (v / scale) < hi_band:
+                            return v / scale
+                        if v < lo_band and (v * scale) < hi_band and (v * scale) > lo_band:
+                            return v * scale
+                        return v
+        except Exception:
+            pass
+
         # Покупки (зеленые треугольники вверх)
         buy_orders = [order for order in orders_data if order['type'] in ['buy', 'short_buy', 'stop_loss_short_cover']]
         if buy_orders:
             fig.add_trace(go.Scatter(
                 x=[order['time'] for order in buy_orders],
-                y=[order['price'] + _offset(order['price']) for order in buy_orders],
+                y=[_vis_price(order['price']) - _offset(order['price']) for order in buy_orders],
                 mode='markers',
                 marker=dict(
                     symbol='triangle-up',
@@ -194,7 +244,7 @@ class ChartBuilder:
         if sell_orders:
             fig.add_trace(go.Scatter(
                 x=[order['time'] for order in sell_orders],
-                y=[order['price'] - _offset(order['price']) for order in sell_orders],
+                y=[_vis_price(order['price']) + _offset(order['price']) for order in sell_orders],
                 mode='markers',
                 marker=dict(
                     symbol='triangle-down',

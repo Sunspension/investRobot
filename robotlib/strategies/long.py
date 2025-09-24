@@ -110,7 +110,7 @@ class LongStrategy(Strategyable):
             and signal.signal_prev is not None
             and signal.macd_prev > signal.signal_prev
             and signal.macd < signal.signal
-            and hist_abs > 0.1
+            and hist_abs > 0.01
         )
 
         # Открыть позицию: ждём trough и пересечения вверх; увелечение лонга при тренде
@@ -122,7 +122,8 @@ class LongStrategy(Strategyable):
                         direction=OrderDirection.BUY,
                         quantity=items,
                         order_type=OrderType.MARKET,
-                        figi=self._figi
+                        figi=self._figi,
+                        strategy=self.strategy_name,
                     )
                 )
                 self._wait_buy_cross = False
@@ -139,7 +140,8 @@ class LongStrategy(Strategyable):
                         direction=OrderDirection.SELL,
                         quantity=items,
                         order_type=OrderType.MARKET,
-                        figi=self._figi
+                        figi=self._figi,
+                        strategy=self.strategy_name,
                     )
                 )
                 self._wait_sell_cross = False
@@ -161,7 +163,8 @@ class LongStrategy(Strategyable):
                 direction=OrderDirection.SELL,
                 quantity=self._position,
                 order_type=OrderType.MARKET,
-                figi=self._figi
+                figi=self._figi,
+                strategy=self.strategy_name,
             )
         else:
             return None

@@ -42,6 +42,7 @@ class OrderIntent:
     stop_price: Optional[float] = None
     time_in_force: str = "GTC"  # Good Till Cancelled
     client_order_id: Optional[str] = None
+    strategy: Optional[str] = None
 
 
 @dataclass

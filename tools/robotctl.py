@@ -239,13 +239,34 @@ def _view_db_summary():
             pass
         print(f"\nOrders: {_count('orders')} записей")
         try:
-            rows = cur.execute(
-                "SELECT order_id, figi, time, type, price, quantity, status, strategy FROM orders ORDER BY time DESC LIMIT 10;"
-            ).fetchall()
+            # Определим доступные колонки динамически
+            cols = [row[1] for row in cur.execute("PRAGMA table_info(orders);").fetchall()]
+            # Предпочитаемые имена столбцов с альтернативами
+            wanted = [
+                ["time", "created_at", "timestamp"],
+                ["figi", "instrument", "ticker"],
+                ["side", "direction", "type"],
+                ["price", "executed_price", "avg_price"],
+                ["quantity", "lots", "lots_requested"],
+                ["status"],
+                ["reason", "comment"],
+                ["strategy", "source"],
+            ]
+            selected: list[str] = []
+            for group in wanted:
+                chosen = next((c for c in group if c in cols), None)
+                if chosen:
+                    selected.append(chosen)
+            if not selected:
+                selected = cols[:8]  # fallback: первые несколько колонок
+            query = f"SELECT {', '.join(selected)} FROM orders ORDER BY time DESC LIMIT 10;"
+            rows = cur.execute(query).fetchall()
             if rows:
                 print("Последние 10 ордеров:")
+                header = " | ".join(selected)
+                print(header)
                 for r in rows:
-                    print(r)
+                    print(" | ".join(str(x) for x in r))
         except Exception:
             pass
         conn.close()

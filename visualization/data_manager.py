@@ -308,6 +308,153 @@ class DataManager:
         except Exception as e:
             self.logger.error(f"Ошибка загрузки последних свечей: {e}")
 
+    def load_recent_orders_today(self, db_path: str, figi: str, limit: int = 300) -> None:
+        """Загружает ордера за текущий день для FIGI по единой схеме orders.
+
+        Ожидаемая схема:
+          time TEXT (ISO8601 UTC), figi TEXT, type TEXT ('buy'|'sell'), price REAL, quantity INTEGER, reason TEXT, strategy TEXT
+        """
+        try:
+            with sqlite3.connect(db_path) as conn:
+                query_today = (
+                    "SELECT time, figi, type, price, quantity, reason, strategy "
+                    "FROM orders WHERE figi = ? AND date(replace(time, 'T', ' '), 'localtime') = date('now','localtime') "
+                    "ORDER BY datetime(replace(time, 'T', ' ')) ASC LIMIT ?"
+                )
+                df = pd.read_sql_query(query_today, conn, params=(figi, limit))
+
+                # Фолбэк: если за текущий день нет записей — берём последние N ордеров без фильтра по дате
+                if df.empty:
+                    query_any = (
+                        "SELECT time, figi, type, price, quantity, reason, strategy "
+                        "FROM orders WHERE figi = ? ORDER BY datetime(replace(time, 'T', ' ')) DESC LIMIT ?"
+                    )
+                    df = pd.read_sql_query(query_any, conn, params=(figi, limit))
+                    # Разворачиваем в возрастающий порядок для стабильного отображения
+                    if not df.empty:
+                        df = df.iloc[::-1].reset_index(drop=True)
+
+                orders: List[Dict[str, Any]] = []
+                for _, row in df.iterrows():
+                    try:
+                        raw_time = str(row['time'])
+                        _dt = pd.to_datetime(raw_time).to_pydatetime()
+                        # Если строка времени уже без таймзоны (naive), считаем её локальной и не конвертируем повторно
+                        if ('+' in raw_time) or ('Z' in raw_time) or ('z' in raw_time):
+                            _dt = to_moscow_time(_dt)
+                        orders.append({
+                            'time': _dt,
+                            'figi': str(row['figi']),
+                            'type': str(row['type']).lower(),
+                            'price': float(row['price'] or 0.0),
+                            'quantity': int(row['quantity'] or 0),
+                            'reason': row.get('reason', ''),
+                            'strategy': row.get('strategy', ''),
+                        })
+                    except Exception:
+                        # Любая проблема с записью — пропускаем
+                        continue
+
+                with self.data_lock:
+                    for o in orders:
+                        self.orders_data.append(o)
+                        self.orders_count = len(self.orders_data)
+                        self.total_volume += o.get('quantity', 1)
+                        side = o.get('type', '').lower()
+                        if side == 'buy':
+                            self.buy_orders_count += 1
+                        elif side == 'sell':
+                            self.sell_orders_count += 1
+                    if len(self.orders_data) > 100:
+                        self.orders_data = self.orders_data[-50:]
+                try:
+                    self.logger.info(f"Загружено исторических ордеров: {len(orders)} для {figi}")
+                except Exception:
+                    pass
+        except Exception as e:
+            self.logger.error(f"Ошибка загрузки ордеров за день: {e}")
+
+    def migrate_orders_schema(self, db_path: str) -> None:
+        """Миграция таблицы orders к единой схеме.
+
+        Целевая схема:
+          orders(time TEXT ISO8601 UTC, figi TEXT, type TEXT, price REAL, quantity INTEGER, reason TEXT, strategy TEXT)
+
+        Стратегия: создаём orders_new, заполняем из orders с COALESCE по возможным именам колонок,
+        отфильтровываем записи с отсутствующими критичными данными, затем атомарно заменяем таблицу.
+        """
+        try:
+            with sqlite3.connect(db_path) as conn:
+                cur = conn.cursor()
+                # Проверяем, есть ли исходная таблица
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders'")
+                if cur.fetchone() is None:
+                    return
+
+                # Создаём новую таблицу по целевой схеме
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS orders_new (
+                        time TEXT,
+                        figi TEXT,
+                        type TEXT,
+                        price REAL,
+                        quantity INTEGER,
+                        reason TEXT,
+                        strategy TEXT
+                    )
+                    """
+                )
+
+                # Очищаем на случай повторной миграции
+                cur.execute("DELETE FROM orders_new")
+
+                # Определяем доступные колонки в исходной таблице
+                cur.execute("PRAGMA table_info(orders)")
+                cols = [row[1] for row in cur.fetchall()]
+
+                def pick(*names: str) -> str:
+                    for n in names:
+                        if n in cols:
+                            return n
+                    return ''
+
+                time_col = pick('time', 'created_at', 'timestamp')
+                type_col = pick('type', 'side', 'direction', 'order_side')
+                price_col = pick('price', 'executed_price', 'limit_price')
+                qty_col = pick('quantity', 'lots', 'qty')
+                reason_col = pick('reason', 'comment', 'note')
+                strategy_col = pick('strategy', 'source', 'tag')
+
+                # Строим SELECT динамически, подставляя NULL для отсутствующих колонок
+                sel_time = time_col if time_col else 'NULL'
+                sel_type = f"LOWER({type_col})" if type_col else "NULL"
+                sel_price = price_col if price_col else 'NULL'
+                sel_qty = qty_col if qty_col else 'NULL'
+                sel_reason = reason_col if reason_col else 'NULL'
+                sel_strategy = strategy_col if strategy_col else 'NULL'
+
+                insert_sql = (
+                    "INSERT INTO orders_new(time, figi, type, price, quantity, reason, strategy) "
+                    f"SELECT {sel_time} AS time, figi, {sel_type} AS type, {sel_price} AS price, {sel_qty} AS quantity, {sel_reason} AS reason, {sel_strategy} AS strategy FROM orders"
+                )
+                cur.execute(insert_sql)
+
+                # Удаляем неполные записи из новой таблицы (жёсткая фильтрация)
+                cur.execute(
+                    "DELETE FROM orders_new WHERE time IS NULL OR figi IS NULL OR price IS NULL OR quantity IS NULL"
+                )
+
+                # Заменяем таблицу атомарно
+                cur.execute("DROP TABLE orders")
+                cur.execute("ALTER TABLE orders_new RENAME TO orders")
+                # Индексы для ускорения выборок
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_orders_figi_time ON orders(figi, time)")
+                conn.commit()
+                self.logger.info("Миграция таблицы orders завершена: применена целевая схема")
+        except Exception as e:
+            self.logger.error(f"Ошибка миграции таблицы orders: {e}")
+
     def merge_historical_candles(self, db_path: str, figi: str, from_time: datetime, to_time: Optional[datetime] = None) -> None:
         """Догружает и сливает свечи из БД в заданном окне времени, не перезаписывая весь список.
 

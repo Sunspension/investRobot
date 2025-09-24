@@ -8,7 +8,6 @@ from typing import List, Dict, Any
 from dash import Dash, dcc, html
 from dash_extensions import WebSocket
 from robotlib.utils.logger import get_logger
-from visualization.logging_config import disable_verbose_logging
 
 class UIComponents:
     """Компоненты пользовательского интерфейса"""
@@ -17,13 +16,6 @@ class UIComponents:
         self.figi = figi
         self.logger = get_logger(__name__)
         self._chart_builder = chart_builder
-        
-        # Отключаем избыточные логи
-        self._disable_verbose_logging()
-    
-    def _disable_verbose_logging(self):
-        """Отключает избыточные логи Flask/Dash"""
-        disable_verbose_logging(enable_debug_logs=True)
     
     def create_dash_app(self) -> Dash:
         """Создает Dash приложение"""

@@ -340,6 +340,19 @@ class TradingSystemContainer:
                     ws_hub=ws_hub,
                     market_status_service=ms_service,
                 )
+                # Мигрируем схему orders и подгружаем исторические данные для старта UI
+                try:
+                    dm.migrate_orders_schema(db_path="data/market.db")
+                except Exception:
+                    pass
+                try:
+                    dm.load_recent_candles(db_path="data/market.db", figi=self._config.figi, limit=300)
+                except Exception:
+                    pass
+                try:
+                    dm.load_recent_orders_today(db_path="data/market.db", figi=self._config.figi, limit=300)
+                except Exception:
+                    pass
             except ImportError:
                 self._logger.warning("Dash визуализатор недоступен")
                 return None
