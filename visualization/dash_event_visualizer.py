@@ -5,6 +5,7 @@ import asyncio
 import os
 import threading
 import json
+import time
 from typing import Dict, Any, Callable
 from datetime import datetime
 from visualization.event_visualizer_interface import WebSocketEventVisualizerable
@@ -231,6 +232,11 @@ class DashEventVisualizer:
                 try:
                     self._logger.info("WS клиент подключен")
                     self._ws_hub.add(ws)
+                    # Heartbeat: отвечаем на пинги клиента
+                    try:
+                        ws.send(json.dumps({"type": "server_hello"}))
+                    except Exception:
+                        pass
                     
                     # Мгновенно отправляем снэпшот с данными после подключения
                     if self._snapshot_callback:
@@ -245,6 +251,14 @@ class DashEventVisualizer:
                         msg = ws.receive()
                         if msg is None:
                             break
+                        # Поддержка heartbeat/ping от клиента
+                        try:
+                            obj = json.loads(msg)
+                            if isinstance(obj, dict) and obj.get('type') == 'ping':
+                                ws.send(json.dumps({"type": "pong", "t": int(time.time())}))
+                                continue
+                        except Exception:
+                            pass
                 except Exception as e:
                     self._logger.debug(f"WS соединение закрыто: {e}")
                 finally:

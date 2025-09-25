@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from typing import Callable, Dict, Any
+from datetime import timezone as _tz
 
 from robotlib.utils.logger import get_logger
 from robotlib.trading_interfaces import TradingEventSinkable
@@ -85,27 +86,68 @@ class WsEventBroadcaster(WsEventBroadcasterable):
     def __init__(self, broadcast_func: Callable[[Dict[str, Any]], None]) -> None:
         self._broadcast = broadcast_func
         self._logger = get_logger(__name__)
+        self._seq: int = 0
+
+    def _envelope(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Добавляет метаданные в WS-сообщение."""
+        try:
+            now_utc = datetime.now(_tz.utc).isoformat().replace('+00:00', 'Z')
+        except Exception:
+            now_utc = None
+        # Монотонная последовательность для идемпотентности на клиенте
+        try:
+            self._seq += 1
+            seq = self._seq
+        except Exception:
+            seq = None
+        meta = {
+            'version': 1,
+            'server_time_utc': now_utc,
+            'seq': seq,
+        }
+        meta.update(payload)
+        return meta
 
     def emit_snapshot(self, snapshot: dict) -> None:
         try:
-            self._broadcast({
+            self._broadcast(self._envelope({
                 'type': 'snapshot',
                 'data': snapshot
-            })
+            }))
         except Exception as e:
             self._logger.error(f"Ошибка WsEventBroadcaster.emit_snapshot: {e}")
 
+    def emit_init_snapshot(self, snapshot: dict) -> None:
+        try:
+            self._broadcast(self._envelope({
+                'type': 'init_snapshot',
+                'data': snapshot
+            }))
+        except Exception as e:
+            self._logger.error(f"Ошибка WsEventBroadcaster.emit_init_snapshot: {e}")
+
     def emit_candle_update(self, candle_update: dict) -> None:
         try:
-            self._broadcast(candle_update)
+            self._broadcast(self._envelope(candle_update))
         except Exception as e:
             self._logger.error(f"Ошибка WsEventBroadcaster.emit_candle_update: {e}")
 
     def emit_signal_update(self, signal_update: dict) -> None:
         try:
-            self._broadcast(signal_update)
+            self._broadcast(self._envelope(signal_update))
         except Exception as e:
             self._logger.error(f"Ошибка WsEventBroadcaster.emit_signal_update: {e}")
+
+    def emit_delta_batch(self, *, candles: list | None, signals: list | None) -> None:
+        try:
+            payload: Dict[str, Any] = {
+                'type': 'delta_batch',
+                'candles': candles or [],
+                'signals': signals or [],
+            }
+            self._broadcast(self._envelope(payload))
+        except Exception as e:
+            self._logger.error(f"Ошибка WsEventBroadcaster.emit_delta_batch: {e}")
 
 
 class TradingToUIBridge(TradingEventSinkable):
@@ -120,6 +162,38 @@ class TradingToUIBridge(TradingEventSinkable):
         self._logger = get_logger(__name__)
         self._snapshot_task = None
         self._snapshot_interval = 60  # 60 секунд
+        # Batching инкрементов
+        self._batch_enabled: bool = True
+        self._batch_interval_sec: float = 0.2
+        self._max_buffer_size: int = 500
+        self._candles_buffer: list = []
+        self._signals_buffer: list = []
+        self._flush_task: asyncio.Task | None = None
+
+    def _schedule_flush(self) -> None:
+        if not self._batch_enabled:
+            return
+        if self._flush_task is None or self._flush_task.done():
+            try:
+                self._flush_task = asyncio.create_task(self._flush_loop())
+            except Exception:
+                self._flush_task = None
+
+    async def _flush_loop(self) -> None:
+        try:
+            await asyncio.sleep(self._batch_interval_sec)
+            if self._candles_buffer or self._signals_buffer:
+                candles = self._candles_buffer[:]
+                signals = self._signals_buffer[:]
+                self._candles_buffer.clear()
+                self._signals_buffer.clear()
+                self._ws.emit_delta_batch(candles=candles, signals=signals)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            self._logger.error(f"Ошибка flush_loop: {e}")
+        finally:
+            self._flush_task = None
 
     async def on_candle(self, candle: Candle | HistoricCandle, price: float, figi: str) -> None:
         try:
@@ -133,10 +207,20 @@ class TradingToUIBridge(TradingEventSinkable):
                 'close': float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9),
                 'volume': getattr(candle, 'volume', 0),
             }
-            self._ws.emit_candle_update({
-                'type': 'candle_added',
-                'candle': candle_data
-            })
+            if self._batch_enabled:
+                self._candles_buffer.append(candle_data)
+                if (len(self._candles_buffer) + len(self._signals_buffer)) > self._max_buffer_size:
+                    # При перегрузе шлем полный снапшот
+                    self._ws.emit_snapshot(self._data.get_data_snapshot())
+                    self._candles_buffer.clear()
+                    self._signals_buffer.clear()
+                else:
+                    self._schedule_flush()
+            else:
+                self._ws.emit_candle_update({
+                    'type': 'candle_added',
+                    'candle': candle_data
+                })
         except Exception as e:
             self._logger.error(f"Ошибка TradingToUIBridge.on_candle: {e}")
             # При ошибке не отправляем обновление
@@ -154,10 +238,19 @@ class TradingToUIBridge(TradingEventSinkable):
                 'histogram': getattr(signal, 'histogram', 0),
                 'price': price,
             }
-            self._ws.emit_signal_update({
-                'type': 'signal_added',
-                'signal': signal_data
-            })
+            if self._batch_enabled:
+                self._signals_buffer.append(signal_data)
+                if (len(self._candles_buffer) + len(self._signals_buffer)) > self._max_buffer_size:
+                    self._ws.emit_snapshot(self._data.get_data_snapshot())
+                    self._candles_buffer.clear()
+                    self._signals_buffer.clear()
+                else:
+                    self._schedule_flush()
+            else:
+                self._ws.emit_signal_update({
+                    'type': 'signal_added',
+                    'signal': signal_data
+                })
         except Exception as e:
             self._logger.error(f"Ошибка TradingToUIBridge.on_signal: {e}")
             # При ошибке не отправляем обновление
@@ -198,7 +291,6 @@ class TradingToUIBridge(TradingEventSinkable):
         if self._snapshot_task is None:
             # Отправляем начальный снэпшот сразу при запуске
             snapshot = self._data.get_data_snapshot()
-            self._logger.debug(f"Начальный снэпшот: candles={len(snapshot.get('candles_data', []))}, orders={len(snapshot.get('orders_data', []))}, market_status={snapshot.get('market_status', {})}")
             self._ws.emit_snapshot(snapshot)
             self._logger.info("Отправлен начальный снэпшот данных")
             
@@ -220,9 +312,9 @@ class TradingToUIBridge(TradingEventSinkable):
         """Отправляет снэпшот по требованию (например, при подключении нового WebSocket клиента)"""
         try:
             snapshot = self._data.get_data_snapshot()
-            self._logger.debug(f"Снэпшот по требованию: candles={len(snapshot.get('candles_data', []))}, orders={len(snapshot.get('orders_data', []))}, market_status={snapshot.get('market_status', {})}")
-            self._ws.emit_snapshot(snapshot)
-            self._logger.info("Отправлен снэпшот по требованию")
+            # Для первых подключений отправляем init_snapshot
+            self._ws.emit_init_snapshot(snapshot)
+            self._logger.info("Отправлен init_snapshot по требованию")
         except Exception as e:
             self._logger.error(f"Ошибка отправки снэпшота по требованию: {e}")
 

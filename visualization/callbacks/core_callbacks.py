@@ -96,7 +96,7 @@ def register_core_callbacks(
             if isinstance(ws_message, dict):
                 msg_type = ws_message.get('type')
                 
-                if msg_type == 'snapshot':
+                if msg_type in ('snapshot', 'init_snapshot'):
                     # Полный снэпшот - обновляем все данные
                     snapshot_data = ws_message.get('data', current_state)
                     logger.debug(f"Получен снэпшот: candles={len(snapshot_data.get('candles_data', []))}, orders={len(snapshot_data.get('orders_data', []))}, market_status={snapshot_data.get('market_status', {})}")
@@ -118,6 +118,19 @@ def register_core_callbacks(
                     if new_signal:
                         _ui_state_manager.append_signal(new_signal)
                         logger.debug(f"Добавлен новый сигнал: {new_signal.get('type')} @ {new_signal.get('price')}")
+
+                elif msg_type == 'delta_batch':
+                    # Пакет инкрементов (свечи/сигналы)
+                    candles = ws_message.get('candles') or []
+                    if candles:
+                        for c in candles:
+                            _ui_state_manager.append_candle(c)
+                        logger.debug(f"Пакет свечей применён: +{len(candles)}")
+                    signals = ws_message.get('signals') or []
+                    if signals:
+                        for s in signals:
+                            _ui_state_manager.append_signal(s)
+                        logger.debug(f"Пакет сигналов применён: +{len(signals)}")
             
             # Используем текущее состояние для построения UI
             snapshot = _ui_state_manager.get_state()
