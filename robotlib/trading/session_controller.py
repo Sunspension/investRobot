@@ -254,16 +254,25 @@ class SessionController(SessionControllable):
     
     async def _check_market_status(self) -> bool:
         """Проверяет статус рынка с поддержкой выходных торгов"""
+        # убран временный подробный лог
         if self._force_start:
-            self._logger.info("Принудительный запуск (игнорируем статус рынка)")
+            # Даже при принудительном старте отправим текущий статус в UI, но без лишних логов
+            try:
+                market_status = await get_market_status_enhanced()
+                await self._send_market_status_to_ui(market_status)
+            except Exception:
+                self._logger.info("Принудительный запуск (игнорируем статус рынка)")
             return True
         
         try:
             # Используем расширенную проверку с поддержкой выходных торгов
             market_status = await get_market_status_enhanced()
+            # Детализированный лог статуса
+            # Убраны подробные debug-логи статуса
             
             # Отправляем статус рынка в UI
             await self._send_market_status_to_ui(market_status)
+            # убран временный лог
             
             if market_status.get('is_trading'):
                 session_type = market_status.get('session_type', 'unknown')
@@ -290,12 +299,28 @@ class SessionController(SessionControllable):
         """Отправляет статус рынка в UI через TradingToUIBridge"""
         try:
             event_sink = self._dependencies.event_sink
+            try:
+                self._logger.debug(
+                    f"_send_market_status_to_ui: event_sink_present={event_sink is not None}, "
+                    f"has_on_market_status={hasattr(event_sink, 'on_market_status') if event_sink else False}, "
+                    f"type={type(event_sink).__name__ if event_sink else None}"
+                )
+            except Exception:
+                pass
             
             if event_sink is not None and hasattr(event_sink, 'on_market_status'):
+                dt = market_status.get('current_time')
+                # Серилизуем время в ISO-строку для безопасной передачи по WS
+                dt_serialized = None
+                try:
+                    if dt is not None:
+                        dt_serialized = dt.isoformat()
+                except Exception:
+                    dt_serialized = None
                 status_payload = {
                     'is_trading': market_status.get('is_trading', False),
                     'session_type': market_status.get('session_type', 'unknown'),
-                    'current_time': market_status.get('current_time'),
+                    'current_time': dt_serialized,
                     'next_session': market_status.get('next_session'),
                     'time_until_next': market_status.get('time_until_next')
                 }

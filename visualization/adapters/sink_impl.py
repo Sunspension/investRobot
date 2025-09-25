@@ -163,9 +163,12 @@ class TradingToUIBridge(TradingEventSinkable):
             # При ошибке не отправляем обновление
 
     async def on_market_status(self, status: dict) -> None:
-        self._data.add_market_status(status)
-        # Отправляем полный снэпшот через WebSocket
-        self._ws.emit_snapshot(self._data.get_data_snapshot())
+        try:
+            self._data.add_market_status(status)
+            # Отправляем полный снэпшот через WebSocket
+            self._ws.emit_snapshot(self._data.get_data_snapshot())
+        except Exception as e:
+            self._logger.error(f"Ошибка TradingToUIBridge.on_market_status: {e}")
 
     async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
         # Нормализуем временную метку и сторону, чтобы совпадали с форматом свечей/чарта

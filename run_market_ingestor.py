@@ -6,6 +6,9 @@ from typing import Optional
 from config_data.config import load_config
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from robotlib.trading.market_data_stream import MarketDataStream
+from robotlib.trading.candle_cache import CandleCache
+from robotlib.trading.historical_data_loader import HistoricalDataLoader
+from robotlib.trading.stream_watchdog import StreamWatchdog
 from robotlib.ingestion.candle_data_sink import CandleDataSink
 from robotlib.utils.logger import get_logger
 from robotlib.utils.backoff import compute_backoff_delay
@@ -25,12 +28,25 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
         account_id=cfg.tcs_client.account_id,
         sandbox_token=cfg.tcs_client.sandbox_token,
     ) as api_client:
+        # Сборка зависимостей под новый конструктор
+        candle_cache = CandleCache(cache_size=100)
+        historical_loader = HistoricalDataLoader(api_client, figi)
+        watchdog = (
+            StreamWatchdog(
+                stale_seconds=cfg.watchdog_stale_seconds,
+                require_open_market=cfg.watchdog_require_open_market,
+                check_interval=getattr(cfg, 'watchdog_check_interval', 30),
+            )
+            if getattr(cfg, 'watchdog_enabled', True)
+            else None
+        )
+
         stream = MarketDataStream(
             api_client=api_client,
             figi=figi,
-            watchdog_enabled=cfg.watchdog_enabled,
-            watchdog_stale_seconds=cfg.watchdog_stale_seconds,
-            watchdog_require_open_market=cfg.watchdog_require_open_market,
+            candle_cache=candle_cache,
+            historical_loader=historical_loader,
+            watchdog=watchdog,
         )
 
         sink = CandleDataSink(db_path=db_path, figi=figi)

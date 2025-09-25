@@ -232,19 +232,12 @@ class DashEventVisualizer:
                     self._logger.info("WS клиент подключен")
                     self._ws_hub.add(ws)
                     
-                    # Отправляем первичное сообщение, чтобы триггернуть обновление UI
-                    try:
-                        ws.send(json.dumps({"type": "init"}))
-                    except Exception as e:
-                        self._logger.debug(f"Не удалось отправить init WS: {e}")
-                    
-                    # Отправляем снэпшот с данными после подключения (с небольшой задержкой)
+                    # Мгновенно отправляем снэпшот с данными после подключения
                     if self._snapshot_callback:
                         try:
-                            import time
-                            time.sleep(0.1)  # Небольшая задержка для полного подключения
-                            self._ws_hub.request_snapshot(self._snapshot_callback)
-                            self._logger.info("Отправлен снэпшот при подключении WebSocket клиента")
+                            # Вызываем callback напрямую, чтобы не ждать тикера/посредников
+                            self._snapshot_callback()
+                            self._logger.info("Отправлен снэпшот при подключении WebSocket клиента (синхронно)")
                         except Exception as e:
                             self._logger.warning(f"Не удалось отправить снэпшот при подключении: {e}")
                     

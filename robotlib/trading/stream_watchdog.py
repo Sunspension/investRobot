@@ -2,7 +2,7 @@
 Модуль для мониторинга состояния стрима
 """
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Callable
 from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
@@ -40,7 +40,14 @@ class StreamWatchdog:
         Args:
             last_candle_time: Время последней свечи
         """
-        self._last_candle_time = last_candle_time
+        # Нормализуем время к UTC-aware для безопасной арифметики дат
+        if last_candle_time is None:
+            self._last_candle_time = None
+            return
+        if last_candle_time.tzinfo is None:
+            self._last_candle_time = last_candle_time.replace(tzinfo=timezone.utc)
+        else:
+            self._last_candle_time = last_candle_time.astimezone(timezone.utc)
     
     def set_restart_callback(self, callback: Callable[[], None]) -> None:
         """
@@ -69,7 +76,13 @@ class StreamWatchdog:
                 if self._last_candle_time is None:
                     continue
                 
-                time_since_last_candle = (datetime.now() - self._last_candle_time).total_seconds()
+                # Используем timezone-aware UTC время
+                now_utc = datetime.now(timezone.utc)
+                last_utc = (
+                    self._last_candle_time if self._last_candle_time.tzinfo is not None
+                    else self._last_candle_time.replace(tzinfo=timezone.utc)
+                )
+                time_since_last_candle = (now_utc - last_utc).total_seconds()
                 
                 if time_since_last_candle > self._stale_seconds:
                     await self._handle_stale_stream()
