@@ -2,21 +2,21 @@
 Модуль для работы со стримом рыночных данных
 """
 import asyncio
-from datetime import datetime, timedelta, timezone, time
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, List
-from collections import deque
-import pytz
 from tinkoff.invest import Candle, HistoricCandle, CandleInterval
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
 from robotlib.utils.logger import get_logger
-from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
 from robotlib.trading_interfaces import CandleEventSinkable
 from robotlib.utils.backoff import compute_backoff_delay
 from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
-from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
-from robotlib.utils.money import Money
+
+# Импортируем новые компоненты
+from robotlib.trading.candle_cache_interfaces import CandleCacheable
+from robotlib.trading.stream_watchdog import StreamWatchdog
+from robotlib.trading.historical_data_loader_interfaces import HistoricalDataLoaderable
 
 
 class TinkoffStreamAdapter:
@@ -58,39 +58,38 @@ class MarketDataStream(MarketDataStreamable):
         self, 
         api_client: TinkoffAPIClientable, 
         figi: str = "FUTIMOEXF000",
-        cache_size: int = 100,
         *,
-        watchdog_enabled: bool,
-        watchdog_stale_seconds: int,
-        watchdog_require_open_market: bool,
+        candle_cache: CandleCacheable,
+        historical_loader: HistoricalDataLoaderable,
+        watchdog: Optional[StreamWatchdog] = None,
     ):
         """
         Инициализация стрима рыночных данных
         
         Args:
             api_client: API клиент для создания стрима
-            signal_manager: Менеджер сигналов для обработки свечей
             figi: FIGI инструмента для подписки
-            cache_size: Размер кэша для хранения свечей
+            candle_cache: Кэш для свечей
+            historical_loader: Загрузчик исторических данных
+            watchdog: Монитор состояния стрима (опционально)
         """
         self._api_client = api_client
         self._figi = figi
-        self._cache_size = cache_size
-        
-        # Создаем системные объекты
-        self._cached_candles = deque(maxlen=cache_size)
         self._logger = get_logger(__name__)
+        
+        # Используем переданные компоненты
+        self._candle_cache = candle_cache
+        self._historical_loader = historical_loader
+        self._watchdog = watchdog
+        
+        # Callback система
         self._candle_callbacks: List[Callable[[Candle], None]] = []
         self._signal_callbacks: List[Callable] = []
         
+        # Состояние стрима
         self._stream_adapter: Optional[TinkoffStreamAdapter] = None
         self._is_running = False
-        self._current_price: Optional[float] = None
         self._sink: Optional[CandleEventSinkable] = None
-        self._last_candle_at: Optional[datetime] = None
-        self._watchdog_enabled = watchdog_enabled
-        self._watchdog_stale_seconds = watchdog_stale_seconds
-        self._watchdog_require_open_market = watchdog_require_open_market
 
     def set_event_sink(self, sink: CandleEventSinkable) -> None:
         """Устанавливает приемник событий (candle/signal/market_status)."""
@@ -109,7 +108,7 @@ class MarketDataStream(MarketDataStreamable):
     @property
     def current_price(self) -> Optional[float]:
         """Текущая цена"""
-        return self._current_price
+        return self._candle_cache.get_current_price()
     
     def _is_api_client_ready(self) -> bool:
         """Проверяет, готов ли API клиент к использованию"""
@@ -146,8 +145,10 @@ class MarketDataStream(MarketDataStreamable):
             
             # Gap-fill: если у нас есть последняя свеча, дозаполним пропуски REST'ом
             try:
-                if self._last_candle_at is not None:
-                    asyncio.create_task(self._gap_fill_missing_candles())
+                if self._watchdog and self._watchdog.last_candle_time is not None:
+                    asyncio.create_task(self._historical_loader.gap_fill_missing_candles(
+                        self._watchdog.last_candle_time, self._sink
+                    ))
             except Exception:
                 pass
             
@@ -176,9 +177,12 @@ class MarketDataStream(MarketDataStreamable):
             # Запускаем обработку данных
             self._is_running = True
             asyncio.create_task(self._process_stream())
-            # Запускаем сторож, чтобы восстановиться при тишине потока (по конфигу)
-            if self._watchdog_enabled:
-                asyncio.create_task(self._watchdog_stale_stream(self._watchdog_stale_seconds))
+            
+            # Запускаем watchdog, если он включен
+            if self._watchdog:
+                # Устанавливаем callback для перезапуска
+                self._watchdog.set_restart_callback(self._restart_stream)
+                asyncio.create_task(self._watchdog.start_monitoring())
             
             self._logger.info("Стрим рыночных данных запущен")
             return True
@@ -197,6 +201,10 @@ class MarketDataStream(MarketDataStreamable):
             
             self._is_running = False
             
+            # Останавливаем watchdog
+            if self._watchdog:
+                await self._watchdog.stop_monitoring()
+            
             if self._stream_adapter is not None:
                 try:
                     # Просто вызываем stop() синхронно
@@ -211,51 +219,30 @@ class MarketDataStream(MarketDataStreamable):
         except Exception as e:
             self._logger.error(f"Ошибка остановки стрима: {e}")
     
+    def _restart_stream(self) -> None:
+        """Перезапускает стрим (используется watchdog'ом)"""
+        try:
+            self._logger.info("Перезапуск стрима по требованию watchdog")
+            if self._stream_adapter is not None:
+                self._stream_adapter.stop()
+            self._is_running = False
+            # Создаем задачу для перезапуска
+            asyncio.create_task(self._async_restart())
+        except Exception as e:
+            self._logger.error(f"Ошибка перезапуска стрима: {e}")
+    
+    async def _async_restart(self) -> None:
+        """Асинхронный перезапуск стрима"""
+        try:
+            await asyncio.sleep(1)
+            await self.start()
+        except Exception as e:
+            self._logger.error(f"Ошибка асинхронного перезапуска: {e}")
+    
     def reset(self) -> None:
         """Сбрасывает флаг остановки для возможности перезапуска"""
         self._is_running = False
     
-    async def _gap_fill_missing_candles(self) -> None:
-        """Дозагружает недостающие свечи с момента последней полученной до текущего времени.
-        
-        Использует REST-метод get_candles, публикует их через sink.on_candle, сохраняя семантику пайплайна.
-        """
-        try:
-            if self._last_candle_at is None:
-                return
-            # Нормализуем к aware-UTC и сдвигаем старт на +1с, чтобы избежать дубликата
-            from_time = self._last_candle_at
-            if getattr(from_time, 'tzinfo', None) is None:
-                from_time = from_time.replace(tzinfo=timezone.utc)
-            else:
-                from_time = from_time.astimezone(timezone.utc)
-            from_time = from_time + timedelta(seconds=1)
-            to_time = datetime.now(timezone.utc)
-            # Защитимся от некорректного порядка
-            if to_time <= from_time:
-                return
-            candles = await self._api_client.get_candles(
-                self._figi,
-                from_time,
-                to_time,
-                CandleInterval.CANDLE_INTERVAL_1_MIN,
-            )
-            if not candles:
-                return
-            for c in candles:
-                try:
-                    # Расчет цены как в stream-пути
-                    price = float(getattr(c.close, 'units', 0) + getattr(c.close, 'nano', 0) / 1e9)
-                except Exception:
-                    try:
-                        price = Money(c.close).to_float()
-                    except Exception:
-                        price = 0.0
-                if self._sink is not None:
-                    asyncio.create_task(self._sink.on_candle(c, price, self._figi))
-            self._logger.info(f"Gap-fill: дозагружено {len(candles)} свечей с {from_time} по {to_time}")
-        except Exception as e:
-            self._logger.warning(f"Gap-fill: ошибка дозагрузки свечей: {e}")
     
     async def _process_stream(self) -> None:
         """Обрабатывает данные из стрима"""
@@ -283,7 +270,10 @@ class MarketDataStream(MarketDataStreamable):
                     self._is_running = True  # позволяем циклу переподключений работать
                     # Gap-fill перед попыткой реконнекта (асинхронно)
                     try:
-                        asyncio.create_task(self._gap_fill_missing_candles())
+                        if self._watchdog and self._watchdog.last_candle_time is not None:
+                            asyncio.create_task(self._historical_loader.gap_fill_missing_candles(
+                                self._watchdog.last_candle_time, self._sink
+                            ))
                     except Exception:
                         pass
                     while self._is_running:
@@ -321,30 +311,37 @@ class MarketDataStream(MarketDataStreamable):
             if candle_figi != self._figi:
                 return
             
-            # Обновляем кэш и текущую цену
-            self._cached_candles.append(candle)
-            self._current_price = candle.close.units + candle.close.nano / 1_000_000_000
-            # Сохраняем время последней свечи как aware-UTC (fallback: now UTC)
+            # Добавляем свечу в кэш
+            self._candle_cache.add_candle(candle)
+            
+            # Обновляем время последней свечи для watchdog
             try:
                 lc_time = getattr(candle, 'time', None)
                 if lc_time is None:
-                    self._last_candle_at = datetime.now(timezone.utc)
+                    last_candle_time = datetime.now(timezone.utc)
                 else:
                     if getattr(lc_time, 'tzinfo', None) is None:
-                        self._last_candle_at = lc_time.replace(tzinfo=timezone.utc)
+                        last_candle_time = lc_time.replace(tzinfo=timezone.utc)
                     else:
-                        self._last_candle_at = lc_time.astimezone(timezone.utc)
+                        last_candle_time = lc_time.astimezone(timezone.utc)
+                
+                # Обновляем watchdog
+                if self._watchdog:
+                    self._watchdog.set_last_candle_time(last_candle_time)
+                    
             except Exception:
-                self._last_candle_at = datetime.now(timezone.utc)
+                if self._watchdog:
+                    self._watchdog.set_last_candle_time(datetime.now(timezone.utc))
             
             # Логируем получение свечи
             figi_info = getattr(candle, 'figi', self._figi)
-            self._logger.debug(f"Получена свеча: {candle.time} - {self._current_price} (FIGI: {figi_info})")
+            current_price = self._candle_cache.get_current_price()
+            self._logger.debug(f"Получена свеча: {candle.time} - {current_price} (FIGI: {figi_info})")
             
             # Публикуем свечу в приемник
             try:
                 if self._sink is not None:
-                    asyncio.create_task(self._sink.on_candle(candle, self._current_price or 0.0, self._figi))
+                    asyncio.create_task(self._sink.on_candle(candle, current_price or 0.0, self._figi))
             except Exception as pub_err:
                 self._logger.warning(f"Не удалось отправить свечу в визуализатор: {pub_err}")
             
@@ -368,40 +365,6 @@ class MarketDataStream(MarketDataStreamable):
         # Пока что просто логируем
         self._logger.debug(f"Получен стакан: {orderbook}")
 
-    async def _watchdog_stale_stream(self, stale_seconds: int = 120) -> None:
-        """Перезапускает стрим, если не приходят свечи более stale_seconds."""
-        try:
-            while self._is_running:
-                await asyncio.sleep(30)
-                if not self._is_running:
-                    break
-                if self._last_candle_at is None:
-                    continue
-                if (datetime.now() - self._last_candle_at).total_seconds() > stale_seconds:
-                    # Опционально: перезапускать только в торговые часы
-                    if self._watchdog_require_open_market:
-                        try:
-                            status = await get_market_status_enhanced()
-                            if not bool(status.get('is_trading', False)):
-                                self._logger.info(
-                                    f"Watchdog: тишина > {stale_seconds}с, рынок закрыт — перезапуск пропущен"
-                                )
-                                continue
-                        except Exception:
-                            # В случае ошибки проверки — позволяем перезапуск для надежности
-                            pass
-                    self._logger.warning(f"Watchdog: тишина > {stale_seconds}с — перезапуск стрима")
-                    try:
-                        if self._stream_adapter is not None:
-                            self._stream_adapter.stop()
-                    except Exception:
-                        pass
-                    self._is_running = False
-                    await asyncio.sleep(1)
-                    await self.start()
-                    return
-        except Exception:
-            pass
     
     def add_candle_callback(self, callback: Callable[[Candle], None]) -> None:
         """
@@ -441,17 +404,7 @@ class MarketDataStream(MarketDataStreamable):
         Returns:
             Список последних свечей
         """
-        try:
-            if not self._cached_candles:
-                self._logger.warning("Кэш свечей пуст")
-                return []
-            
-            # Возвращаем последние count свечей
-            return list(self._cached_candles)[-count:]
-            
-        except Exception as e:
-            self._logger.error(f"Ошибка получения последних свечей: {e}")
-            return []
+        return self._candle_cache.get_latest_candles(count)
     
     async def get_current_price(self) -> Optional[float]:
         """
@@ -460,7 +413,7 @@ class MarketDataStream(MarketDataStreamable):
         Returns:
             Текущая цена или None если данных нет
         """
-        return self._current_price
+        return self._candle_cache.get_current_price()
     
     def get_cached_candles(self) -> List[Candle]:
         """
@@ -469,7 +422,7 @@ class MarketDataStream(MarketDataStreamable):
         Returns:
             Список всех кэшированных свечей
         """
-        return list(self._cached_candles)
+        return self._candle_cache.get_cached_candles()
     
     def get_cache_size(self) -> int:
         """
@@ -478,12 +431,11 @@ class MarketDataStream(MarketDataStreamable):
         Returns:
             Количество свечей в кэше
         """
-        return len(self._cached_candles)
+        return self._candle_cache.get_cache_size()
     
     def clear_cache(self) -> None:
         """Очищает кэш свечей"""
-        self._cached_candles.clear()
-        self._current_price = None
+        self._candle_cache.clear_cache()
     
     async def _load_historical_data(self) -> None:
         """Загружает исторические данные фиксированного окна до текущего момента (UTC)."""
@@ -498,35 +450,24 @@ class MarketDataStream(MarketDataStreamable):
             self._logger.info(f"🔍 FIGI: {self._figi}")
             self._logger.info(f"🔍 from_date: {from_date} (тип: {type(from_date)})")
             self._logger.info(f"🔍 to_date: {to_date} (тип: {type(to_date)})")
-            self._logger.info(f"🔍 interval: {CandleInterval.CANDLE_INTERVAL_1_MIN}")
             
-            # Получаем исторические свечи
-            candles_response = await self._api_client.get_candles(
-                figi=self._figi,
-                from_date=from_date,
-                to_date=to_date,
-                interval=CandleInterval.CANDLE_INTERVAL_1_MIN
-            )
+            # Используем HistoricalDataLoader
+            candles = await self._historical_loader.load_historical_data(from_date, to_date)
             
-            if candles_response and candles_response.candles:
-                self._logger.info(f"Загружено {len(candles_response.candles)} исторических свечей")
+            if candles:
+                self._logger.info(f"Загружено {len(candles)} исторических свечей")
                 
                 # Логируем период данных для отладки
-                if candles_response.candles:
-                    first_candle = candles_response.candles[0]
-                    last_candle = candles_response.candles[-1]
+                if candles:
+                    first_candle = candles[0]
+                    last_candle = candles[-1]
                     self._logger.info(f"Период данных: {first_candle.time} - {last_candle.time}")
                 
                 # Обрабатываем каждую свечу
-                for candle in candles_response.candles:
+                for candle in candles:
                     self._process_candle(candle)
-                    
             else:
-                self._logger.warning(f"Не удалось загрузить исторические данные. Ответ: {candles_response}")
-                if candles_response:
-                    self._logger.warning(f"Тип ответа: {type(candles_response)}")
-                    if hasattr(candles_response, 'candles'):
-                        self._logger.warning(f"Свечи в ответе: {candles_response.candles}")
+                self._logger.warning("Не удалось загрузить исторические данные")
                 
         except Exception as e:
             self._logger.error(f"Ошибка загрузки исторических данных: {e}")
@@ -538,79 +479,7 @@ class MarketDataStream(MarketDataStreamable):
         Returns:
             tuple: (from_date, to_date) - период последней основной торговой сессии
         """
-        try:
-            market_hours = await get_tinkoff_market_hours()
-            schedule = await market_hours.get_trading_schedule()
-            
-            # Получаем текущую дату
-            current_date = datetime.now(market_hours.moscow_tz).date()
-            
-            # Ищем последний торговый день
-            last_trading_day = None
-            for i in range(7):  # Проверяем последние 7 дней
-                check_date = current_date - timedelta(days=i)
-                date_str = check_date.isoformat()
-                
-                # Проверяем разные форматы дат
-                search_keys = [
-                    f"{date_str}T00:00:00+00:00",
-                    date_str
-                ]
-                
-                for key in search_keys:
-                    if key in schedule['days']:
-                        day_info = schedule['days'][key]
-                        if day_info['is_trading_day'] and day_info['sessions']:
-                            last_trading_day = day_info
-                            break
-                
-                if last_trading_day:
-                    break
-            
-            if last_trading_day and last_trading_day['sessions']:
-                # Берем основную сессию (первую) - 10:00-18:45
-                main_session = last_trading_day['sessions'][0]
-                
-                # Конвертируем время в московское
-                if main_session['start'].tzinfo:
-                    session_start = main_session['start'].astimezone(market_hours.moscow_tz)
-                    session_end = main_session['end'].astimezone(market_hours.moscow_tz)
-                else:
-                    session_start = market_hours.moscow_tz.localize(main_session['start'])
-                    session_end = market_hours.moscow_tz.localize(main_session['end'])
-                
-                # Для фьючерсов используем только основную сессию (10:00-18:45)
-                # Принудительно устанавливаем время основной сессии
-                session_date = session_start.date()
-                from_date = market_hours.moscow_tz.localize(
-                    datetime.combine(session_date, time(10, 0))
-                )
-                to_date = market_hours.moscow_tz.localize(
-                    datetime.combine(session_date, time(18, 45))
-                )
-                
-                self._logger.info(f"Основная сессия для фьючерса: {from_date} - {to_date}")
-                return from_date, to_date
-            else:
-                # Если не найдена торговая сессия, используем стандартное время MOEX
-                self._logger.warning("Не найдена торговая сессия, используем стандартное время MOEX (10:00-18:45)")
-                yesterday = current_date - timedelta(days=1)
-                from_date = market_hours.moscow_tz.localize(
-                    datetime.combine(yesterday, time(10, 0))
-                )
-                to_date = market_hours.moscow_tz.localize(
-                    datetime.combine(yesterday, time(18, 45))
-                )
-                return from_date, to_date
-                
-        except Exception as e:
-            self._logger.error(f"Ошибка определения периода основной сессии: {e}")
-            # Fallback на вчерашний день
-            moscow_tz = pytz.timezone('Europe/Moscow')
-            yesterday = datetime.now(moscow_tz).date() - timedelta(days=1)
-            from_date = moscow_tz.localize(datetime.combine(yesterday, time(10, 0)))
-            to_date = moscow_tz.localize(datetime.combine(yesterday, time(18, 45)))
-            return from_date, to_date
+        return await self._historical_loader.get_last_main_trading_session_period()
     
     async def _get_last_trading_session_period(self) -> tuple:
         """
@@ -619,63 +488,4 @@ class MarketDataStream(MarketDataStreamable):
         Returns:
             tuple: (from_date, to_date) - период последней торговой сессии
         """
-        try:
-            market_hours = await get_tinkoff_market_hours()
-            schedule = await market_hours.get_trading_schedule()
-            
-            # Получаем текущую дату
-            current_date = datetime.now(market_hours.moscow_tz).date()
-            
-            # Ищем последний торговый день
-            last_trading_day = None
-            for i in range(7):  # Проверяем последние 7 дней
-                check_date = current_date - timedelta(days=i)
-                date_str = check_date.isoformat()
-                
-                # Проверяем разные форматы дат
-                search_keys = [
-                    f"{date_str}T00:00:00+00:00",
-                    date_str
-                ]
-                
-                for key in search_keys:
-                    if key in schedule['days']:
-                        day_info = schedule['days'][key]
-                        if day_info['is_trading_day'] and day_info['sessions']:
-                            last_trading_day = day_info
-                            break
-                
-                if last_trading_day:
-                    break
-            
-            if last_trading_day and last_trading_day['sessions']:
-                # Берем основную сессию (первую)
-                main_session = last_trading_day['sessions'][0]
-                
-                # Конвертируем время в московское
-                if main_session['start'].tzinfo:
-                    session_start = main_session['start'].astimezone(market_hours.moscow_tz)
-                    session_end = main_session['end'].astimezone(market_hours.moscow_tz)
-                else:
-                    session_start = main_session['start'].replace(tzinfo=timezone.utc).astimezone(market_hours.moscow_tz)
-                    session_end = main_session['end'].replace(tzinfo=timezone.utc).astimezone(market_hours.moscow_tz)
-                
-                self._logger.info(f"Найдена последняя торговая сессия: {session_start} - {session_end}")
-                return session_start, session_end
-            else:
-                # Если не нашли торговую сессию, используем стандартное время торговой сессии MOEX
-                yesterday = current_date - timedelta(days=1)
-                # Стандартное время торговой сессии MOEX: 10:00 - 23:50 МСК (основная + вечерняя)
-                from_date = datetime.combine(yesterday, datetime.min.time().replace(hour=10, minute=0)).replace(tzinfo=market_hours.moscow_tz)
-                to_date = datetime.combine(yesterday, datetime.min.time().replace(hour=23, minute=50)).replace(tzinfo=market_hours.moscow_tz)
-                self._logger.warning("Не найдена торговая сессия, используем стандартное время MOEX (10:00-23:50)")
-                return from_date, to_date
-                
-        except Exception as e:
-            self._logger.error(f"Ошибка определения периода последней сессии: {e}")
-            # Fallback: используем стандартное время торговой сессии MOEX
-            yesterday = datetime.now(market_hours.moscow_tz).date() - timedelta(days=1)
-            from_date = datetime.combine(yesterday, datetime.min.time().replace(hour=10, minute=0)).replace(tzinfo=market_hours.moscow_tz)
-            to_date = datetime.combine(yesterday, datetime.min.time().replace(hour=23, minute=50)).replace(tzinfo=market_hours.moscow_tz)
-            self._logger.warning("Fallback: используем стандартное время MOEX (10:00-23:50)")
-            return from_date, to_date
+        return await self._historical_loader.get_last_trading_session_period()

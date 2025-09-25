@@ -9,6 +9,9 @@ from collections import deque
 
 from tinkoff.invest import Candle, MoneyValue, Quotation
 from robotlib.trading.market_data_stream import MarketDataStream
+from robotlib.trading.candle_cache import CandleCache
+from robotlib.trading.stream_watchdog import StreamWatchdog
+from robotlib.trading.historical_data_loader import HistoricalDataLoader
 from robotlib.signal_manager import SignalManager
 
 
@@ -22,7 +25,18 @@ def api_client():
 @pytest.fixture
 def stream(api_client):
     figi = "FUTIMOEXF000"
-    return MarketDataStream(api_client, figi, cache_size=100, watchdog_enabled=False, watchdog_stale_seconds=120, watchdog_require_open_market=True)
+    # Создаем компоненты
+    candle_cache = CandleCache(cache_size=100)
+    historical_loader = HistoricalDataLoader(api_client, figi)
+    watchdog = None  # Отключаем watchdog для тестов
+    
+    return MarketDataStream(
+        api_client=api_client, 
+        figi=figi, 
+        candle_cache=candle_cache,
+        historical_loader=historical_loader,
+        watchdog=watchdog
+    )
 
 
 @pytest.fixture
@@ -40,7 +54,11 @@ async def test_get_current_price_none(market_data_stream):
 @pytest.mark.asyncio
 async def test_get_current_price_with_value(market_data_stream):
     """Тест получения текущей цены когда она есть"""
-    market_data_stream._current_price = 1500.5
+    # Создаем mock свечу для установки цены
+    mock_candle = Mock()
+    mock_candle.close.units = 1500
+    mock_candle.close.nano = 500000000  # 0.5
+    market_data_stream._candle_cache.add_candle(mock_candle)
     price = await market_data_stream.get_current_price()
     assert price == 1500.5
 

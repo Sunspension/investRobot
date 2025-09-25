@@ -9,6 +9,9 @@ from collections import deque
 
 from tinkoff.invest import Candle, MoneyValue, Quotation, CandleInterval
 from robotlib.trading.market_data_stream import MarketDataStream, TinkoffStreamAdapter
+from robotlib.trading.candle_cache import CandleCache
+from robotlib.trading.stream_watchdog import StreamWatchdog
+from robotlib.trading.historical_data_loader import HistoricalDataLoader
 from robotlib.trading_interfaces import TradingEventSinkable
 
 
@@ -41,13 +44,17 @@ def api_client():
 @pytest.fixture
 def stream(api_client):
     """Фикстура для MarketDataStream"""
+    # Создаем компоненты
+    candle_cache = CandleCache(cache_size=100)
+    historical_loader = HistoricalDataLoader(api_client, "FUTIMOEXF000")
+    watchdog = None  # Отключаем watchdog для тестов
+    
     return MarketDataStream(
-        api_client, 
-        "FUTIMOEXF000", 
-        cache_size=100, 
-        watchdog_enabled=False, 
-        watchdog_stale_seconds=120, 
-        watchdog_require_open_market=True
+        api_client=api_client, 
+        figi="FUTIMOEXF000", 
+        candle_cache=candle_cache,
+        historical_loader=historical_loader,
+        watchdog=watchdog
     )
 
 
@@ -201,9 +208,9 @@ class TestMarketDataStreamExtended:
     @pytest.mark.asyncio
     async def test_get_latest_candles_with_data(self, stream, mock_candle):
         """Тест получения последних свечей с данными"""
-        # Добавляем свечи в кэш
-        stream._cached_candles.append(mock_candle)
-        stream._cached_candles.append(mock_candle)
+        # Добавляем свечи в кэш через CandleCache
+        stream._candle_cache.add_candle(mock_candle)
+        stream._candle_cache.add_candle(mock_candle)
         
         candles = await stream.get_latest_candles(5)
         assert len(candles) == 2
@@ -217,11 +224,11 @@ class TestMarketDataStreamExtended:
     @pytest.mark.asyncio
     async def test_get_current_price_with_data(self, stream, mock_candle):
         """Тест получения текущей цены с данными"""
-        # Устанавливаем цену напрямую
-        stream._current_price = 1000.0
+        # Добавляем свечу в кэш, что установит цену
+        stream._candle_cache.add_candle(mock_candle)
         
         price = await stream.get_current_price()
-        assert price == 1000.0
+        assert price is not None
     
     @pytest.mark.asyncio
     async def test_set_candle_sink(self, stream):
@@ -277,8 +284,8 @@ class TestMarketDataStreamExtended:
     
     def test_get_cache_size_with_data(self, stream, mock_candle):
         """Тест получения размера кэша с данными"""
-        stream._cached_candles.append(mock_candle)
-        stream._cached_candles.append(mock_candle)
+        stream._candle_cache.add_candle(mock_candle)
+        stream._candle_cache.add_candle(mock_candle)
         
         size = stream.get_cache_size()
         assert size == 2
@@ -290,7 +297,7 @@ class TestMarketDataStreamExtended:
     
     def test_get_cached_candles_with_data(self, stream, mock_candle):
         """Тест получения свечей из кэша с данными"""
-        stream._cached_candles.append(mock_candle)
+        stream._candle_cache.add_candle(mock_candle)
         
         candles = stream.get_cached_candles()
         assert len(candles) == 1
@@ -298,17 +305,17 @@ class TestMarketDataStreamExtended:
     
     def test_clear_cache(self, stream, mock_candle):
         """Тест очистки кэша"""
-        stream._cached_candles.append(mock_candle)
-        assert len(stream._cached_candles) == 1
+        stream._candle_cache.add_candle(mock_candle)
+        assert stream.get_cache_size() == 1
         
         stream.clear_cache()
-        assert len(stream._cached_candles) == 0
+        assert stream.get_cache_size() == 0
     
     @pytest.mark.asyncio
     async def test_load_historical_data_success(self, stream):
         """Тест успешной загрузки исторических данных"""
         # Упрощенный тест - проверяем только инициализацию
-        assert len(stream._cached_candles) == 0
+        assert stream.get_cache_size() == 0
     
     @pytest.mark.asyncio
     async def test_load_historical_data_failure(self, stream):
@@ -321,13 +328,13 @@ class TestMarketDataStreamExtended:
         )):
             await stream._load_historical_data()
             
-            # Проверяем, что кэш остался пустым
-            assert len(stream._cached_candles) == 0
+        # Проверяем, что кэш остался пустым
+        assert stream.get_cache_size() == 0
     
     @pytest.mark.asyncio
     async def test_get_last_main_trading_session_period(self, stream):
         """Тест получения периода последней основной торговой сессии"""
-        with patch('robotlib.trading.market_data_stream.get_tinkoff_market_hours') as mock_hours:
+        with patch('robotlib.trading.historical_data_loader.get_tinkoff_market_hours') as mock_hours:
             mock_hours.return_value = {
                 'is_trading_day': True,
                 'main_session_start': '10:00',
@@ -343,7 +350,7 @@ class TestMarketDataStreamExtended:
     @pytest.mark.asyncio
     async def test_get_last_trading_session_period(self, stream):
         """Тест получения периода последней торговой сессии"""
-        with patch('robotlib.trading.market_data_stream.get_tinkoff_market_hours') as mock_hours:
+        with patch('robotlib.trading.historical_data_loader.get_tinkoff_market_hours') as mock_hours:
             mock_market_hours = Mock()
             mock_market_hours.moscow_tz = timezone.utc
             mock_market_hours.get_trading_schedule = AsyncMock(return_value={

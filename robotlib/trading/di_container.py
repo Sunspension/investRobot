@@ -13,6 +13,11 @@ from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.trading.order_executor import OrderExecutor
 from robotlib.trading.market_data_stream import MarketDataStream
 from robotlib.trading.stream_config import StreamConfig
+from robotlib.trading.candle_cache import CandleCache
+from robotlib.trading.candle_cache_interfaces import CandleCacheable
+from robotlib.trading.stream_watchdog import StreamWatchdog
+from robotlib.trading.historical_data_loader import HistoricalDataLoader
+from robotlib.trading.historical_data_loader_interfaces import HistoricalDataLoaderable
 from robotlib.trading.position_sizing_service import PositionSizingService
 from robotlib.trading.position_sizing_config import PositionSizingConfig
 from robotlib.strategies.long import LongStrategy
@@ -264,13 +269,20 @@ class TradingSystemContainer:
             except Exception:
                 stream_cfg = StreamConfig()
 
+            # Создаем компоненты для MarketDataStream
+            candle_cache = CandleCache(cache_size=100)
+            historical_loader = HistoricalDataLoader(api_client, self._config.figi)
+            watchdog = StreamWatchdog(
+                stale_seconds=stream_cfg.watchdog_stale_seconds,
+                require_open_market=stream_cfg.watchdog_require_open_market
+            ) if stream_cfg.watchdog_enabled else None
+            
             self._instances['market_data_stream'] = MarketDataStream(
                 api_client=api_client,
                 figi=self._config.figi,
-                cache_size=100,
-                watchdog_enabled=stream_cfg.watchdog_enabled,
-                watchdog_stale_seconds=stream_cfg.watchdog_stale_seconds,
-                watchdog_require_open_market=stream_cfg.watchdog_require_open_market,
+                candle_cache=candle_cache,
+                historical_loader=historical_loader,
+                watchdog=watchdog,
             )
             # Создаем TradingToUIBridge как основной sink
             bridge = self._create_trading_bridge()
