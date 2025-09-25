@@ -22,7 +22,7 @@ from robotlib.trading.session_stats import SessionStats
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.utils.money import Money
 from robotlib.trading.events import TradingEvent, EventType
-from visualization.data_manager import DataManager
+from visualization.data_manager import VisualizationDataStore
 
 
 class TestModelDataIntegrity:
@@ -121,6 +121,7 @@ class TestModelDataIntegrity:
         market_data_stream = Mock()
         signal_manager = Mock()
         strategy_manager = Mock()
+        event_sink = Mock()
         
         # Создаем TradingDependencies
         dependencies = TradingDependencies(
@@ -131,7 +132,8 @@ class TestModelDataIntegrity:
             order_executor=order_executor,
             market_data_stream=market_data_stream,
             signal_manager=signal_manager,
-            strategy_manager=strategy_manager
+            strategy_manager=strategy_manager,
+            event_sink=event_sink
         )
         
         # Проверяем целостность
@@ -179,8 +181,8 @@ class TestModelDataIntegrity:
         assert isinstance(stats['total_pnl'], float)
     
     def test_data_manager_integrity(self):
-        """Тест целостности DataManager"""
-        data_manager = DataManager()
+        """Тест целостности VisualizationDataStore"""
+        data_manager = VisualizationDataStore()
         
         # Добавляем тестовые данные
         candle_data = {
@@ -390,7 +392,7 @@ class TestModelDataIntegrity:
         """Тест консистентности данных между компонентами"""
         # Создаем компоненты
         signal_manager = SignalManager()
-        data_manager = DataManager()
+        data_manager = VisualizationDataStore()
         
         # Создаем тестовую свечу
         mock_candle = Mock()
@@ -404,7 +406,7 @@ class TestModelDataIntegrity:
         # Обрабатываем свечу в SignalManager
         signal = signal_manager.add_candle(mock_candle)
         
-        # Обрабатываем свечу в DataManager
+        # Обрабатываем свечу в VisualizationDataStore
         candle_data = {
             'time': mock_candle.time,
             'open': Money(mock_candle.open).to_float(),

@@ -4,8 +4,8 @@
 Управляет свечами, сигналами, ордерами и их синхронизацией
 """
 
-import threading
 import sqlite3
+import threading
 from datetime import datetime
 from typing import List, Dict, Optional, Any
 
@@ -14,8 +14,8 @@ import pytz
 from visualization.formatters import to_moscow_time
 from robotlib.utils.logger import get_logger
 
-class DataManager:
-    """Менеджер данных для визуализации"""
+class VisualizationDataStore:
+    """Хранилище данных для визуализации"""
     
     def __init__(self):
         self.logger = get_logger(__name__)
@@ -462,7 +462,6 @@ class DataManager:
         """
         try:
             import sqlite3
-            import pandas as pd
             from visualization.formatters import to_moscow_time
             import pytz
             from datetime import timezone as _tz

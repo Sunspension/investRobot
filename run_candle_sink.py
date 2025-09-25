@@ -14,7 +14,8 @@ from robotlib.utils.backoff import compute_backoff_delay
 logger = get_logger(__name__)
 
 
-async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
+async def _run_candle_sink(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
+    """Запускает CandleDataSink для сбора и сохранения свечей в SQLite"""
     cfg = load_config()
 
     # Ensure data directory exists
@@ -33,8 +34,8 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
             watchdog_require_open_market=cfg.watchdog_require_open_market,
         )
 
-        sink = CandleDataSink(db_path=db_path, figi=figi)
-        stream.set_event_sink(sink)
+        candle_sink = CandleDataSink(db_path=db_path, figi=figi)
+        stream.set_event_sink(candle_sink)
         stop_event = asyncio.Event()
         
         def _handle_signal(signum, frame):  # type: ignore[no-redef]
@@ -94,14 +95,14 @@ async def _run(figi: str, db_path: str, run_seconds: Optional[int]) -> None:
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Standalone market data ingestor → SQLite")
+    parser = argparse.ArgumentParser(description="Standalone CandleDataSink → SQLite")
     parser.add_argument("--figi", default="FUTIMOEXF000", help="Instrument FIGI")
     parser.add_argument("--db", default=os.path.join("data", "market.db"), help="SQLite DB path")
     parser.add_argument("--seconds", type=int, default=0, help="Run duration in seconds (0 = infinite)")
     args = parser.parse_args()
 
-    logger.info(f"Старт сбора рыночных данных: FIGI={args.figi}, БД={args.db}, секунд={args.seconds}")
-    asyncio.run(_run(args.figi, args.db, args.seconds if args.seconds > 0 else None))
+    logger.info(f"Старт CandleDataSink: FIGI={args.figi}, БД={args.db}, секунд={args.seconds}")
+    asyncio.run(_run_candle_sink(args.figi, args.db, args.seconds if args.seconds > 0 else None))
 
 
 if __name__ == "__main__":

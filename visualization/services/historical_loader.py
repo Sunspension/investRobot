@@ -7,7 +7,7 @@ from robotlib.utils.logger import get_logger
 
 
 class HistoricalLoader:
-    """Сервис начальной подгрузки исторических свечей из SQLite в DataManager."""
+    """Сервис начальной подгрузки исторических свечей из SQLite в VisualizationDataStore."""
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         self._logger = get_logger(__name__)

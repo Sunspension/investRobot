@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from robotlib.signal_types import Signal
-from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.trading_interfaces import TradingEventSinkable
 
 
 class SignalDispatchable(Protocol):

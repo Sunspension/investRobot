@@ -9,7 +9,7 @@ from collections import deque
 
 from tinkoff.invest import Candle, MoneyValue, Quotation, CandleInterval
 from robotlib.trading.market_data_stream import MarketDataStream, TinkoffStreamAdapter
-from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.trading_interfaces import TradingEventSinkable
 
 
 class MockTradingEventSinkable(TradingEventSinkable):
@@ -186,7 +186,7 @@ class TestMarketDataStreamExtended:
         # Просто проверяем, что метод не падает
         try:
             task = asyncio.create_task(stream._watchdog_stale_stream(stale_seconds=1))
-            await asyncio.sleep(0.01)
+            # Нет задержек - тест должен быть мгновенным
             stream._is_running = False
             await task
         except Exception:
@@ -224,8 +224,8 @@ class TestMarketDataStreamExtended:
         assert price == 1000.0
     
     @pytest.mark.asyncio
-    async def test_set_event_sink(self, stream):
-        """Тест установки визуализационного sink"""
+    async def test_set_candle_sink(self, stream):
+        """Тест установки candle sink"""
         sink = MockTradingEventSinkable()
         
         stream.set_event_sink(sink)

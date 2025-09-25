@@ -203,7 +203,8 @@ class TestSessionController(unittest.TestCase):
                 # Запускаем цикл на короткое время
                 async def run_test():
                     task = asyncio.create_task(self.controller.run_trading_loop())
-                    await asyncio.sleep(0.1)  # Короткая пауза
+                    # Даем время на выполнение
+                    await asyncio.sleep(0.01)
                     self.controller._is_running = False
                     await task
                 asyncio.run(run_test())
@@ -230,7 +231,8 @@ class TestSessionController(unittest.TestCase):
                 # Запускаем цикл на короткое время
                 async def run_test():
                     task = asyncio.create_task(self.controller.run_trading_loop())
-                    await asyncio.sleep(0.1)  # Короткая пауза
+                    # Даем время на выполнение
+                    await asyncio.sleep(0.01)
                     self.controller._is_running = False
                     await task
                 asyncio.run(run_test())
@@ -366,7 +368,8 @@ class TestSessionControllerIntegration(unittest.TestCase):
                     # Запускаем цикл на короткое время
                     async def run_test():
                         task = asyncio.create_task(self.controller.run_trading_loop())
-                        await asyncio.sleep(0.1)  # Короткая пауза
+                        # Даем время на выполнение
+                        await asyncio.sleep(0.01)
                         self.controller._is_running = False
                         await task
                     asyncio.run(run_test())

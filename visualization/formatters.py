@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 from datetime import datetime
-
 
 def to_moscow_time(dt: datetime | None) -> datetime:
     """Возвращает naive-datetime в часовом поясе МСК для стабильного отображения в Plotly.
@@ -18,5 +16,3 @@ def to_moscow_time(dt: datetime | None) -> datetime:
         return dt.astimezone(msk).replace(tzinfo=None)
     except Exception:
         return dt if dt is not None else datetime.now()
-
-

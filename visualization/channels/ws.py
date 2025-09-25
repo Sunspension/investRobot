@@ -39,6 +39,14 @@ class WebSocketHub:
                 dead.append(ws)
         for ws in dead:
             self._connections.discard(ws)
+    
+    def request_snapshot(self, snapshot_callback) -> None:
+        """Запрашивает снэпшот через callback функцию"""
+        if hasattr(snapshot_callback, '__call__'):
+            try:
+                snapshot_callback()
+            except Exception as e:
+                self._logger.error(f"Ошибка при запросе снэпшота: {e}")
 
     def start_ticker(self) -> None:
         if self._ticker_thread and self._ticker_thread.is_alive():

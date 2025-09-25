@@ -7,12 +7,48 @@ from dash import Dash, Input, Output, State, html
 from plotly.graph_objects import Figure
 
 
+class UIStateManager:
+    """Менеджер состояния UI для хранения данных между callback'ами"""
+    
+    def __init__(self):
+        self._state = {
+            'candles_data': [],
+            'signals_data': [],
+            'orders_data': [],
+            'portfolio_data': {},
+            'market_status': {},
+            'current_price': 0.0,
+            'buy_count': 0,
+            'sell_count': 0,
+            'last_update': None
+        }
+    
+    def get_state(self):
+        return self._state
+    
+    def update_state(self, new_state):
+        self._state.update(new_state)
+    
+    def append_candle(self, candle):
+        self._state['candles_data'].append(candle)
+        self._state['current_price'] = candle.get('close', self._state['current_price'])
+        self._state['last_update'] = candle.get('time')
+    
+    def append_signal(self, signal):
+        self._state['signals_data'].append(signal)
+        if signal.get('type') == 'buy':
+            self._state['buy_count'] += 1
+        else:
+            self._state['sell_count'] += 1
+
+# Глобальный экземпляр менеджера состояния
+_ui_state_manager = UIStateManager()
+
 def register_core_callbacks(
     app: Dash,
     *,
     ui_components,
     chart_builder,
-    data_manager,
     logger,
     market_status_service=None
 ):
@@ -36,8 +72,55 @@ def register_core_callbacks(
     )
     def update_display(ws_message):  # noqa: ANN001
         try:
-            logger.debug("Callback вызван по WebSocket сообщению")
-            snapshot = data_manager.get_data_snapshot()
+            logger.debug(f"Callback вызван по WebSocket сообщению: {type(ws_message)} - {ws_message}")
+            
+            # Логируем текущее состояние UI
+            current_state = _ui_state_manager.get_state()
+            logger.debug(f"Текущее состояние UI: candles={len(current_state.get('candles_data', []))}, orders={len(current_state.get('orders_data', []))}")
+            
+            # Извлекаем данные из WebSocket сообщения
+            if isinstance(ws_message, dict) and 'data' in ws_message:
+                # WebSocket сообщение обернуто в объект с полем 'data'
+                import json
+                try:
+                    data_str = ws_message['data']
+                    if isinstance(data_str, str):
+                        ws_message = json.loads(data_str)
+                    else:
+                        ws_message = data_str
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Не удалось распарсить WebSocket данные: {e}")
+                    return
+            
+            # Обрабатываем разные типы WebSocket сообщений
+            if isinstance(ws_message, dict):
+                msg_type = ws_message.get('type')
+                
+                if msg_type == 'snapshot':
+                    # Полный снэпшот - обновляем все данные
+                    snapshot_data = ws_message.get('data', current_state)
+                    logger.debug(f"Получен снэпшот: candles={len(snapshot_data.get('candles_data', []))}, orders={len(snapshot_data.get('orders_data', []))}, market_status={snapshot_data.get('market_status', {})}")
+                    _ui_state_manager.update_state(snapshot_data)
+                    logger.debug("Обновлен полный снэпшот данных")
+                    updated_state = _ui_state_manager.get_state()
+                    logger.debug(f"Новое состояние UI: candles={len(updated_state.get('candles_data', []))}, orders={len(updated_state.get('orders_data', []))}")
+                    
+                elif msg_type == 'candle_added':
+                    # Инкрементальное обновление свечи
+                    new_candle = ws_message.get('candle')
+                    if new_candle:
+                        _ui_state_manager.append_candle(new_candle)
+                        logger.debug(f"Добавлена новая свеча: {new_candle.get('time')} @ {new_candle.get('close')}")
+                        
+                elif msg_type == 'signal_added':
+                    # Инкрементальное обновление сигнала
+                    new_signal = ws_message.get('signal')
+                    if new_signal:
+                        _ui_state_manager.append_signal(new_signal)
+                        logger.debug(f"Добавлен новый сигнал: {new_signal.get('type')} @ {new_signal.get('price')}")
+            
+            # Используем текущее состояние для построения UI
+            snapshot = _ui_state_manager.get_state()
 
             # График
             hide_inactive = True
@@ -100,6 +183,7 @@ def register_core_callbacks(
             orders_list = ui_components.create_orders_list(snapshot['orders_data'])
             recent_orders = ui_components.create_recent_orders(snapshot['orders_data'])
 
+            logger.debug(f"Возвращаем данные для UI: current_price={current_price}, candles={len(snapshot['candles_data'])}, orders={len(snapshot['orders_data'])}")
             return (
                 fig,
                 f"{float(current_price):.1f} ₽",
@@ -142,10 +226,13 @@ def register_core_callbacks(
         [Input('ws_events', 'message')],
         prevent_initial_call=True,
     )
-    def update_pnl_color(_msg):  # noqa: ANN001
+    def update_pnl_color(ws_message):  # noqa: ANN001
         try:
-            snapshot = data_manager.get_data_snapshot()
-            pnl_value = snapshot.get('portfolio_data', {}).get('pnl', 0)
+            # Получаем данные из WebSocket сообщения
+            pnl_value = 0
+            if isinstance(ws_message, dict) and ws_message.get('type') == 'snapshot':
+                snapshot = ws_message.get('data', {})
+                pnl_value = snapshot.get('portfolio_data', {}).get('pnl', 0)
             if pnl_value > 0:
                 color = '#28a745'
             elif pnl_value < 0:
@@ -161,10 +248,13 @@ def register_core_callbacks(
         [Input('ws_events', 'message')],
         prevent_initial_call=True,
     )
-    def update_variation_margin_color(_msg):  # noqa: ANN001
+    def update_variation_margin_color(ws_message):  # noqa: ANN001
         try:
-            snapshot = data_manager.get_data_snapshot()
-            value = snapshot.get('portfolio_data', {}).get('variation_margin', 0)
+            # Получаем данные из WebSocket сообщения
+            value = 0
+            if isinstance(ws_message, dict) and ws_message.get('type') == 'snapshot':
+                snapshot = ws_message.get('data', {})
+                value = snapshot.get('portfolio_data', {}).get('variation_margin', 0)
             if value > 0:
                 color = '#28a745'
             elif value < 0:

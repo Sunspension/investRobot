@@ -2,7 +2,7 @@ import datetime as dt
 
 import pandas as pd
 
-from visualization.data_manager import DataManager
+from visualization.data_manager import VisualizationDataStore
 
 
 def test_load_historical_today_and_cap(monkeypatch, tmp_path):
@@ -32,7 +32,7 @@ def test_load_historical_today_and_cap(monkeypatch, tmp_path):
             )
         conn.commit()
 
-    dm = DataManager()
+    dm = VisualizationDataStore()
     dm.load_historical_candles(str(db), "F1", limit=500)
     snap = dm.get_data_snapshot()
     # Только сегодня (лимит больше не режем до 200 в загрузке)

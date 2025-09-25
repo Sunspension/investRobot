@@ -1,19 +1,17 @@
 """
 Интерфейсы для торговых компонентов - обеспечивают инверсию зависимостей
 """
-from abc import ABC, abstractmethod
 from typing import Protocol, Optional, List, Dict, Any, runtime_checkable
-from visualization.interfaces import DataManagerable
-from dataclasses import dataclass
+from visualization.interfaces import VisualizationDataStoreable
 
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution
 from robotlib.trading.order_executor import OrderResult
 from robotlib.trading.portfolio_manager import Portfolio, Position
-from robotlib.trading.session_interfaces import SessionStatsable, SessionInitializable
+from robotlib.trading.session_interfaces import SessionStatsable
 from robotlib.trading.risk_manager import RiskLimits, RiskCheck
 from tinkoff.invest import Candle, HistoricCandle
-
+from robotlib.trading_interfaces import TradingEventSinkable
 
 class APIClientable(Protocol):
     """Интерфейс для API клиента"""
@@ -282,7 +280,8 @@ class TradingDependencies:
         strategy_manager: StrategyManageable,
         market_data_stream: MarketDataStreamable,
         session_stats: SessionStatsable,
-        data_manager: DataManagerable | None = None
+        event_sink: TradingEventSinkable,
+        data_manager: VisualizationDataStoreable | None = None
     ):
         self.api_client = api_client
         self.order_executor = order_executor
@@ -292,4 +291,5 @@ class TradingDependencies:
         self.strategy_manager = strategy_manager
         self.market_data_stream = market_data_stream
         self.session_stats = session_stats
+        self.event_sink = event_sink
         self.data_manager = data_manager

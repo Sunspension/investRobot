@@ -8,7 +8,7 @@ from robotlib.trading.portfolio_manager import PortfolioManager
 
 
 class PortfolioLoader:
-    """Сервис загрузки портфеля из API и адаптации к формату DataManager."""
+    """Сервис загрузки портфеля из API и адаптации к формату VisualizationDataStore."""
 
     def __init__(self) -> None:
         self._logger = get_logger(__name__)

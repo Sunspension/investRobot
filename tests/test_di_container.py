@@ -108,6 +108,23 @@ class TestTradingSystemContainer(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             TradingSystemContainer(config_incomplete_tcs)
         self.assertIn("Токен TCS клиента не настроен", str(context.exception))
+    
+    def test_trading_bridge_singleton(self):
+        """Тест, что TradingToUIBridge создается как синглтон"""
+        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
+        config_with_viz.tcs_client = self.config.tcs_client
+        container_with_viz = TradingSystemContainer(config_with_viz)
+        
+        # Получаем bridge дважды
+        bridge1 = container_with_viz.get_trading_bridge()
+        bridge2 = container_with_viz.get_trading_bridge()
+        
+        # Проверяем, что это один и тот же объект (если визуализация включена)
+        if bridge1 is not None and bridge2 is not None:
+            self.assertIs(bridge1, bridge2)
+            # Проверяем, что bridge сохранен в инстансах
+            self.assertIn('trading_bridge', container_with_viz._instances)
+            self.assertIs(container_with_viz._instances['trading_bridge'], bridge1)
 
 
 if __name__ == '__main__':

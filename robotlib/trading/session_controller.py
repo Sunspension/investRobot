@@ -97,6 +97,23 @@ class SessionController(SessionControllable):
         except Exception as e:
             self._logger.warning(f"Не удалось опубликовать портфель на старте: {e}")
 
+    async def _start_periodic_snapshots(self) -> None:
+        """Запускает периодические снэпшоты для UI после загрузки начальных данных"""
+        try:
+            event_sink = self._dependencies.event_sink
+            self._logger.debug(f"_start_periodic_snapshots: event_sink={event_sink is not None}")
+            if event_sink is not None:
+                self._logger.debug(f"_start_periodic_snapshots: event_sink={event_sink is not None}, type={type(event_sink).__name__}")
+                if hasattr(event_sink, 'start_periodic_snapshots'):
+                    await event_sink.start_periodic_snapshots()
+                    self._logger.info("Периодические снэпшоты запущены")
+                else:
+                    self._logger.warning(f"event_sink не имеет метода start_periodic_snapshots: {type(event_sink).__name__}")
+            else:
+                self._logger.warning("event_sink не найден")
+        except Exception as e:
+            self._logger.warning(f"Не удалось запустить периодические снэпшоты: {e}")
+
 
     async def _warmup_strategies(self) -> None:
         try:
@@ -119,7 +136,7 @@ class SessionController(SessionControllable):
                     dispatch_signals=False,
                     place_orders=False,
                 )
-                self._logger.info(f"Прогрето стратегий барами: {len(bars)}")
+                self._logger.info(f"Прогрев стратегий барами: {len(bars)}")
         except Exception as e:
             self._logger.warning(f"Прогрев стратегий пропущен: {e}")
 
@@ -138,6 +155,9 @@ class SessionController(SessionControllable):
                 await self._visualizer.start()
                 self._logger.info("✅ Dash визуализатор событий запущен")
                 await self._publish_initial_portfolio()
+                
+                # Запускаем периодические снэпшоты после загрузки начальных данных
+                await self._start_periodic_snapshots()
 
             await self._warmup_strategies()
             await self._log_session_info()
@@ -242,6 +262,9 @@ class SessionController(SessionControllable):
             # Используем расширенную проверку с поддержкой выходных торгов
             market_status = await get_market_status_enhanced()
             
+            # Отправляем статус рынка в UI
+            await self._send_market_status_to_ui(market_status)
+            
             if market_status.get('is_trading'):
                 session_type = market_status.get('session_type', 'unknown')
                 message = market_status.get('message', 'Рынок открыт')
@@ -262,6 +285,24 @@ class SessionController(SessionControllable):
             # Ждем восстановления API
             await self._wait_for_api_recovery()
             return True
+    
+    async def _send_market_status_to_ui(self, market_status: dict) -> None:
+        """Отправляет статус рынка в UI через TradingToUIBridge"""
+        try:
+            event_sink = self._dependencies.event_sink
+            
+            if event_sink is not None and hasattr(event_sink, 'on_market_status'):
+                status_payload = {
+                    'is_trading': market_status.get('is_trading', False),
+                    'session_type': market_status.get('session_type', 'unknown'),
+                    'current_time': market_status.get('current_time'),
+                    'next_session': market_status.get('next_session'),
+                    'time_until_next': market_status.get('time_until_next')
+                }
+                await event_sink.on_market_status(status_payload)
+                self._logger.debug(f"Статус рынка отправлен в UI: is_trading={market_status.get('is_trading', False)}")
+        except Exception as e:
+            self._logger.warning(f"Не удалось отправить статус рынка в UI: {e}")
     
     async def _wait_for_market_open(self) -> None:
         """Ждет открытия рынка"""
@@ -370,18 +411,7 @@ class SessionController(SessionControllable):
         """Получает новые свечи"""
         try:
             candles = await self._dependencies.market_data_stream.get_latest_candles()
-            # Отправляем свечи в визуализатор
-            if self._visualizer and candles:
-                for candle in candles:
-                    candle_data = {
-                        'time': candle.time,
-                        'open': candle.open.units + candle.open.nano / 1_000_000_000,
-                        'high': candle.high.units + candle.high.nano / 1_000_000_000,
-                        'low': candle.low.units + candle.low.nano / 1_000_000_000,
-                        'close': candle.close.units + candle.close.nano / 1_000_000_000,
-                        'volume': candle.volume
-                    }
-                    await self._visualizer.add_candle(candle_data)
+            # Свечи отправляются в визуализатор через TradingToUIBridge
             return candles
         except Exception as e:
             self._logger.error(f"Ошибка получения свечей: {e}")
@@ -395,18 +425,7 @@ class SessionController(SessionControllable):
                 signals = await self._dependencies.strategy_manager.on_candle(candle)
                 
                 # Отправляем сигналы в визуализатор
-                if self._visualizer and signals:
-                    for signal in signals:
-                        signal_data = {
-                            'time': signal.time,
-                            'type': signal.type,
-                            'price': signal.price,
-                            'reason': getattr(signal, 'reason', ''),
-                            'strategy': getattr(signal, 'strategy', ''),
-                            'quantity': getattr(signal, 'quantity', 1),
-                            'strength': getattr(signal, 'strength', 0.0)
-                        }
-                        await self._visualizer.add_signal(signal_data)
+                # Сигналы отправляются в визуализатор через TradingToUIBridge
                 
                 # Обновляем статистику
                 self._stats.add_signal()

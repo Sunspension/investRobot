@@ -5,7 +5,7 @@ from robotlib.indicators import IncrementalMACD, IncrementalATR, MACDPoint
 from robotlib.utils.peaks import find_peaks_indices, find_troughs_indices
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
-from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.trading_interfaces import TradingEventSinkable
 from robotlib.utils.logger import get_logger
 from robotlib.signal_types import Signal
 import asyncio

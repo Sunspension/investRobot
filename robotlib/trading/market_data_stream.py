@@ -10,10 +10,9 @@ from tinkoff.invest import Candle, HistoricCandle, CandleInterval
 from tinkoff.invest.market_data_stream.async_market_data_stream_manager import AsyncMarketDataStreamManager
 
 from robotlib.utils.logger import get_logger
-from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 from robotlib.utils.tinkoff_market_hours import get_tinkoff_market_hours
 from robotlib.trading.interfaces import TinkoffAPIClientable, MarketDataStreamable
-from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.trading_interfaces import CandleEventSinkable
 from robotlib.utils.backoff import compute_backoff_delay
 from tinkoff.invest import MarketDataRequest, SubscribeCandlesRequest, CandleInstrument, SubscriptionAction
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
@@ -87,13 +86,13 @@ class MarketDataStream(MarketDataStreamable):
         self._stream_adapter: Optional[TinkoffStreamAdapter] = None
         self._is_running = False
         self._current_price: Optional[float] = None
-        self._sink: Optional[TradingEventSinkable] = None
+        self._sink: Optional[CandleEventSinkable] = None
         self._last_candle_at: Optional[datetime] = None
         self._watchdog_enabled = watchdog_enabled
         self._watchdog_stale_seconds = watchdog_stale_seconds
         self._watchdog_require_open_market = watchdog_require_open_market
 
-    def set_event_sink(self, sink: TradingEventSinkable) -> None:
+    def set_event_sink(self, sink: CandleEventSinkable) -> None:
         """Устанавливает приемник событий (candle/signal/market_status)."""
         self._sink = sink
     
@@ -151,23 +150,6 @@ class MarketDataStream(MarketDataStreamable):
                     asyncio.create_task(self._gap_fill_missing_candles())
             except Exception:
                 pass
-            
-            # Проверяем статус рынка (расширенная логика с типом сессии и таймерами)
-            market_status = await get_market_status_enhanced()
-            # Публикуем изменение статуса рынка
-            try:
-                status_payload = {
-                    'is_trading': market_status.get('is_trading', False),
-                    'session_type': market_status.get('session_type', 'unknown'),
-                    'current_time': market_status.get('current_time'),
-                    'next_session': market_status.get('next_session'),
-                    'time_until_next': market_status.get('time_until_next')
-                }
-                if self._sink is not None:
-                    asyncio.create_task(self._sink.on_market_status(status_payload))
-                self._logger.info(f"Опубликован статус рынка: is_trading={market_status.get('is_trading', False)}")
-            except Exception as publish_error:
-                self._logger.warning(f"Не удалось опубликовать статус рынка: {publish_error}")
             
             # Всегда подписываемся на поток свечей, независимо от статуса рынка
             try:
@@ -260,7 +242,6 @@ class MarketDataStream(MarketDataStreamable):
             )
             if not candles:
                 return
-            # Преобразуем и публикуем через sink для единообразия (и записи в БД, если sink=DBIngestionSink)
             for c in candles:
                 try:
                     # Расчет цены как в stream-пути
@@ -285,15 +266,12 @@ class MarketDataStream(MarketDataStreamable):
                     async for market_data in self._stream_adapter:
                         if not self._is_running:
                             break
-                        
                         # Обрабатываем свечи
                         if market_data.candle:
                             self._process_candle(market_data.candle)
-                        
                         # Обрабатываем другие типы данных
                         if market_data.trade:
                             await self._process_trade(market_data.trade)
-                        
                         if market_data.orderbook:
                             await self._process_orderbook(market_data.orderbook)
                             
@@ -363,7 +341,7 @@ class MarketDataStream(MarketDataStreamable):
             figi_info = getattr(candle, 'figi', self._figi)
             self._logger.debug(f"Получена свеча: {candle.time} - {self._current_price} (FIGI: {figi_info})")
             
-            # Публикуем свечу в визуализатор
+            # Публикуем свечу в приемник
             try:
                 if self._sink is not None:
                     asyncio.create_task(self._sink.on_candle(candle, self._current_price or 0.0, self._figi))

@@ -4,7 +4,7 @@
 
 from typing import Optional, List, Protocol, runtime_checkable, Awaitable
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.ingestion.db_sink import DBIngestionSink
+from robotlib.ingestion.order_execution_sink import OrderExecutionSink
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
@@ -26,7 +26,7 @@ class OrderExecutor:
     def __init__(
         self,
         api_client: TinkoffAPIClient,
-        order_sink: Optional[DBIngestionSink] = None,
+        order_sink: Optional[OrderExecutionSink] = None,
         *,
         listeners: Optional[List[OrderExecutionListener]] = None,
     ):

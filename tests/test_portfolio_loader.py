@@ -2,7 +2,7 @@ import types
 import asyncio
 
 from visualization.services.portfolio_loader import PortfolioLoader
-from visualization.data_manager import DataManager
+from visualization.data_manager import VisualizationDataStore
 
 
 class DummyPortfolio:
@@ -50,7 +50,7 @@ def test_portfolio_loader(monkeypatch):
     monkeypatch.setattr(mod, 'TinkoffAPIClient', DummyTinkoff)
     monkeypatch.setattr(mod, 'PortfolioManager', pm_factory)
 
-    dm = DataManager()
+    dm = VisualizationDataStore()
     loader = PortfolioLoader()
     asyncio.run(loader.load_into(dm, token='x', account_id='y', sandbox_token=None))
 

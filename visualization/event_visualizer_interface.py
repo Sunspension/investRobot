@@ -1,57 +1,44 @@
 """
-Интерфейс для визуализатора событий торговой системы
+Интерфейсы для визуализатора событий торговой системы
 """
-from abc import ABC, abstractmethod
-from typing import List, Protocol, Dict, Any, runtime_checkable
-from robotlib.trading.events import TradingEvent, EventType
-from robotlib.visualization_interfaces import TradingEventSinkable
+from typing import Protocol, Any, Callable, List
+from robotlib.trading.events import TradingEvent
 
 
-class EventVisualizerable(ABC):
-    """Интерфейс для визуализатора событий"""
+class EventVisualizerable(Protocol):
+    """Базовый протокол для визуализатора событий"""
     
-    @abstractmethod
     async def start(self) -> None:
         """Запускает визуализатор"""
-        pass
+        ...
     
-    @abstractmethod
     async def stop(self) -> None:
         """Останавливает визуализатор"""
-        pass
+        ...
     
-    @abstractmethod
     def is_running(self) -> bool:
         """Проверяет, запущен ли визуализатор"""
-        pass
+        ...
+
+
+class WebSocketEventVisualizerable(Protocol):
+    """Протокол для визуализатора событий, получающего данные через WebSocket"""
     
-    async def handle_candle_event(self, event: TradingEvent) -> None:
-        """Необязательная обработка события свечи (по умолчанию — noop)."""
-        return None
+    async def start(self) -> None:
+        """Запускает визуализатор"""
+        ...
     
-    async def handle_signal_event(self, event: TradingEvent) -> None:
-        """Необязательная обработка события сигнала (по умолчанию — noop)."""
-        return None
+    async def stop(self) -> None:
+        """Останавливает визуализатор"""
+        ...
     
-    @abstractmethod
-    async def handle_order_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие ордера"""
-        pass
+    def is_running(self) -> bool:
+        """Проверяет, запущен ли визуализатор"""
+        ...
     
-    @abstractmethod
-    async def handle_position_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие позиции"""
-        pass
-    
-    @abstractmethod
-    async def handle_portfolio_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие портфеля"""
-        pass
-    
-    @abstractmethod
-    async def handle_market_status_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие статуса рынка"""
-        pass
+    def set_snapshot_callback(self, callback: Callable[[], None]) -> None:
+        """Устанавливает callback для отправки снэпшотов по требованию"""
+        ...
 
 
 

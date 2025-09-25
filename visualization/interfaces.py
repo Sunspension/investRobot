@@ -23,7 +23,7 @@ class TradingSessionDataProvider(Protocol):
 
 
 @runtime_checkable
-class DataManagerable(Protocol):
+class VisualizationDataStoreable(Protocol):
     def get_data_snapshot(self) -> Dict[str, Any]:
         ...
 
@@ -65,7 +65,7 @@ class UIComponentsable(Protocol):
 
 
 @runtime_checkable
-class DataManagerSinkable(Protocol):
+class TradingDataMapperable(Protocol):
     def add_candle(self, candle) -> None:  # Candle | HistoricCandle at runtime
         ...
 

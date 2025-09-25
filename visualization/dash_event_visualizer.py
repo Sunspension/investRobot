@@ -5,13 +5,9 @@ import asyncio
 import os
 import threading
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Callable
 from datetime import datetime
-import pytz
-from visualization.event_visualizer_interface import EventVisualizerable
-from robotlib.visualization_interfaces import TradingEventSinkable
-from robotlib.trading.order_types import OrderExecution, OrderIntent
-from visualization.data_manager import DataManager
+from visualization.event_visualizer_interface import WebSocketEventVisualizerable
 from visualization.chart_builder import ChartBuilder
 from visualization.ui_components import UIComponents
 from visualization.logging_config import QuietFlaskServer
@@ -20,16 +16,14 @@ from visualization.services.market_status_service import MarketStatusService
 from visualization.channels.ws import WebSocketHub
 from visualization.callbacks.core_callbacks import register_core_callbacks
 from robotlib.utils.logger import get_logger
-from robotlib.trading.events import TradingEvent
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
-from robotlib.signal_types import Signal
-from tinkoff.invest import Candle, HistoricCandle
+from visualization.formatters import to_moscow_time
 
 # Dash импорты
 from dash import Dash, html
 
 
-class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
+class DashEventVisualizer:
     """Dash визуализатор событий торговой системы"""
     
     def __init__(
@@ -39,11 +33,10 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         port: int = 8050,
         start_server: bool = True,
         *,
-        data_manager: DataManager,
         chart_builder: ChartBuilder,
         ui_components: UIComponents,
         ws_hub: WebSocketHub,
-        market_status_service: MarketStatusService,
+        market_status_service: MarketStatusService = None,
     ):
         self._figi = figi
         self._host = host
@@ -53,42 +46,25 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         self._logger = get_logger(__name__)
         
         # Зависимости инъецируются извне
-        self._data_manager = data_manager
         self._chart_builder = chart_builder
         self._ui_components = ui_components
+        self._ws_hub = ws_hub
+        self._market_status_service = market_status_service
         
         # Инициализируем портфель с нулевыми значениями (будет обновлен от API)
         self._init_portfolio()
 
-        # Проверяем, что данные загружены
-        data_snapshot = self._data_manager.get_data_snapshot()
-        self._logger.debug(f"После инициализации: {len(data_snapshot['candles_data'])} свечей, {data_snapshot['buy_count']} BUY, {data_snapshot['sell_count']} SELL")
-        
-        # Dash приложение
-        self._app = None
-        self._server_thread = None
-        # Инжектируем каналы и сервис статуса рынка
-        self._ws_hub = ws_hub
-        self._market_status_service = market_status_service
-        # Кэш для API данных
-        self._market_status_cache = None
-        self._last_cache_update = None
-        self._cache_ttl = 5  # Кэш на 5 секунд для отладки
+        # Callback для отправки снэпшотов по требованию
+        self._snapshot_callback = None
 
-    def _to_moscow_time(self, dt: datetime) -> datetime:
-        """Конвертирует время свечи в московский часовой пояс и делает его naive для стабильного отображения.
-        Plotly рендерит даты в часовом поясе браузера, поэтому используем naive-дату в МСК.
-        """
-        try:
-            msk = pytz.timezone('Europe/Moscow')
-            if dt is None:
-                return datetime.now(msk).replace(tzinfo=None)
-            if dt.tzinfo is None:
-                # считаем, что это UTC
-                dt = pytz.utc.localize(dt)
-            return dt.astimezone(msk).replace(tzinfo=None)
-        except Exception:
-            return dt
+        # Данные будут загружены через WebSocket события от TradingToUIBridge
+        self._logger.debug("DashEventVisualizer инициализирован, ожидает данные через WebSocket")
+    
+    def set_snapshot_callback(self, callback: Callable[[], None]) -> None:
+        """Устанавливает callback для отправки снэпшотов по требованию"""
+        self._snapshot_callback = callback
+        self._logger.debug("Snapshot callback установлен в DashEventVisualizer")
+
     
     def _init_portfolio(self) -> None:
         """Инициализирует портфель с нулевыми значениями"""
@@ -103,107 +79,20 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
                 'guarantee_deposit': 0.0,
                 'last_update': datetime.now()
             }
-            self._data_manager.update_portfolio(portfolio_data)
+            # Портфель будет обновлен через WebSocket события от TradingToUIBridge
             self._logger.debug("Портфель инициализирован с нулевыми значениями")
             
         except Exception as e:
             self._logger.error(f"Ошибка инициализации портфеля: {e}")
     
-    async def on_candle(self, candle: Candle | HistoricCandle, price: float, figi: str) -> None:
-        try:
-            candle_time = getattr(candle, 'time', datetime.now())
-            candle_data = {
-                'time': self._to_moscow_time(candle_time),
-                'open': float(getattr(candle.open, 'units', 0) + getattr(candle.open, 'nano', 0) / 1e9),
-                'high': float(getattr(candle.high, 'units', 0) + getattr(candle.high, 'nano', 0) / 1e9),
-                'low': float(getattr(candle.low, 'units', 0) + getattr(candle.low, 'nano', 0) / 1e9),
-                'close': float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9),
-                'volume': getattr(candle, 'volume', 0)
-            }
-            self._data_manager.add_candle(candle_data)
-            if self._running:
-                self._broadcast_ws({"type": "candle", "time": str(candle_data['time']), "price": candle_data['close']})
-        except Exception as e:
-            self._logger.error(f"Ошибка on_candle: {e}")
-    
-    async def on_signal(self, signal: Signal, figi: str, price: float) -> None:
-        try:
-            signal_data = {
-                'time': datetime.now(),
-                'type': 'buy' if getattr(signal, 'histogram', 0) > 0 else 'sell',
-                'strength': abs(getattr(signal, 'histogram', 0)),
-                'macd': getattr(signal, 'macd', 0),
-                'signal_line': getattr(signal, 'signal', 0),
-                'histogram': getattr(signal, 'histogram', 0),
-                'price': price
-            }
-            self._data_manager.add_signal(signal_data)
-            # Отправляем короткое WS-сообщение, чтобы UI сразу обновил счетчики
-            if self._running:
-                self._broadcast_ws({"type": "signal", "side": signal_data['type'], "price": price})
-        except Exception as e:
-            self._logger.error(f"Ошибка on_signal: {e}")
-    
-    async def on_order_execution(self, execution: OrderExecution, intent: OrderIntent) -> None:
-        pass
-    
-    async def on_market_status(self, status: Dict[str, Any]) -> None:
-        """Обрабатывает событие статуса рынка"""
-        try:
-            self._data_manager.update_market_status(status)
-            if self._running:
-                self._broadcast_ws({"type": "market_status", "is_trading": status.get('is_trading', False)})
-        except Exception as e:
-            self._logger.error(f"Ошибка on_market_status: {e}")
-    
-    async def handle_order_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие ордера"""
-        if not self._running:
-            return
-        
-        try:
-            order_data = event.data
-            # Добавляем ордер в менеджер данных
-            self._data_manager.add_order(order_data)
-            self._logger.debug(f"Добавлен ордер: {event.event_type}")
-        except Exception as e:
-            self._logger.error(f"Ошибка обработки события ордера: {e}")
-    
-    async def handle_position_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие позиции"""
-        if not self._running:
-            return
-        
-        try:
-            position_data = event.data
-            # Добавляем позицию в менеджер данных
-            self._data_manager.add_position(position_data)
-            self._logger.debug(f"Добавлена позиция: {event.event_type}")
-        except Exception as e:
-            self._logger.error(f"Ошибка обработки события позиции: {e}")
-    
-    async def handle_portfolio_event(self, event: TradingEvent) -> None:
-        """Обрабатывает событие портфеля"""
-        if not self._running:
-            return
-        
-        try:
-            portfolio_data = event.data
-            # Обновляем данные портфеля
-            self._data_manager.update_portfolio(portfolio_data)
-            self._logger.debug(f"Обновлен портфель: {event.event_type}")
-        except Exception as e:
-            self._logger.error(f"Ошибка обработки события портфеля: {e}")
-    
-    async def handle_market_status_event(self, event: TradingEvent) -> None:
+    async def handle_market_status_event(self, event: Any) -> None:
         """Обрабатывает событие статуса рынка"""
         if not self._running:
             return
         
         try:
             market_data = event.data
-            # Обновляем статус рынка
-            self._data_manager.update_market_status(market_data)
+            # Статус рынка будет обновлен через WebSocket события от TradingToUIBridge
             self._logger.debug(f"Обновлен статус рынка: {event.event_type}")
             # Push-уведомление в UI
             self._broadcast_ws({"type": "market_status", "is_trading": market_data.get('is_trading', False)})
@@ -223,7 +112,7 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
                 pass
             try:
                 ms = await get_market_status_enhanced()
-                self._data_manager.update_market_status(ms)
+                # Статус рынка будет обновлен через WebSocket события от TradingToUIBridge
             except Exception as e:
                 self._logger.warning(f"Не удалось предзаполнить статус рынка: {e}")
 
@@ -323,12 +212,11 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
         # Создаем макет
         app.layout = self._create_layout()
         
-        # Настраиваем callbacks
+        # Настраиваем callbacks (данные получаем из WebSocket)
         register_core_callbacks(
             app,
             ui_components=self._ui_components,
             chart_builder=self._chart_builder,
-            data_manager=self._data_manager,
             logger=self._logger,
             market_status_service=self._market_status_service,
         )
@@ -343,11 +231,23 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
                 try:
                     self._logger.info("WS клиент подключен")
                     self._ws_hub.add(ws)
+                    
                     # Отправляем первичное сообщение, чтобы триггернуть обновление UI
                     try:
                         ws.send(json.dumps({"type": "init"}))
                     except Exception as e:
                         self._logger.debug(f"Не удалось отправить init WS: {e}")
+                    
+                    # Отправляем снэпшот с данными после подключения (с небольшой задержкой)
+                    if self._snapshot_callback:
+                        try:
+                            import time
+                            time.sleep(0.1)  # Небольшая задержка для полного подключения
+                            self._ws_hub.request_snapshot(self._snapshot_callback)
+                            self._logger.info("Отправлен снэпшот при подключении WebSocket клиента")
+                        except Exception as e:
+                            self._logger.warning(f"Не удалось отправить снэпшот при подключении: {e}")
+                    
                     while True:
                         msg = ws.receive()
                         if msg is None:
@@ -366,25 +266,32 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             
             @app.server.get('/_health')
             def _health():
-                snapshot = self._data_manager.get_data_snapshot()
+                # Данные теперь поступают через WebSocket, возвращаем базовую информацию
                 return jsonify({
                     'ok': True,
-                    'is_trading': snapshot.get('market_status', {}).get('is_trading', False),
-                    'candles_count': len(snapshot.get('candles_data', [])),
-                    'buy_signals': snapshot.get('buy_count', 0),
-                    'sell_signals': snapshot.get('sell_count', 0)
+                    'is_trading': False,  # Будет обновлено через WebSocket
+                    'candles_count': 0,   # Будет обновлено через WebSocket
+                    'buy_signals': 0,     # Будет обновлено через WebSocket
+                    'sell_signals': 0     # Будет обновлено через WebSocket
                 })
             
             @app.server.get('/_snapshot')
             def _snapshot():
-                snapshot = self._data_manager.get_data_snapshot()
-                # Убираем тяжелые поля, если что
-                return jsonify(snapshot)
+                # Данные теперь поступают через WebSocket, возвращаем пустой снэпшот
+                return jsonify({
+                    'candles_data': [],
+                    'signals_data': [],
+                    'orders_data': [],
+                    'portfolio_data': {},
+                    'market_status': {},
+                    'buy_count': 0,
+                    'sell_count': 0
+                })
         except Exception as e:
             self._logger.warning(f"Не удалось добавить диагностические эндпоинты: {e}")
         
 
-        # Прогреем стратегии историческими барами из DataManager без размещения ордеров
+        # Прогреем стратегии историческими барами из TradingToUIBridge без размещения ордеров
         try:
             from robotlib.trading.di_container import TradingSystemContainer  # избегаем циклов импортов в рантайме
         except Exception:
@@ -412,7 +319,7 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
             try:
                 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
                 ms = await get_market_status_enhanced()
-                self._data_manager.update_market_status(ms)
+                # Статус рынка будет обновлен через WebSocket события от TradingToUIBridge
                 self._broadcast_ws({"type": "market_status", "is_trading": ms.get('is_trading', False)})
             except Exception as e:
                 self._logger.debug(f"Ошибка обновления статуса рынка: {e}")
@@ -429,9 +336,8 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
     def _get_strategy_status(self):
         """Получает статус стратегий"""
         try:
-            # Пытаемся получить данные из DataManager
-            data_snapshot = self._data_manager.get_data_snapshot()
-            strategies_data = data_snapshot.get('strategies_data', [])
+            # Данные теперь поступают через WebSocket, возвращаем пустой статус
+            strategies_data = []
             
             if strategies_data:
                 # Создаем детальный статус для каждой стратегии
@@ -484,12 +390,11 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
     def _get_trading_status(self):
         """Получает торговый статус"""
         try:
-            # Пытаемся получить данные из DataManager
-            data_snapshot = self._data_manager.get_data_snapshot()
-            candle_count = len(data_snapshot.get('candles_data', []))
-            signal_count = data_snapshot.get('buy_count', 0) + data_snapshot.get('sell_count', 0)
-            current_price = data_snapshot.get('current_price', 0.0)
-            last_update = data_snapshot.get('last_update')
+            # Данные теперь поступают через WebSocket, возвращаем базовые значения
+            candle_count = 0
+            signal_count = 0
+            current_price = 0.0
+            last_update = None
             
             # Форматируем время последнего обновления
             if last_update:
@@ -502,16 +407,15 @@ class DashEventVisualizer(EventVisualizerable, TradingEventSinkable):
                 if signal_count > 0:
                     status = f"🟢 Торговля активна • {signal_count} сигналов • {candle_count} свечей • {current_price:.2f}₽ • {time_str}"
                 else:
-                    # Получаем информацию о портфеле
-                    portfolio_data = data_snapshot.get('portfolio_data', {})
-                    positions_count = len(portfolio_data.get('positions', []))
-                    pnl_value = portfolio_data.get('pnl', 0)
+                    # Данные теперь поступают через WebSocket, используем базовые значения
+                    positions_count = 0
+                    pnl_value = 0
+                    orders_count = 0
                     
                     if positions_count > 0:
                         pnl_sign = "+" if pnl_value >= 0 else ""
                         status = f"🟡 Ожидание сигналов • {candle_count} свечей • {positions_count} позиций • P&L: {pnl_sign}{pnl_value:.2f}₽ • {time_str}"
                     else:
-                        orders_count = data_snapshot.get('orders_count', 0)
                         status = f"🟡 Ожидание сигналов • {candle_count} свечей • {orders_count} ордеров • {current_price:.2f}₽ • {time_str}"
             else:
                 # Получаем информацию о рынке

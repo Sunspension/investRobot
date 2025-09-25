@@ -22,7 +22,7 @@ class MockSignal:
         self.signal = signal
 
 
-def test_data_manager_sink_add_candle():
+def test_trading_data_mapper_add_candle():
     dm = VisualizationDataStore()
     mapper = TradingDataMapper(dm)
 
@@ -45,7 +45,7 @@ def test_data_manager_sink_add_candle():
     assert c['volume'] == 1000
 
 
-def test_data_manager_sink_add_signal():
+def test_trading_data_mapper_add_signal():
     dm = VisualizationDataStore()
     mapper = TradingDataMapper(dm)
     sig = MockSignal(histogram=0.4, macd=1.1, signal=0.7)
@@ -60,7 +60,7 @@ def test_data_manager_sink_add_signal():
     assert s['price'] == 101.0
 
 
-def test_data_manager_sink_add_market_status_and_order():
+def test_trading_data_mapper_add_market_status_and_order():
     dm = VisualizationDataStore()
     mapper = TradingDataMapper(dm)
 

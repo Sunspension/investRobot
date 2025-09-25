@@ -2,7 +2,6 @@
 DI контейнер для торговой системы
 """
 from typing import Optional, Dict, Any
-from typing import Callable, Dict, List
 from robotlib.utils.logger import get_logger
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.interfaces import TradingDependencies
@@ -23,9 +22,15 @@ from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
 from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
 from visualization.dash_event_visualizer import DashEventVisualizer
-from robotlib.visualization_interfaces import TradingEventSinkable
-from robotlib.ingestion.db_sink import DBIngestionSink
+from robotlib.ingestion.order_execution_sink import OrderExecutionSink
 from config_data.config import load_config
+from visualization.adapters.sink_impl import TradingDataMapper, WsEventBroadcaster, TradingToUIBridge
+from visualization.data_manager import VisualizationDataStore
+from visualization.chart_builder import ChartBuilder
+from visualization.ui_components import UIComponents
+from visualization.channels.ws import WebSocketHub
+from visualization.services.market_status_service import MarketStatusService
+from robotlib.trading_interfaces import MarketStatusSinkable
 
 class TradingSystemContainer:
     """DI контейнер для торговой системы"""
@@ -56,7 +61,7 @@ class TradingSystemContainer:
     
     async def _create_strategies(self):
         """Создает стратегии с их зависимостями"""
-        # Создаем PositionSizingService с динамикой, масштаб — от RiskManager
+        # Создаем PositionSizingService с динамикой
         rm = await self.get_risk_manager()
         pm = await self.get_portfolio_manager()
         cfg = PositionSizingConfig(
@@ -90,6 +95,12 @@ class TradingSystemContainer:
         ]
         
         return strategies
+    
+    def get_data_manager(self) -> Optional[VisualizationDataStore]:
+        """Получает data_manager (если визуализация включена)"""
+        if not self._config.enable_visualization:
+            return None
+        return self._instances.get('data_manager')
     
     def get_session_stats(self) -> SessionStats:
         """Получает статистику сессии"""
@@ -139,30 +150,25 @@ class TradingSystemContainer:
             # Используем единый API клиент
             api_client = await self.get_api_client()
             # Создаём sink для сохранения ордеров (в ту же БД, что и свечи визуализатора при желании)
-            order_sink: DBIngestionSink | None = None
+            order_sink: OrderExecutionSink | None = None
             try:
-                order_sink = DBIngestionSink(
+                order_sink = OrderExecutionSink(
                     db_path="data/market.db",
                     figi=self._config.figi,
-                    batch_size=200,
-                    flush_interval_sec=1.0,
                 )
-                self._logger.info("DBIngestionSink для ордеров инициализирован")
+                self._logger.info("OrderExecutionSink для ордеров инициализирован")
             except Exception as e:
-                self._logger.warning(f"DBIngestionSink недоступен, ордера не будут писаться: {e}")
+                self._logger.warning(f"OrderExecutionSink недоступен, ордера не будут писаться: {e}")
                 order_sink = None
             
             # Подключаем UI listener для ордеров
-            viz = self.get_visualizer()
-            dm = getattr(viz, "_data_manager", None)
-            if self._config.enable_visualization and dm is None:
-                raise RuntimeError("DataManager не инициализирован при включенной визуализации")
-            from visualization.adapters.sink_impl import DataManagerSink, WsEventBroadcaster, TradingToUIBridge
+            # Проверяем, что визуализация включена, но не требуем обязательной инициализации data_manager
+            # так как он может быть создан позже через get_visualizer
+            
             listeners = []
-            if dm is not None:
-                data_sink = DataManagerSink(dm)
-                ws = WsEventBroadcaster(viz._broadcast_ws)
-                listeners.append(TradingToUIBridge(data_sink, ws))
+            bridge = self._create_trading_bridge()
+            if bridge is not None:
+                listeners.append(bridge)
             self._instances['order_executor'] = OrderExecutor(
                 api_client=api_client,
                 order_sink=order_sink,
@@ -173,17 +179,21 @@ class TradingSystemContainer:
     def get_signal_manager(self) -> SignalManager:
         """Получает менеджер сигналов"""
         if 'signal_manager' not in self._instances:
-            visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
+            # SignalManager больше не нужен для визуализации - TradingToUIBridge обрабатывает сигналы
             self._instances['signal_manager'] = SignalManager(
-                visualization_sink=visualizer if isinstance(visualizer, TradingEventSinkable) else None
+                visualization_sink=None
             )
         return self._instances['signal_manager']
     
     async def get_strategy_manager(self) -> StrategyManager:
         """Получает менеджер стратегий"""
         if 'strategy_manager' not in self._instances:
-            visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
-            dispatcher = VisualizationSignalDispatcher(visualizer) if visualizer else None
+            # Используем TradingToUIBridge для SignalDispatcher
+            dispatcher = None
+            bridge = self._create_trading_bridge()
+            if bridge is not None:
+                dispatcher = VisualizationSignalDispatcher(bridge)
+            
             strategies = await self._create_strategies()
             
             strategy_manager = StrategyManager(
@@ -196,7 +206,45 @@ class TradingSystemContainer:
             )
             
             self._instances['strategy_manager'] = strategy_manager
-        return self._instances['strategy_manager']
+        return self._instances['strategy_manager']    
+    
+    def get_trading_bridge(self) -> Optional[TradingToUIBridge]:
+        """Получает TradingToUIBridge (если визуализация включена)"""
+        return self._create_trading_bridge()
+    
+    def _create_trading_bridge(self) -> Optional[TradingToUIBridge]:
+        """Создает TradingToUIBridge для связи торговой системы с UI"""
+        if not self._config.enable_visualization:
+            self._logger.debug("TradingToUIBridge не создан: визуализация отключена")
+            return None
+            
+        # Проверяем, не создан ли уже bridge
+        if 'trading_bridge' in self._instances:
+            return self._instances['trading_bridge']
+            
+        visualizer = self.get_visualizer()
+        dm = self.get_data_manager()
+        
+        if dm is None or visualizer is None:
+            self._logger.warning(f"TradingToUIBridge не создан: visualizer={visualizer is not None}, dm={dm is not None}")
+            return None
+            
+        try:
+            data_mapper = TradingDataMapper(dm)
+            ws = WsEventBroadcaster(visualizer._broadcast_ws)
+            bridge = TradingToUIBridge(data_mapper, ws)
+            
+            # Устанавливаем callback для отправки снэпшотов по требованию
+            visualizer.set_snapshot_callback(bridge.send_snapshot_on_demand)
+            
+            # Сохраняем bridge в инстансах для переиспользования
+            self._instances['trading_bridge'] = bridge
+            
+            self._logger.info("TradingToUIBridge создан успешно и сохранен в инстансах")
+            return bridge
+        except Exception as e:
+            self._logger.error(f"Ошибка создания TradingToUIBridge: {e}")
+            return None
     
     async def get_market_data_stream(self) -> MarketDataStream:
         """Получает стрим рыночных данных"""
@@ -224,10 +272,12 @@ class TradingSystemContainer:
                 watchdog_stale_seconds=stream_cfg.watchdog_stale_seconds,
                 watchdog_require_open_market=stream_cfg.watchdog_require_open_market,
             )
-            # Инжектим sink в поток рыночных данных
-            visualizer = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
-            if isinstance(visualizer, TradingEventSinkable):
-                self._instances['market_data_stream'].set_event_sink(visualizer)
+            # Создаем TradingToUIBridge как основной sink
+            bridge = self._create_trading_bridge()
+            if bridge is not None:
+                self._instances['market_data_stream'].set_event_sink(bridge)
+                self._logger.info("TradingToUIBridge установлен как event_sink для market_data_stream")
+                # Периодические снэпшоты будут запущены в SessionController после загрузки начальных данных
             # Подключаем стратегии к потоку свечей (генерация сигналов)
             try:
                 strategy_manager = await self.get_strategy_manager()
@@ -248,17 +298,8 @@ class TradingSystemContainer:
     async def get_trading_dependencies(self) -> TradingDependencies:
         """Получает зависимости торговой системы"""
         if 'trading_dependencies' not in self._instances:
-            # Используем единый API клиент
-            api_client = await self.get_api_client()
-
-            # Визуализатор и его DataManager (если включен)
-            viz = self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
-            # Требуем DataManager, если визуализация включена
-            dm = getattr(viz, "_data_manager", None)
-            if dm is None and self._config.enable_visualization:
-                raise RuntimeError("DataManager не инициализирован при включенной визуализации")
             self._instances['trading_dependencies'] = TradingDependencies(
-                api_client=api_client,
+                api_client=await self.get_api_client(),
                 session_stats=self.get_session_stats(),
                 portfolio_manager=await self.get_portfolio_manager(),
                 risk_manager=await self.get_risk_manager(),
@@ -266,7 +307,8 @@ class TradingSystemContainer:
                 market_data_stream=await self.get_market_data_stream(),
                 signal_manager=self.get_signal_manager(),
                 strategy_manager=await self.get_strategy_manager(),
-                data_manager=dm,
+                event_sink=self._create_trading_bridge(),
+                data_manager=self.get_data_manager()
             )
         return self._instances['trading_dependencies']
     
@@ -299,6 +341,7 @@ class TradingSystemContainer:
                 market_data_stream=dependencies.market_data_stream,
                 signal_manager=dependencies.signal_manager,
                 strategy_manager=dependencies.strategy_manager,
+                event_sink=dependencies.event_sink,
                 data_manager=dependencies.data_manager,
             )
             # Добавляем session_initializer как атрибут
@@ -307,7 +350,7 @@ class TradingSystemContainer:
             self._instances['session_controller'] = SessionController(
                 config=self._config,
                 dependencies=controller_dependencies,
-                force_start=False,
+                force_start=True,
                 visualizer=self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             )
         return self._instances['session_controller']
@@ -319,12 +362,8 @@ class TradingSystemContainer:
         
         if 'visualizer' not in self._instances:
             try:
-                from visualization.data_manager import DataManager
-                from visualization.chart_builder import ChartBuilder
-                from visualization.ui_components import UIComponents
-                from visualization.channels.ws import WebSocketHub
-                from visualization.services.market_status_service import MarketStatusService
-                dm = DataManager()
+                dm = VisualizationDataStore()
+                self._instances['data_manager'] = dm
                 cb = ChartBuilder()
                 ui = UIComponents(self._config.figi, cb)
                 ws_hub = WebSocketHub()
@@ -334,7 +373,6 @@ class TradingSystemContainer:
                     host=host,
                     port=port,
                     start_server=start_server,
-                    data_manager=dm,
                     chart_builder=cb,
                     ui_components=ui,
                     ws_hub=ws_hub,

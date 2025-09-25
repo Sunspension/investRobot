@@ -3,7 +3,7 @@ import sqlite3
 from datetime import datetime
 
 from visualization.services.historical_loader import HistoricalLoader
-from visualization.data_manager import DataManager
+from visualization.data_manager import VisualizationDataStore
 
 
 def test_historical_loader_reads_db(tmp_path):
@@ -28,7 +28,7 @@ def test_historical_loader_reads_db(tmp_path):
         )
         conn.commit()
 
-    dm = DataManager()
+    dm = VisualizationDataStore()
     loader = HistoricalLoader(db_path=str(db_path))
     loader.load_into(dm, 'TESTFIGI', limit=10)
 

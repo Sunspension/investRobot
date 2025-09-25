@@ -8,6 +8,13 @@ from robotlib.utils.logger import get_logger
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.di_container import TradingSystemContainer
 from tests.mocks.tinkoff_api_client_mock import MockTinkoffAPIClient
+from robotlib.trading.interfaces import TradingDependencies
+from robotlib.trading.portfolio_manager import PortfolioManager
+from robotlib.trading.order_executor import OrderExecutor
+from robotlib.trading.market_data_stream import MarketDataStream
+from robotlib.trading_interfaces import MarketStatusSinkable
+from tests.mocks.visualizer_mock import MockEventVisualizer
+
 
 logger = get_logger(__name__)
 
@@ -47,7 +54,6 @@ async def run_trading_system_with_mocks(
     
     async def get_portfolio_manager_with_mock():
         if 'portfolio_manager' not in container._instances:
-            from robotlib.trading.portfolio_manager import PortfolioManager
             container._instances['portfolio_manager'] = PortfolioManager(
                 api_client=mock_api_client
             )
@@ -55,7 +61,6 @@ async def run_trading_system_with_mocks(
     
     async def get_order_executor_with_mock():
         if 'order_executor' not in container._instances:
-            from robotlib.trading.order_executor import OrderExecutor
             container._instances['order_executor'] = OrderExecutor(
                 api_client=mock_api_client,
                 order_sink=None
@@ -64,7 +69,6 @@ async def run_trading_system_with_mocks(
     
     async def get_market_data_stream_with_mock():
         if 'market_data_stream' not in container._instances:
-            from robotlib.trading.market_data_stream import MarketDataStream
             container._instances['market_data_stream'] = MarketDataStream(
                 api_client=mock_api_client,
                 figi=config.figi,
@@ -72,9 +76,13 @@ async def run_trading_system_with_mocks(
             )
         return container._instances['market_data_stream']
     
+    async def get_event_sink_with_mock():
+        if 'event_sink' not in container._instances:
+            container._instances['event_sink'] = MarketStatusSinkable()
+        return container._instances['event_sink']
+    
     async def get_trading_dependencies_with_mock():
         if 'trading_dependencies' not in container._instances:
-            from robotlib.trading.interfaces import TradingDependencies
             container._instances['trading_dependencies'] = TradingDependencies(
                 api_client=mock_api_client,
                 order_executor=await get_order_executor_with_mock(),
@@ -83,13 +91,13 @@ async def run_trading_system_with_mocks(
                 signal_manager=container.get_signal_manager(),
                 strategy_manager=await container.get_strategy_manager(),
                 market_data_stream=await get_market_data_stream_with_mock(),
+                event_sink=await get_event_sink_with_mock(),
                 session_stats=container.get_session_stats()
             )
         return container._instances['trading_dependencies']
     
     def get_visualizer_with_mock(host="127.0.0.1", port=8050, start_server=True):
         if 'visualizer' not in container._instances:
-            from tests.mocks.visualizer_mock import MockEventVisualizer
             container._instances['visualizer'] = MockEventVisualizer(
                 host=host,
                 port=port,

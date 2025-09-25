@@ -7,16 +7,14 @@ from tinkoff.invest import Candle, HistoricCandle
 
 from robotlib.utils.logger import get_logger
 from robotlib.utils.sql_schema import init_db
-from robotlib.utils.sql_repository import DBCandle, upsert_candles, insert_orders, outbox_enqueue_order
-from robotlib.visualization_interfaces import TradingEventSinkable
+from robotlib.utils.sql_repository import DBCandle, upsert_candles
+from robotlib.trading_interfaces import CandleEventSinkable
 
 
-class DBIngestionSink(TradingEventSinkable):
-    """Приёмник визуализации, сохраняющий свечи в SQLite в фоне.
+class CandleDataSink(CandleEventSinkable):
+    """Приёмник для сохранения свечей в SQLite в фоне.
 
-    Предполагается инжектировать в `MarketDataStream`, чтобы исторические
-    (разогревочные) и живые свечи сохранялись независимо от торговой
-    логики/стратегий.
+    Специализируется только на свечах. Игнорирует все остальные события.
     """
 
     def __init__(
@@ -43,10 +41,10 @@ class DBIngestionSink(TradingEventSinkable):
             return
         # Инициализируем схему БД и запускаем фонового рабочего один раз
         await init_db(self._db_path)
-        self._worker_task = asyncio.create_task(self._worker(), name="db_ingestion_sink_worker")
+        self._worker_task = asyncio.create_task(self._worker(), name="candle_data_sink_worker")
         self._started = True
         self._logger.info(
-            f"DBIngestionSink запущен: db_path={self._db_path}, figi={self._figi}, "
+            f"CandleDataSink запущен: db_path={self._db_path}, figi={self._figi}, "
             f"batch_size={self._batch_size}, flush_interval_sec={self._flush_interval_sec}"
         )
 
@@ -70,22 +68,25 @@ class DBIngestionSink(TradingEventSinkable):
                         buffer.clear()
                     continue
                 except Exception as e:
-                    self._logger.error(f"Ошибка фонового сохранения в DBIngestionSink: {e}")
+                    self._logger.error(f"Ошибка фонового сохранения в CandleDataSink: {e}")
         finally:
             if buffer:
                 try:
                     await upsert_candles(self._db_path, buffer)
                     self._logger.debug(f"Сброшено {len(buffer)} свечей в БД (финальный сброс)")
                 except Exception as e:
-                    self._logger.error(f"Ошибка финального сброса DBIngestionSink: {e}")
-            self._logger.info("Фоновый рабочий DBIngestionSink остановлен")
+                    self._logger.error(f"Ошибка финального сброса CandleDataSink: {e}")
+            self._logger.info("Фоновый рабочий CandleDataSink остановлен")
 
     async def on_candle(self, candle: Any, price: float, figi: str) -> None:
+        """Сохраняет свечи в очередь для записи в БД."""
         # Ленивый запуск фонового рабочего и инициализация БД
         await self._ensure_started()
 
-        # Сохраняем свечи только для сконфигурированного FIGI (если приходит другой — игнорируем)
+        # Сохраняем свечи только для сконфигурированного FIGI
         figi_to_store = figi or self._figi
+        if figi_to_store != self._figi:
+            return
 
         try:
             db_candle = DBCandle.from_candle(figi_to_store, candle)  # type: ignore[arg-type]
@@ -94,43 +95,8 @@ class DBIngestionSink(TradingEventSinkable):
         except Exception as e:
             self._logger.warning(f"Не удалось поставить свечу в очередь для записи в БД: {e}")
 
-    async def on_signal(self, signal: Any, figi: str, price: float) -> None:
-        # Сигналы этим приёмником не сохраняются
-        return
-
-    async def on_market_status(self, status: dict) -> None:
-        # Статус рынка этим приёмником не сохраняется (можно добавить позже)
-        return
-
-    async def on_order(self, order: dict) -> None:
-        """Опционально сохранить исполненные ордера, если переданы."""
-        try:
-            # Гарантируем наличие схемы даже если рабочий со свечами ещё не стартовал
-            await init_db(self._db_path)
-            await insert_orders(self._db_path, [order])
-            try:
-                oid = order.get('order_id')
-                typ = order.get('type')
-                prc = order.get('price')
-                qty = order.get('quantity')
-                self._logger.info(f"Ордер записан в БД: id={oid} type={typ} price={prc} qty={qty}")
-            except Exception:
-                pass
-            # Пишем в outbox событие для идемпотентной доставки
-            try:
-                await outbox_enqueue_order(
-                    self._db_path,
-                    account_id=order.get('account_id'),
-                    figi=order.get('figi'),
-                    order_id=order.get('order_id'),
-                    payload=order,
-                )
-            except Exception as e:
-                self._logger.warning(f"Не удалось записать событие в outbox: {e}")
-        except Exception as e:
-            self._logger.warning(f"Не удалось сохранить ордер: {e}")
-
     async def close(self) -> None:
+        """Корректно закрывает sink и останавливает фоновый воркер."""
         if self._closed:
             return
         self._closed = True
@@ -140,5 +106,3 @@ class DBIngestionSink(TradingEventSinkable):
             except Exception:
                 pass
             self._worker_task = None
-
-
