@@ -82,7 +82,7 @@ class TestOrderExecutionSink:
             order_record = call_args[1][0]
             assert order_record['order_id'] == "test_order_123"
             assert order_record['figi'] == "TEST_FIGI"
-            assert order_record['type'] == "buy"
+            assert order_record['direction'] == "buy"
             assert order_record['price'] == 100.5
             assert order_record['quantity'] == 10
             assert order_record['status'] == "filled"
@@ -101,7 +101,7 @@ class TestOrderExecutionSink:
             
             call_args = mock_insert.call_args[0]
             order_record = call_args[1][0]
-            assert order_record['type'] == "sell"
+            assert order_record['direction'] == "sell"
 
     @pytest.mark.asyncio
     async def test_on_order_execution_handles_exception(self, order_sink, mock_order_execution, mock_order_intent):

@@ -38,7 +38,7 @@ class OrderExecutionSink(OrderEventSinkable):
                 'account_id': getattr(execution, 'account_id', None),
                 'figi': intent.figi,
                 'time': execution.timestamp,
-                'type': 'buy' if intent.direction.name.lower() == 'buy' else 'sell',
+                'direction': 'buy' if intent.direction.name.lower() == 'buy' else 'sell',
                 'price': execution.price or 0.0,
                 'quantity': execution.filled_quantity or intent.quantity,
                 'status': 'filled' if execution.status.name == 'FILLED' else 'cancelled',
@@ -52,7 +52,7 @@ class OrderExecutionSink(OrderEventSinkable):
             try:
                 self._logger.info(
                     f"Ордер записан в БД: id={order_record['order_id']} "
-                    f"type={order_record['type']} price={order_record['price']} "
+                    f"direction={order_record['direction']} price={order_record['price']} "
                     f"qty={order_record['quantity']}"
                 )
             except Exception:

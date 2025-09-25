@@ -23,7 +23,7 @@ def test_outbox_roundtrip_and_orders_commission(tmp_path):
         "account_id": "ACC-1",
         "figi": "TESTFIGI",
         "time": datetime.now(timezone.utc),
-        "type": "buy",
+        "direction": "buy",
         "price": 123.45,
         "quantity": 2,
         "status": "filled",

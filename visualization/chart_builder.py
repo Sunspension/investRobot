@@ -159,7 +159,7 @@ class ChartBuilder:
                 except Exception:
                     pass
 
-                # Подпись у левой оси на уровне линии
+                # Подпись у левой оси на уровне линии, заливка = цвет линии, текст белый
                 fig.add_annotation(
                     xref="paper",
                     x=0.0,
@@ -169,8 +169,8 @@ class ChartBuilder:
                     showarrow=False,
                     xanchor="left",
                     yanchor="middle",
-                    font=dict(color="#111", size=13),
-                    bgcolor="rgba(255,255,255,0.95)",
+                    font=dict(color="#ffffff", size=13),
+                    bgcolor=line_col,
                     bordercolor=line_col,
                     borderwidth=2,
                 )
@@ -266,7 +266,7 @@ class ChartBuilder:
         # Покупки (зеленые треугольники вверх)
         def _otype(o: Dict[str, Any]) -> str:
             try:
-                return str(o.get('type', '')).lower()
+                return str(o.get('direction', '')).lower()
             except Exception:
                 return ''
 

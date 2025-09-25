@@ -22,21 +22,21 @@ def test_orders_are_displayed_at_correct_times():
     ]
 
     orders = [
-        {
-            'type': 'buy',
-            'time': base + timedelta(minutes=1),
-            'price': 101.0,
-            'quantity': 2,
-            'strategy': 'TestStrat'
-        },
-        {
-            'type': 'sell',
-            'time': base + timedelta(minutes=3),
-            'price': 103.0,
-            'quantity': 1,
-            'strategy': 'TestStrat'
-        },
-    ]
+            {
+                'direction': 'buy',
+                'time': base + timedelta(minutes=1),
+                'price': 101.0,
+                'quantity': 2,
+                'strategy': 'TestStrat'
+            },
+            {
+                'direction': 'sell',
+                'time': base + timedelta(minutes=3),
+                'price': 103.0,
+                'quantity': 1,
+                'strategy': 'TestStrat'
+            },
+        ]
 
     fig = ChartBuilder().create_trading_chart(
         candles_data=candles,

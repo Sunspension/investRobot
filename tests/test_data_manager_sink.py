@@ -73,7 +73,7 @@ def test_data_manager_sink_add_market_status_and_order():
 
     # Order
     execution = Mock(order_id='ord1', timestamp=datetime(2024, 1, 1, 12, 0, 0), price=100.5, filled_quantity=3, reason='test')
-    intent = Mock(figi='TEST', side='buy', quantity=3, strategy='str1')
+    intent = Mock(figi='TEST', direction=Mock(value='buy'), quantity=3, strategy='str1')
     
     # Настраиваем Mock объекты для правильной работы с float()
     execution.price = 100.5

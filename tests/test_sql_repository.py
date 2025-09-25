@@ -34,14 +34,14 @@ async def create_test_db_schema(db_path: str) -> None:
             )
         """)
         
-        # Создаем таблицу orders
+        # Создаем таблицу orders (новая схема с direction)
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS orders (
                 order_id TEXT,
                 account_id TEXT,
                 figi TEXT NOT NULL,
                 time TEXT NOT NULL,
-                type TEXT NOT NULL,
+                direction TEXT NOT NULL,
                 price REAL NOT NULL,
                 quantity INTEGER NOT NULL DEFAULT 1,
                 status TEXT NOT NULL DEFAULT 'filled',
@@ -277,7 +277,7 @@ class TestInsertOrders:
                     "account_id": "acc_123",
                     "figi": "TEST123",
                     "time": now,
-                    "type": "buy",
+                    "direction": "buy",
                     "price": 100.0,
                     "quantity": 10,
                     "status": "filled",
@@ -289,7 +289,7 @@ class TestInsertOrders:
                     "account_id": "acc_123",
                     "figi": "TEST456",
                     "time": now + timedelta(seconds=1),
-                    "type": "sell",
+                    "direction": "sell",
                     "price": 200.0,
                     "quantity": 5,
                     "status": "filled",
@@ -311,7 +311,7 @@ class TestInsertOrders:
                 async with conn.execute("SELECT * FROM orders WHERE figi = 'TEST123'") as cursor:
                     row = await cursor.fetchone()
                     assert row["order_id"] == "order_1"
-                    assert row["type"] == "buy"
+                    assert row["direction"] == "buy"
                     assert row["price"] == 100.0
                     assert row["quantity"] == 10
         
@@ -358,7 +358,7 @@ class TestInsertOrders:
                 {
                     "figi": "TEST123",
                     "time": now,
-                    "type": "buy",
+                    "direction": "buy",
                     "price": 100.0
                     # quantity, status, commission, strategy - отсутствуют
                 }
@@ -402,7 +402,7 @@ class TestLoadOrders:
                     "account_id": "acc_123",
                     "figi": "TEST123",
                     "time": now,
-                    "type": "buy",
+                    "direction": "buy",
                     "price": 100.0,
                     "quantity": 10,
                     "status": "filled",
@@ -414,7 +414,7 @@ class TestLoadOrders:
                     "account_id": "acc_123",
                     "figi": "TEST123",
                     "time": now + timedelta(seconds=1),
-                    "type": "sell",
+                    "direction": "sell",
                     "price": 200.0,
                     "quantity": 5,
                     "status": "filled",
@@ -435,8 +435,8 @@ class TestLoadOrders:
             assert len(loaded_orders) == 2
             assert loaded_orders[0]["order_id"] == "order_1"
             assert loaded_orders[1]["order_id"] == "order_2"
-            assert loaded_orders[0]["type"] == "buy"
-            assert loaded_orders[1]["type"] == "sell"
+            assert loaded_orders[0]["direction"] == "buy"
+            assert loaded_orders[1]["direction"] == "sell"
         
         finally:
             import os
@@ -457,19 +457,19 @@ class TestLoadOrders:
                 {
                     "figi": "TEST123",
                     "time": base_time,
-                    "type": "buy",
+                    "direction": "buy",
                     "price": 100.0
                 },
                 {
                     "figi": "TEST123",
                     "time": base_time + timedelta(seconds=1),
-                    "type": "sell",
+                    "direction": "sell",
                     "price": 200.0
                 },
                 {
                     "figi": "TEST123",
                     "time": base_time + timedelta(seconds=2),
-                    "type": "buy",
+                    "direction": "buy",
                     "price": 300.0
                 }
             ]

@@ -345,7 +345,7 @@ class VisualizationDataStore:
                         orders.append({
                             'time': _dt,
                             'figi': str(row['figi']),
-                            'type': str(row['type']).lower(),
+                            'direction': str(row['direction']).lower(),
                             'price': float(row['price'] or 0.0),
                             'quantity': int(row['quantity'] or 0),
                             'reason': row.get('reason', ''),
@@ -360,7 +360,7 @@ class VisualizationDataStore:
                         self.orders_data.append(o)
                         self.orders_count = len(self.orders_data)
                         self.total_volume += o.get('quantity', 1)
-                        side = o.get('type', '').lower()
+                        side = o.get('direction', '').lower()
                         if side == 'buy':
                             self.buy_orders_count += 1
                         elif side == 'sell':

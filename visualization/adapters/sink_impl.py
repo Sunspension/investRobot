@@ -62,7 +62,8 @@ class TradingDataMapper(TradingDataMapperable):
         try:
             order_data = {
                 'time': to_moscow_time(execution.timestamp),
-                'side': getattr(intent, 'side', 'unknown'),
+                # Единое поле стороны для UI/БД
+                'direction': 'buy' if getattr(intent, 'direction', None) and str(getattr(intent, 'direction').value).lower() == 'buy' else 'sell',
                 'price': float(getattr(execution, 'executed_price', 0) or getattr(execution, 'price', 0)),
                 'quantity': getattr(intent, 'quantity', 0),
                 'strategy': getattr(intent, 'strategy', None),

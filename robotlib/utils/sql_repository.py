@@ -70,16 +70,17 @@ async def upsert_candles(db_path: str, candles: Iterable[DBCandle]) -> None:
 
 
 async def insert_orders(db_path: str, orders: List[Dict[str, Any]]) -> None:
-    """Вставляет список исполненных ордеров.
-    Ожидаемые поля: order_id (optional), figi, time (datetime), type, price, quantity, status, strategy(optional)
+    """Вставляет список исполненных ордеров (новая схема: direction).
+    Ожидаемые поля: order_id (optional), account_id (optional), figi, time (datetime), direction, price, quantity,
+    status, commission (optional), strategy (optional)
     """
     if not orders:
         return
-    sql = (
-        "INSERT OR IGNORE INTO orders (order_id, account_id, figi, time, type, price, quantity, status, commission, strategy) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    )
     async with aiosqlite.connect(db_path) as conn:
+        sql = (
+            "INSERT OR IGNORE INTO orders (order_id, account_id, figi, time, direction, price, quantity, status, commission, strategy) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
         await conn.executemany(
             sql,
             [
@@ -88,7 +89,7 @@ async def insert_orders(db_path: str, orders: List[Dict[str, Any]]) -> None:
                     o.get("account_id"),
                     o["figi"],
                     (o["time"].isoformat() if isinstance(o["time"], datetime) else str(o["time"])),
-                    o["type"],
+                    o["direction"],
                     float(o["price"]),
                     int(o.get("quantity", 1)),
                     o.get("status", "filled"),
@@ -119,7 +120,7 @@ async def load_orders(
         params.append(account_id)
 
     sql = (
-        "SELECT order_id, account_id, figi, time, type, price, quantity, status, commission, strategy "
+        "SELECT order_id, account_id, figi, time, direction, price, quantity, status, commission, strategy "
         "FROM orders WHERE figi = ? AND time >= ?" + to_clause + where_acc + " ORDER BY time ASC"
     )
     rows: List[Dict[str, Any]] = []
@@ -132,7 +133,7 @@ async def load_orders(
                     "account_id": row["account_id"],
                     "figi": row["figi"],
                     "time": datetime.fromisoformat(row["time"]),
-                    "type": row["type"],
+                    "direction": row["direction"],
                     "price": row["price"],
                     "quantity": row["quantity"],
                     "status": row["status"],
