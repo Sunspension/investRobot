@@ -8,6 +8,7 @@ import asyncio
 
 from robotlib.trading.order_executor import OrderExecutor
 from robotlib.trading.tinkoff_api_client import OrderResult
+from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
 
 
 class TestOrderResult(unittest.TestCase):
@@ -56,7 +57,10 @@ class TestOrderExecutor(unittest.TestCase):
     def setUp(self):
         """Настройка тестов"""
         self.mock_api_client = Mock()
-        self.executor = OrderExecutor(self.mock_api_client)
+        # Мок приемника исполненных ордеров
+        self.mock_sink = Mock()
+        self.mock_sink.on_order_execution = AsyncMock()
+        self.executor = OrderExecutor(self.mock_api_client, order_sink=self.mock_sink)
     
     def test_init(self):
         """Тест инициализации"""
@@ -214,6 +218,38 @@ class TestOrderExecutor(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.order_id, "12345")
         self.mock_api_client.buy_market.assert_called_once_with("FUTIMOEXF000", 1, True)
+
+    @pytest.mark.asyncio
+    async def test_execute_order_persists_to_sink(self):
+        """При успешном исполнении OrderExecutor вызывает sink.on_order_execution(execution, intent)."""
+        # Готовим успешный результат от API
+        mock_result = OrderResult(
+            success=True,
+            order_id="abc",
+            executed_price=123.45,
+            executed_quantity=2,
+            commission=0.0,
+            error_message=None
+        )
+        # Мокаем buy_market, так как будем отправлять MARKET BUY
+        self.mock_api_client.buy_market = AsyncMock(return_value=mock_result)
+
+        # Формируем намерение
+        intent = OrderIntent(
+            figi="FUTIMOEXF000",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.MARKET,
+            quantity=2,
+        )
+
+        # Выполняем ордер
+        execution = await self.executor.execute_order(intent)
+
+        # Проверяем, что sink вызван корректно
+        self.mock_sink.on_order_execution.assert_awaited_once()
+        args, kwargs = self.mock_sink.on_order_execution.await_args
+        assert args[0].order_id == execution.order_id
+        assert args[1] == intent
     
     @pytest.mark.asyncio
 
@@ -384,6 +420,70 @@ class TestOrderExecutor(unittest.TestCase):
         
         self.assertEqual(str(context.exception), "Connection error")
         self.mock_api_client.buy_market.assert_called_once_with("FUTIMOEXF000", 1, True)
+
+    @pytest.mark.asyncio
+    async def test_execute_order_persists_limit_order(self):
+        """Проверяем запись в sink для лимитного ордера при успехе."""
+        self.mock_api_client.buy_limit = AsyncMock(return_value=OrderResult(
+            success=True, order_id="lim1", executed_price=100.0, executed_quantity=3, commission=0.0, error_message=None
+        ))
+        intent = OrderIntent(
+            figi="FUTIMOEXF000",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.LIMIT,
+            quantity=3,
+        )
+        # прокинем цену лимита через атрибут (OrderExecutor проверяет limit_price)
+        setattr(intent, 'limit_price', 100.0)
+        await self.executor.execute_order(intent)
+        self.mock_sink.on_order_execution.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_order_failure_not_persisted(self):
+        """При неуспехе запись в sink не вызывается, но исключений нет."""
+        self.mock_api_client.buy_market = AsyncMock(return_value=OrderResult(
+            success=False, order_id=None, executed_price=None, executed_quantity=0, commission=None, error_message="err"
+        ))
+        intent = OrderIntent(
+            figi="FUTIMOEXF000",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1,
+        )
+        await self.executor.execute_order(intent)
+        self.mock_sink.on_order_execution.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_order_zero_quantity_rejected(self):
+        """Нулевое количество приводит к REJECTED и не вызывает sink."""
+        intent = OrderIntent(
+            figi="FUTIMOEXF000",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.MARKET,
+            quantity=0,
+        )
+        execution = await self.executor.execute_order(intent)
+        assert execution.quantity == 0
+        self.mock_sink.on_order_execution.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_execute_order_listener_error_is_caught(self):
+        """Ошибки listener не должны ронять исполнение."""
+        bad_listener = Mock()
+        bad_listener.on_order_execution = AsyncMock(side_effect=Exception("listener boom"))
+        self.executor._listeners = [bad_listener]
+        self.mock_api_client.buy_market = AsyncMock(return_value=OrderResult(
+            success=True, order_id="ok", executed_price=None, executed_quantity=1, commission=None, error_message=None
+        ))
+        intent = OrderIntent(
+            figi="FUTIMOEXF000",
+            direction=OrderDirection.BUY,
+            order_type=OrderType.MARKET,
+            quantity=1,
+        )
+        await self.executor.execute_order(intent)
+        # sink должен быть вызван, несмотря на падение listener
+        self.mock_sink.on_order_execution.assert_awaited()
 
 
 # Функция для запуска асинхронных тестов

@@ -14,6 +14,7 @@ from robotlib.strategies.short import ShortStrategy
 from robotlib.utils.backtest_sqlite import run_backtest_from_sqlite
 from robotlib.trading.risk_manager import RiskLimits
 from unittest.mock import Mock
+from robotlib.strategies.intent_arbiter import SimpleIntentArbiter
 
 
 @dataclass
@@ -110,6 +111,7 @@ async def maximize_income(
                 LongStrategy(risk_manager=mock_risk_manager, portfolio_manager=mock_portfolio_manager),
                 ShortStrategy(risk_manager=mock_risk_manager, portfolio_manager=mock_portfolio_manager),
             ],
+            intent_arbiter=SimpleIntentArbiter(),
         )
         result = await run_backtest_from_sqlite(
             db_path=db_path,

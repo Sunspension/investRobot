@@ -20,3 +20,9 @@ class VisualizationSignalDispatcher:
         await self._sink.on_signal(signal, figi, price)
 
 
+class NullSignalDispatcher:
+    """No-op dispatcher used when visualization is disabled."""
+
+    async def dispatch_signal(self, signal: Signal, figi: str, price: float) -> None:  # noqa: D401
+        return None
+

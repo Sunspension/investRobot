@@ -10,7 +10,8 @@ aiosqlite==0.21.0
 dash==3.0.4
 plotly==6.1.2
 Flask==3.0.3
-dash-extensions==0.0.75
+# Pin compatible with Python 3.10
+dash-extensions==0.1.13
 
 # Обработка данных
 pandas==2.3.0

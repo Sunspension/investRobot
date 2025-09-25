@@ -111,19 +111,70 @@ class ChartBuilder:
                 line=dict(color='#26a69a', width=2)
             ))
         
-        # Добавляем горизонтальную линию текущей цены
-        if not df.empty and current_price > 0:
-            fig.add_hline(
-                y=current_price,
-                line_dash="dash",
-                line_color="#FF6B35",
-                line_width=1,
-                annotation_text=f"Текущая цена: {current_price:.2f} ₽",
-                annotation_position="top right",
-                annotation_font_color="#FF6B35",
-                annotation_font_size=12
-            )
-        
+        # Добавляем горизонтальную линию текущей цены c динамическим цветом и читаемой подписью
+        if not df.empty:
+            # Нормализуем текущую цену и делаем fallback на последнюю close при нулевом/пустом значении
+            cp: float = 0.0
+            try:
+                cp = float(current_price)
+            except Exception:
+                cp = 0.0
+            if cp <= 0.0:
+                try:
+                    cp = float(df['close'].iloc[-1])
+                except Exception:
+                    cp = 0.0
+            if cp <= 0.0:
+                # Нет валидной цены — не рисуем линию
+                pass
+            else:
+                # Безопасное определение цвета линии текущей цены (более насыщенные цвета)
+                green = '#2ecc71'
+                red = '#e74c3c'
+                neutral = '#444444'
+                line_col = neutral
+                if 'close' in df.columns and 'open' in df.columns:
+                    try:
+                        last_row = df.iloc[-1]
+                        last_close = float(last_row['close'])
+                        last_open = float(last_row['open'])
+                        is_green = last_close >= last_open
+                        price_up = float(cp) >= last_close
+                        if is_green and price_up:
+                            line_col = green
+                        elif (not is_green) and (not price_up):
+                            line_col = red
+                    except Exception:
+                        line_col = neutral
+
+                # Одна непрерывная линия (shape) на всю ширину области графика
+                try:
+                    fig.add_shape(
+                        type='line',
+                        xref='paper', x0=0.0, x1=1.0,
+                        yref='y', y0=cp, y1=cp,
+                        line=dict(color=line_col, width=2, dash='dash'),
+                        layer='above'
+                    )
+                except Exception:
+                    pass
+
+                # Подпись у левой оси на уровне линии
+                fig.add_annotation(
+                    xref="paper",
+                    x=0.0,
+                    yref="y",
+                    y=cp,
+                    text=f"<b>Текущая цена: {cp:.2f} ₽</b>",
+                    showarrow=False,
+                    xanchor="left",
+                    yanchor="middle",
+                    font=dict(color="#111", size=13),
+                    bgcolor="rgba(255,255,255,0.95)",
+                    bordercolor=line_col,
+                    borderwidth=2,
+                )
+
         # Ордера покупки/продажи
         self._add_orders_to_chart(fig, orders_data, candles_data)
         
@@ -213,7 +264,17 @@ class ChartBuilder:
             pass
 
         # Покупки (зеленые треугольники вверх)
-        buy_orders = [order for order in orders_data if order['type'] in ['buy', 'short_buy', 'stop_loss_short_cover']]
+        def _otype(o: Dict[str, Any]) -> str:
+            try:
+                return str(o.get('type', '')).lower()
+            except Exception:
+                return ''
+
+        buy_orders = [
+            order for order in (orders_data or [])
+            if _otype(order) in ['buy', 'short_buy', 'stop_loss_short_cover']
+            and 'time' in order and 'price' in order
+        ]
         if buy_orders:
             fig.add_trace(go.Scatter(
                 x=[order['time'] for order in buy_orders],
@@ -240,7 +301,11 @@ class ChartBuilder:
             ))
         
         # Продажи (красные треугольники вниз)
-        sell_orders = [order for order in orders_data if order['type'] in ['sell', 'short_sell', 'stop_loss_sell']]
+        sell_orders = [
+            order for order in (orders_data or [])
+            if _otype(order) in ['sell', 'short_sell', 'stop_loss_sell']
+            and 'time' in order and 'price' in order
+        ]
         if sell_orders:
             fig.add_trace(go.Scatter(
                 x=[order['time'] for order in sell_orders],
@@ -284,7 +349,8 @@ class ChartBuilder:
         fig.update_xaxes(
             type='date',
             tickformat='%H:%M:%S',
-            autorange=True
+            autorange=True,
+            showgrid=True
         )
         fig.update_yaxes(autorange=True)
         

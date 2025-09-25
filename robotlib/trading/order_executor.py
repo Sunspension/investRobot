@@ -26,7 +26,7 @@ class OrderExecutor:
     def __init__(
         self,
         api_client: TinkoffAPIClient,
-        order_sink: Optional[OrderExecutionSink] = None,
+        order_sink: OrderExecutionSink,
         *,
         listeners: Optional[List[OrderExecutionListener]] = None,
     ):
@@ -110,23 +110,10 @@ class OrderExecutor:
                 reason=exec_reason
             )
             
-            # Если ордер исполнен, записываем в БД (если sink задан)
-            if result.success and execution.status == OrderStatus.FILLED and self._order_sink is not None:
+            # Если ордер исполнен, записываем в БД
+            if result.success and execution.status == OrderStatus.FILLED:
                 try:
-                    order_record = {
-                        'order_id': execution.order_id,
-                        'account_id': getattr(self.api_client, 'account_id', None),
-                        'figi': order_intent.figi,
-                        'time': execution.timestamp,
-                        'type': 'buy' if order_intent.direction.name.lower() == 'buy' else 'sell',
-                        'price': execution.price or 0.0,
-                        'quantity': execution.filled_quantity or order_intent.quantity,
-                        'status': 'filled',
-                        'commission': execution.commission or 0.0,
-                        'strategy': getattr(order_intent, 'strategy', None),
-                        'reason': execution.reason,
-                    }
-                    await self._order_sink.on_order(order_record)
+                    await self._order_sink.on_order_execution(execution, order_intent)
                 except Exception as persist_err:
                     self.logger.warning(f"Не удалось сохранить исполненный ордер: {persist_err}")
 
@@ -302,7 +289,7 @@ async def main():
         sandbox_token=config.tcs_client.sandbox_token
     ) as api_client:
         
-        executor = OrderExecutor(api_client)
+        executor = OrderExecutor(api_client, order_sink=OrderExecutionSink()) # Assuming OrderExecutionSink is imported or defined elsewhere
         
         # Проверяем доступность рынка
         if await executor.check_market_availability():

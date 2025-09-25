@@ -6,7 +6,7 @@ import asyncio
 import json
 import tempfile
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import Mock, patch
 from robotlib.utils.sql_repository import (
     DBCandle, upsert_candles, insert_orders, load_orders,
@@ -180,7 +180,7 @@ class TestUpsertCandles:
                 ),
                 DBCandle(
                     figi="TEST123",
-                    time=now.replace(second=now.second + 1),
+                    time=now + timedelta(seconds=1),
                     open=102.0,
                     high=108.0,
                     low=98.0,
@@ -288,7 +288,7 @@ class TestInsertOrders:
                     "order_id": "order_2",
                     "account_id": "acc_123",
                     "figi": "TEST456",
-                    "time": now.replace(second=now.second + 1),
+                    "time": now + timedelta(seconds=1),
                     "type": "sell",
                     "price": 200.0,
                     "quantity": 5,
@@ -413,7 +413,7 @@ class TestLoadOrders:
                     "order_id": "order_2",
                     "account_id": "acc_123",
                     "figi": "TEST123",
-                    "time": now.replace(second=now.second + 1),
+                    "time": now + timedelta(seconds=1),
                     "type": "sell",
                     "price": 200.0,
                     "quantity": 5,
@@ -429,7 +429,7 @@ class TestLoadOrders:
             loaded_orders = await load_orders(
                 db_path=db_path,
                 figi="TEST123",
-                from_time=now.replace(second=now.second - 1)
+                from_time=now - timedelta(seconds=1)
             )
             
             assert len(loaded_orders) == 2
@@ -462,13 +462,13 @@ class TestLoadOrders:
                 },
                 {
                     "figi": "TEST123",
-                    "time": base_time.replace(second=base_time.second + 1),
+                    "time": base_time + timedelta(seconds=1),
                     "type": "sell",
                     "price": 200.0
                 },
                 {
                     "figi": "TEST123",
-                    "time": base_time.replace(second=base_time.second + 2),
+                    "time": base_time + timedelta(seconds=2),
                     "type": "buy",
                     "price": 300.0
                 }
@@ -481,7 +481,7 @@ class TestLoadOrders:
                 db_path=db_path,
                 figi="TEST123",
                 from_time=base_time,
-                to_time=base_time.replace(second=base_time.second + 2)
+                to_time=base_time + timedelta(seconds=2)
             )
             
             assert len(loaded_orders) == 2  # Только первые два ордера
@@ -650,7 +650,7 @@ class TestIterCandles:
                 ),
                 DBCandle(
                     figi="TEST123",
-                    time=now.replace(second=now.second + 1),
+                    time=now + timedelta(seconds=1),
                     open=102.0,
                     high=108.0,
                     low=98.0,
@@ -666,7 +666,7 @@ class TestIterCandles:
             async for candle in iter_candles(
                 db_path=db_path,
                 figi="TEST123",
-                from_time=now.replace(second=now.second - 1)
+                from_time=now - timedelta(seconds=1)
             ):
                 loaded_candles.append(candle)
             
@@ -703,7 +703,7 @@ class TestIterCandles:
                 ),
                 DBCandle(
                     figi="TEST123",
-                    time=base_time.replace(second=base_time.second + 1),
+                    time=base_time + timedelta(seconds=1),
                     open=102.0,
                     high=108.0,
                     low=98.0,
@@ -712,7 +712,7 @@ class TestIterCandles:
                 ),
                 DBCandle(
                     figi="TEST123",
-                    time=base_time.replace(second=base_time.second + 2),
+                    time=base_time + timedelta(seconds=2),
                     open=106.0,
                     high=110.0,
                     low=100.0,
@@ -729,7 +729,7 @@ class TestIterCandles:
                 db_path=db_path,
                 figi="TEST123",
                 from_time=base_time,
-                to_time=base_time.replace(second=base_time.second + 2)
+                to_time=base_time + timedelta(seconds=2)
             ):
                 loaded_candles.append(candle)
             

@@ -31,8 +31,10 @@ from robotlib.signal_manager import SignalManager
 from robotlib.trading.risk_manager import RiskManager, RiskLimits
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from tests.mocks import MockOrderExecutor, MockAPIClient, MockPortfolioManager
+from robotlib.strategies.signal_dispatcher import NullSignalDispatcher
 from tests.mocks.position_sizer_dummy import DummySizer
 import pytz
+from robotlib.strategies.intent_arbiter import SimpleIntentArbiter
 
 logger = get_logger(__name__)
 
@@ -113,7 +115,9 @@ async def test_historical_trading(
             risk_manager=risk_manager,
             portfolio_manager=portfolio_manager,
             strategies=strategies,
-            order_executor=order_executor  # ✅ Передаем OrderExecutor
+            order_executor=order_executor,  # ✅ Передаем OrderExecutor
+            signal_dispatcher=NullSignalDispatcher(),
+            intent_arbiter=SimpleIntentArbiter(),
         )
         
         # Инициализируем стратегии

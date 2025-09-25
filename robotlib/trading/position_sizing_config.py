@@ -14,7 +14,7 @@ class PositionSizingConfig:
     # Общие
     enable_dynamic_sizing: bool = True
     min_lots: int = 1                  # Минимальный размер заявки
-    max_lots: int = 100                # Жесткий потолок лотов на сделку
+    max_lots: int = 10                # Жесткий потолок лотов на сделку
 
     # Волатильность (ATR/цена) → чем выше, тем меньше размер
     volatility_threshold_high: float = 0.05

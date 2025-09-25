@@ -28,6 +28,8 @@ def test_sink_adapter_on_candle():
     data_manager = VisualizationDataStore()
     broadcast_mock = Mock()
     bridge = TradingToUIBridge(TradingDataMapper(data_manager), WsEventBroadcaster(broadcast_mock))
+    # Отключаем batching для детерминированного инкрементального сообщения
+    bridge._batch_enabled = False
     
     candle = MockCandle(
         time=datetime(2024, 1, 1, 12, 0, 0),
@@ -64,6 +66,7 @@ def test_sink_adapter_on_signal():
     data_manager = VisualizationDataStore()
     broadcast_mock = Mock()
     bridge = TradingToUIBridge(TradingDataMapper(data_manager), WsEventBroadcaster(broadcast_mock))
+    bridge._batch_enabled = False
     
     signal = MockSignal(histogram=0.5, macd=1.2, signal=0.7)
     
@@ -134,6 +137,7 @@ def test_sink_adapter_on_signal_sell():
     data_manager = VisualizationDataStore()
     broadcast_mock = Mock()
     bridge = TradingToUIBridge(TradingDataMapper(data_manager), WsEventBroadcaster(broadcast_mock))
+    bridge._batch_enabled = False
     
     signal = MockSignal(histogram=-0.3, macd=-1.0, signal=-0.5)
     
@@ -162,6 +166,7 @@ def test_sink_adapter_on_candle_broadcast_time_format_utc():
     data_manager = VisualizationDataStore()
     broadcast_mock = Mock()
     bridge = TradingToUIBridge(TradingDataMapper(data_manager), WsEventBroadcaster(broadcast_mock))
+    bridge._batch_enabled = False
     
     utc_dt = pytz.utc.localize(datetime(2024, 1, 1, 12, 0, 0))
     candle = MockCandle(

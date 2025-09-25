@@ -25,6 +25,7 @@ from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.api_client_factory import APIClientFactory
 from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
+from robotlib.strategies.intent_arbiter import SimpleIntentArbiter
 from robotlib.strategies.signal_dispatcher import VisualizationSignalDispatcher
 from visualization.dash_event_visualizer import DashEventVisualizer
 from robotlib.ingestion.order_execution_sink import OrderExecutionSink
@@ -72,7 +73,7 @@ class TradingSystemContainer:
         cfg = PositionSizingConfig(
             enable_dynamic_sizing=True,
             min_lots=1,
-            max_lots=100,
+            max_lots=5,
         )
         try:
             cfg.system_state_scale = await rm.get_system_state_scale()
@@ -156,15 +157,11 @@ class TradingSystemContainer:
             api_client = await self.get_api_client()
             # Создаём sink для сохранения ордеров (в ту же БД, что и свечи визуализатора при желании)
             order_sink: OrderExecutionSink | None = None
-            try:
-                order_sink = OrderExecutionSink(
-                    db_path="data/market.db",
-                    figi=self._config.figi,
-                )
-                self._logger.info("OrderExecutionSink для ордеров инициализирован")
-            except Exception as e:
-                self._logger.warning(f"OrderExecutionSink недоступен, ордера не будут писаться: {e}")
-                order_sink = None
+            order_sink = OrderExecutionSink(
+                db_path="data/market.db",
+                figi=self._config.figi,
+            )
+            self._logger.info("OrderExecutionSink для ордеров инициализирован")
             
             # Подключаем UI listener для ордеров
             # Проверяем, что визуализация включена, но не требуем обязательной инициализации data_manager
@@ -194,10 +191,12 @@ class TradingSystemContainer:
         """Получает менеджер стратегий"""
         if 'strategy_manager' not in self._instances:
             # Используем TradingToUIBridge для SignalDispatcher
-            dispatcher = None
             bridge = self._create_trading_bridge()
             if bridge is not None:
                 dispatcher = VisualizationSignalDispatcher(bridge)
+            else:
+                from robotlib.strategies.signal_dispatcher import NullSignalDispatcher
+                dispatcher = NullSignalDispatcher()
             
             strategies = await self._create_strategies()
             
@@ -207,7 +206,8 @@ class TradingSystemContainer:
                 portfolio_manager=await self.get_portfolio_manager(),
                 order_executor=await self.get_order_executor(),
                 strategies=strategies,
-                signal_dispatcher=dispatcher
+                signal_dispatcher=dispatcher,
+                intent_arbiter=SimpleIntentArbiter(),
             )
             
             self._instances['strategy_manager'] = strategy_manager

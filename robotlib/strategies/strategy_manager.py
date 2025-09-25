@@ -1,17 +1,16 @@
 import pandas as pd
-import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List
 from dataclasses import asdict
 from pandas import DataFrame
 
 from robotlib.signal_manager import SignalManager
-from robotlib.signal_types import Signal
-from robotlib.trading.order_types import OrderIntent, OrderExecution
+from robotlib.trading.order_types import OrderIntent
 from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.trading.interfaces import StrategyManageable, OrderExecutable
-from robotlib.strategies.signal_dispatcher import SignalDispatchable, VisualizationSignalDispatcher
+from robotlib.strategies.signal_dispatcher import SignalDispatchable
 from robotlib.utils.logger import get_logger
 from tinkoff.invest import Candle, HistoricCandle
+from robotlib.strategies.intent_arbiter_interfaces import IntentArbiterable
 
 class StrategyManager(StrategyManageable):
     """
@@ -70,8 +69,9 @@ class StrategyManager(StrategyManageable):
         risk_manager,
         portfolio_manager,
         strategies: List[Strategyable],
-        order_executor: OrderExecutable = None,
-        signal_dispatcher: Optional[SignalDispatchable] = None,
+        intent_arbiter: IntentArbiterable,
+        order_executor: OrderExecutable,
+        signal_dispatcher: SignalDispatchable,
     ):
         self._signal_manager = signal_manager
         self._risk_manager = risk_manager
@@ -82,6 +82,7 @@ class StrategyManager(StrategyManageable):
         self._logger = get_logger(__name__)
         self._last_processed_bar_time = None
         self._strategies = strategies
+        self._intent_arbiter: IntentArbiterable = intent_arbiter
 
     async def initialize(self, figi: str = "FUTIMOEXF000", point_value: float = None, contracts_per_lot: int = None) -> None:
         """
@@ -108,43 +109,42 @@ class StrategyManager(StrategyManageable):
             return
 
         self._logger.debug(f"on_candle: получена свеча {bar_time}")
-        signal: Signal = self._signal_manager.add_candle(candle)
+        signal = self._signal_manager.add_candle(candle)
         if not signal:
-            # self._logger.debug("on_candle: сигнал не сформирован (нет условий)")
             return
-        # Отправляем сигнал в диспетчер, если есть
-        if self._signal_dispatcher is not None:
-            try:
-                price = float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9)
-            except Exception:
-                price = 0.0
-            await self._signal_dispatcher.dispatch_signal(signal, getattr(candle, 'figi', 'unknown'), price)
+        # Отправляем сигнал в диспетчер
+        try:
+            price = float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9)
+        except Exception:
+            price = 0.0
+        await self._signal_dispatcher.dispatch_signal(signal, getattr(candle, 'figi', 'unknown'), price)
 
-        # Выполняем все стратегии
+        # Выполняем все стратегии и собираем intents в арбитр
+        intents_bucket: list[OrderIntent] = []
+
         for strategy in self._strategies:
             self._logger.debug(f"execute: {strategy.__class__.__name__} processing signal hist={getattr(signal,'histogram',None)}")
             order_intents: list[OrderIntent] = await strategy.execute(signal)
             self._logger.debug(f"execute: {strategy.__class__.__name__} вернул {len(order_intents)} намерений")
-            
-            # Если есть OrderExecutor, выполняем ордера и передаем результаты в стратегии
-            if self._order_executor:
-                for order_intent in order_intents:
-                    try:
-                        # Выполняем ордер
-                        self._logger.info(f"OrderIntent → исполнение: {order_intent}")
-                        execution = await self._order_executor.execute_order(order_intent)
-                        
-                        # Передаем результат исполнения в стратегию
-                        if hasattr(strategy, '_process_execution'):
+            intents_bucket.extend(order_intents)
+        self._intent_arbiter.add_intents(intents_bucket)
+        netted_intents = self._intent_arbiter.flush()
+
+        # Исполнение
+        for order_intent in netted_intents:
+            try:
+                self._logger.info(f"Arbiter Intent → исполнение: {order_intent}")
+                execution = await self._order_executor.execute_order(order_intent)
+                # Передаём результат во все стратегии (для синхронизации состояния позиций)
+                for strategy in self._strategies:
+                    if hasattr(strategy, '_process_execution'):
+                        try:
                             strategy._process_execution(execution)
-                        
-                        self._logger.info(f"Ордер выполнен: {execution}")
-                        
-                    except Exception as e:
-                        self._logger.error(f"Ошибка выполнения ордера {order_intent}: {e}")
-            else:
-                # Если нет OrderExecutor, просто сохраняем намерения
-                self._orders.extend(order_intents)
+                        except Exception:
+                            pass
+                self._logger.info(f"Ордер выполнен: {execution}")
+            except Exception as e:
+                self._logger.error(f"Ошибка выполнения ордера {order_intent}: {e}")
 
         # Отмечаем свечу как обработанную
         self._last_processed_bar_time = bar_time
@@ -164,7 +164,7 @@ class StrategyManager(StrategyManageable):
                 low_price=b['low'],
                 close_price=b['close'],
             )
-            if sig and dispatch_signals and self._signal_dispatcher is not None:
+            if sig and dispatch_signals:
                 try:
                     await self._signal_dispatcher.dispatch_signal(sig, 'unknown', float(b['close']))
                 except Exception:

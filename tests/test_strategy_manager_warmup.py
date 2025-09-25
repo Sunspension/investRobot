@@ -2,6 +2,8 @@ import asyncio
 
 from robotlib.signal_manager import SignalManager
 from robotlib.strategies.strategy_manager import StrategyManager
+from robotlib.strategies.intent_arbiter import SimpleIntentArbiter
+from robotlib.strategies.signal_dispatcher import NullSignalDispatcher
 
 
 class DummyRisk:
@@ -43,7 +45,8 @@ def test_warmup_no_dispatch_no_orders():
         portfolio_manager=DummyPortfolio(),
         order_executor=executor,
         strategies=strategies,
-        signal_dispatcher=dispatcher,
+        signal_dispatcher=NullSignalDispatcher(),
+        intent_arbiter=SimpleIntentArbiter(),
     )
 
     # 50 баров

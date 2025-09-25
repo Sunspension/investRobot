@@ -8,6 +8,8 @@ import asyncio
 from datetime import datetime
 
 from robotlib.strategies.strategy_manager import StrategyManager
+from robotlib.strategies.intent_arbiter import SimpleIntentArbiter
+from robotlib.strategies.signal_dispatcher import NullSignalDispatcher
 from robotlib.signal_manager import Signal
 from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
 from robotlib.strategies.long import LongStrategy
@@ -38,7 +40,10 @@ class TestStrategyManager(unittest.TestCase):
             signal_manager=self.mock_signal_manager,
             risk_manager=self.mock_risk_manager,
             portfolio_manager=self.mock_portfolio_manager,
-            strategies=self.mock_strategies
+            strategies=self.mock_strategies,
+            intent_arbiter=SimpleIntentArbiter(),
+            order_executor=Mock(),
+            signal_dispatcher=NullSignalDispatcher(),
         )
     
     def test_init(self):
@@ -250,6 +255,38 @@ class TestStrategyManager(unittest.TestCase):
         self.assertEqual(custom_risk_manager.risk_limits.items_per_trade, 5)
         self.assertEqual(custom_risk_manager.risk_limits.stop_loss_threshold, 10.0)
     
+    @pytest.mark.asyncio
+    async def test_duplicate_bar_is_skipped(self):
+        """Повторная свеча с тем же временем игнорируется (не обрабатывается повторно)."""
+        from datetime import datetime
+        # Подготовка свечи с фиксированным временем
+        fixed_time = datetime(2025, 1, 1, 10, 0, 0)
+        mock_candle = Mock()
+        mock_candle.time = fixed_time
+        # Для совместимости попытки получения цены
+        mock_candle.close = Mock()
+        mock_candle.close.units = 1000
+        mock_candle.close.nano = 0
+
+        # Сигнал менеджер возвращает сигналы (чтобы пройти ветку обработки)
+        dummy_signal = Mock()
+        self.mock_signal_manager.add_candle = Mock(return_value=dummy_signal)
+
+        # Стратегии вернут пустые намерения, но мы считаем вызовы execute
+        for strategy in self.strategy_manager._strategies:
+            strategy.execute = AsyncMock(return_value=[])
+
+        # Первый вызов — обработка должна пройти
+        await self.strategy_manager.on_candle(mock_candle)
+        # Второй вызов с тем же временем — должен быть проигнорирован
+        await self.strategy_manager.on_candle(mock_candle)
+
+        # add_candle вызван ровно один раз
+        self.mock_signal_manager.add_candle.assert_called_once()
+        # execute у стратегий вызван по одному разу
+        for strategy in self.strategy_manager._strategies:
+            assert strategy.execute.call_count == 1
+
     def tearDown(self):
         """Очистка после тестов"""
         # Очищаем переменную экземпляра _orders после каждого теста
