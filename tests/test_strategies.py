@@ -34,16 +34,16 @@ class TestLongStrategy(unittest.TestCase):
         self.mock_risk_manager = Mock()
         self.mock_risk_manager.risk_limits.percent_from_deposit = 50.0
         self.mock_risk_manager.risk_limits.items_per_trade = 20
-        self.mock_portfolio_manager = Mock()
+        self.mock_portfolio_manager = AsyncMock()
+        self.mock_portfolio_manager.get_loss_positions = AsyncMock(return_value=[])
+        self.mock_portfolio_manager.get_profit_positions = AsyncMock(return_value=[])
         self.strategy = LongStrategy(
-            risk_manager=self.mock_risk_manager,
-            portfolio_manager=self.mock_portfolio_manager,
-            position_sizing_service=DummySizer(),
+            position_manager=self.mock_portfolio_manager,
         )
     
     def test_init(self):
         """Тест инициализации"""
-        self.assertEqual(self.strategy._portfolio_manager, self.mock_portfolio_manager)
+        self.assertEqual(self.strategy._position_manager, self.mock_portfolio_manager)
         self.assertEqual(self.strategy.strategy_name, "LongStrategy")
     
     @pytest.mark.asyncio
@@ -87,16 +87,10 @@ class TestLongStrategy(unittest.TestCase):
         mock_signal.signal_prev = -0.1
         mock_signal.candle = mock_candle
         
-        # Мокаем портфель
-        mock_portfolio = Mock()
-        mock_portfolio.total_amount = 100000.0
-        mock_portfolio.available_amount = 50000.0
-        mock_portfolio.positions = []
         
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_portfolio = AsyncMock(return_value=mock_portfolio)
-            mock_pm.get_deposit = AsyncMock(return_value=100000.0)
-            mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
+        with patch.object(self.strategy, '_position_manager') as mock_pm:
+            mock_pm.get_loss_positions = AsyncMock(return_value=[])
+            mock_pm.get_profit_positions = AsyncMock(return_value=[])
             
             result = await self.strategy.execute(mock_signal)
             
@@ -158,8 +152,9 @@ class TestLongStrategy(unittest.TestCase):
         mock_portfolio.available_amount = 500.0
         mock_portfolio.positions = []
         
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_portfolio = AsyncMock(return_value=mock_portfolio)
+        with patch.object(self.strategy, '_position_manager') as mock_pm:
+            mock_pm.get_loss_positions = AsyncMock(return_value=[])
+            mock_pm.get_profit_positions = AsyncMock(return_value=[])
             mock_pm.get_deposit = AsyncMock(return_value=1000.0)
             mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
             
@@ -196,30 +191,20 @@ class TestLongStrategy(unittest.TestCase):
         # Должен вернуть пустой список, так как нет позиции для продажи
         self.assertEqual(result, [])
     
-    @pytest.mark.asyncio
-
-    
-    async def test_items_to_buy_calculation(self):
+    def test_items_to_buy_calculation(self):
         """Тест расчета количества для покупки"""
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_deposit = AsyncMock(return_value=100000.0)
-            mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
+        with patch.object(self.strategy, '_position_manager') as mock_pm:
             
-            result = await self.strategy._items_to_buy(100.0)
+            result = self.strategy._items_to_buy(100.0)
             
             # Проверяем, что результат больше 0
             self.assertGreater(result, 0)
     
-    @pytest.mark.asyncio
-
-    
-    async def test_items_to_buy_api_error(self):
+    def test_items_to_buy_api_error(self):
         """Тест расчета количества при ошибке API"""
-        # Подменяем сайзер на выбрасывающий исключение
-        self.strategy._position_sizing_service = RaisingSizer()
-        with self.assertRaises(Exception) as context:
-            await self.strategy._items_to_buy(100.0)
-        self.assertIn("API Error", str(context.exception))
+        # В новой архитектуре _items_to_buy просто возвращает 1
+        result = self.strategy._items_to_buy(Mock())
+        self.assertEqual(result, 1)
 
 
 class TestShortStrategy(unittest.TestCase):
@@ -230,16 +215,16 @@ class TestShortStrategy(unittest.TestCase):
         self.mock_risk_manager = Mock()
         self.mock_risk_manager.risk_limits.percent_from_deposit = 50.0
         self.mock_risk_manager.risk_limits.items_per_trade = 20
-        self.mock_portfolio_manager = Mock()
+        self.mock_portfolio_manager = AsyncMock()
+        self.mock_portfolio_manager.get_loss_positions = AsyncMock(return_value=[])
+        self.mock_portfolio_manager.get_profit_positions = AsyncMock(return_value=[])
         self.strategy = ShortStrategy(
-            risk_manager=self.mock_risk_manager,
-            portfolio_manager=self.mock_portfolio_manager,
-            position_sizing_service=DummySizer(),
+            position_manager=self.mock_portfolio_manager,
         )
     
     def test_init(self):
         """Тест инициализации"""
-        self.assertEqual(self.strategy._portfolio_manager, self.mock_portfolio_manager)
+        self.assertEqual(self.strategy._position_manager, self.mock_portfolio_manager)
         self.assertEqual(self.strategy.strategy_name, "ShortStrategy")
     
     @pytest.mark.asyncio
@@ -283,16 +268,10 @@ class TestShortStrategy(unittest.TestCase):
         mock_signal.signal_prev = 0.1
         mock_signal.candle = mock_candle
         
-        # Мокаем портфель
-        mock_portfolio = Mock()
-        mock_portfolio.total_amount = 100000.0
-        mock_portfolio.available_amount = 50000.0
-        mock_portfolio.positions = []
         
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_portfolio = AsyncMock(return_value=mock_portfolio)
-            mock_pm.get_deposit = AsyncMock(return_value=100000.0)
-            mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
+        with patch.object(self.strategy, '_position_manager') as mock_pm:
+            mock_pm.get_loss_positions = AsyncMock(return_value=[])
+            mock_pm.get_profit_positions = AsyncMock(return_value=[])
             
             result = await self.strategy.execute(mock_signal)
             
@@ -354,8 +333,9 @@ class TestShortStrategy(unittest.TestCase):
         mock_portfolio.available_amount = 500.0
         mock_portfolio.positions = []
         
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_portfolio = AsyncMock(return_value=mock_portfolio)
+        with patch.object(self.strategy, '_position_manager') as mock_pm:
+            mock_pm.get_loss_positions = AsyncMock(return_value=[])
+            mock_pm.get_profit_positions = AsyncMock(return_value=[])
             mock_pm.get_deposit = AsyncMock(return_value=1000.0)
             mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
             
@@ -392,30 +372,20 @@ class TestShortStrategy(unittest.TestCase):
         # Должен вернуть пустой список, так как нет позиции для закрытия
         self.assertEqual(result, [])
     
-    @pytest.mark.asyncio
-
-    
-    async def test_items_to_sell_short_calculation(self):
+    def test_items_to_sell_short_calculation(self):
         """Тест расчета количества для продажи в шорт"""
-        with patch.object(self.strategy, '_portfolio_manager') as mock_pm:
-            mock_pm.get_deposit = AsyncMock(return_value=100000.0)
-            mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
+        with patch.object(self.strategy, '_position_manager') as mock_pm:
             
-            result = await self.strategy._items_to_sell_short(100.0)
+            result = self.strategy._items_to_sell_short(100.0)
             
             # Проверяем, что результат больше 0
             self.assertGreater(result, 0)
     
-    @pytest.mark.asyncio
-
-    
-    async def test_items_to_sell_short_api_error(self):
+    def test_items_to_sell_short_api_error(self):
         """Тест расчета количества при ошибке API"""
-        # Подменяем сайзер на выбрасывающий исключение
-        self.strategy._position_sizing_service = RaisingSizer()
-        with self.assertRaises(Exception) as context:
-            await self.strategy._items_to_sell_short(100.0)
-        self.assertIn("API Error", str(context.exception))
+        # В новой архитектуре _items_to_sell_short просто возвращает 1
+        result = self.strategy._items_to_sell_short(Mock())
+        self.assertEqual(result, 1)
 
 
 # Функция для запуска асинхронных тестов

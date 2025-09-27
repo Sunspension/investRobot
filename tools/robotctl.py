@@ -158,14 +158,14 @@ def _multi_account_menu():
     return 0
 
 
-def _run_market_ingestor():
-    # Предохранитель: не запускаем второй экземпляр, если уже есть инжестор
+def _run_candle_sink():
+    # Предохранитель: не запускаем второй экземпляр, если уже есть запись свечей в базу
     try:
         found = False
         try:
-            p = subprocess.run(["pgrep", "-fl", "run_market_ingestor.py"], capture_output=True, text=True)
+            p = subprocess.run(["pgrep", "-fl", "run_candle_sink.py"], capture_output=True, text=True)
             if p.returncode == 0 and p.stdout.strip():
-                lines = [ln for ln in p.stdout.splitlines() if "run_market_ingestor.py" in ln]
+                lines = [ln for ln in p.stdout.splitlines() if "run_candle_sink.py" in ln]
                 if lines:
                     print("⚠ Обнаружен уже запущенный инжестор:")
                     for ln in lines:
@@ -195,7 +195,7 @@ def _run_market_ingestor():
     figi = _input_nonempty("FIGI [FUTIMOEXF000]: ", default="FUTIMOEXF000")
     db = _input_nonempty("Путь к БД [data/market.db]: ", default="data/market.db")
     seconds = _input_nonempty("Секунд работать [0=беск.] [0]: ", default="0")
-    return _run_subprocess([_python_executable(), "run_market_ingestor.py", "--figi", figi, "--db", db, "--seconds", seconds])  # type: ignore[arg-type]
+    return _run_subprocess([_python_executable(), "run_candle_sink.py", "--figi", figi, "--db", db, "--seconds", seconds])  # type: ignore[arg-type]
 
 
 def _load_historical():
@@ -276,14 +276,14 @@ def _view_db_summary():
         return 1
 
 
-def _run_market_ingestor_daemon():
+def _run_candle_sink_daemon():
     # Предохранитель: не запускаем второй экземпляр в фоне, если уже есть инжестор
     try:
         found = False
         try:
-            p = subprocess.run(["pgrep", "-fl", "run_market_ingestor.py"], capture_output=True, text=True)
+            p = subprocess.run(["pgrep", "-fl", "run_candle_sink.py"], capture_output=True, text=True)
             if p.returncode == 0 and p.stdout.strip():
-                lines = [ln for ln in p.stdout.splitlines() if "run_market_ingestor.py" in ln]
+                lines = [ln for ln in p.stdout.splitlines() if "run_candle_sink.py" in ln]
                 if lines:
                     print("⚠ Обнаружен уже запущенный инжестор:")
                     for ln in lines:
@@ -317,7 +317,7 @@ def _run_market_ingestor_daemon():
 
     args = [
         _python_executable(),
-        "run_market_ingestor.py",
+        "run_candle_sink.py",
         "--figi", figi,
         "--db", db,
         "--seconds", "0",
@@ -630,10 +630,10 @@ def main() -> int:
         print("  2) Запустить торговую систему (ограниченное время)")
         print("  3) Многоаккаунтный режим")
         print("\n📊 ДАННЫЕ:")
-        print("  4) Сбор рыночных данных → SQLite")
-        print("  5) Сбор данных → запустить в фоне (detached)")
-        print("  6) Сбор данных → остановить (stop)")
-        print("  7) Сбор данных → статус")
+        print("  4) Запись свечей в базу - запустить")
+        print("  5) Запись свечей в базу - запустить в фоне")
+        print("  6) Запись свечей в базу - остановить")
+        print("  7) Запись свечей в базу - статус")
         print("  8) Загрузка исторических данных")
         print("  9) Просмотр БД (последние записи)")
         print("\n⚙️ СИСТЕМА:")
@@ -660,9 +660,9 @@ def main() -> int:
                 _multi_account_menu()
             # ДАННЫЕ
             elif choice == "4":
-                _run_market_ingestor()
+                _run_candle_sink()
             elif choice == "5":
-                _run_market_ingestor_daemon()
+                _run_candle_sink_daemon()
             elif choice == "6":
                 _stop_market_ingestor_daemon()
             elif choice == "7":

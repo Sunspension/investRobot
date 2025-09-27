@@ -37,7 +37,7 @@ from robotlib.utils.logger import get_logger
 from robotlib.utils.rate_limiter import TokenBucket
 
 from robotlib.utils.market_hours import is_trading_time_with_api
-from robotlib.utils.money import money_value_to_float, float_to_money_value
+from robotlib.utils.money import money_value_to_float, money_value_to_float_with_currency, float_to_money_value, Money
 import time
 
 
@@ -341,6 +341,7 @@ class TinkoffAPIClient:
     async def wait_for_order_execution(
         self, 
         order_id: str, 
+        figi: str = None,
         max_wait_time: int = 30,
         check_interval: float = 1.0
     ) -> OrderResult:
@@ -370,12 +371,26 @@ class TinkoffAPIClient:
                 status_name = getattr(status, "name", str(status))
                 if status_name == "EXECUTION_REPORT_STATUS_FILL":
                     # Приказ исполнен
+                    # Получаем point_value для правильной конвертации валюты
+                    point_value = 1.0
+                    if figi:
+                        try:
+                            margin_info = await self.get_futures_margin(figi)
+                            if margin_info and 'min_price_increment' in margin_info and 'min_price_increment_amount' in margin_info:
+                                min_price_increment = margin_info['min_price_increment']
+                                min_price_increment_amount = margin_info['min_price_increment_amount']
+                                if min_price_increment > 0:
+                                    point_value = min_price_increment_amount / min_price_increment
+                        except Exception as e:
+                            self._logger.warning(f"Не удалось получить point_value для {figi}: {e}")
+                            point_value = 10.0  # Значение по умолчанию для фьючерса на MOEX
+                    
                     return OrderResult(
                         success=True,
                         order_id=order_id,
-                        executed_price=money_value_to_float(order_state.executed_order_price),
+                        executed_price=Money(order_state.executed_order_price).to_float_with_currency(point_value),
                         executed_quantity=order_state.lots_executed,
-                        commission=money_value_to_float(order_state.initial_commission),
+                        commission=Money(order_state.initial_commission).to_float_with_currency(point_value),
                         order_status="FILL",
                         is_executed=True
                     )
@@ -448,7 +463,7 @@ class TinkoffAPIClient:
         
         # Если приказ размещен успешно и нужно ждать исполнения
         if result.success and result.order_id and wait_execution:
-            return await self.wait_for_order_execution(result.order_id)
+            return await self.wait_for_order_execution(result.order_id, figi)
         
         return result
     
@@ -463,7 +478,7 @@ class TinkoffAPIClient:
         
         # Если приказ размещен успешно и нужно ждать исполнения
         if result.success and result.order_id and wait_execution:
-            return await self.wait_for_order_execution(result.order_id)
+            return await self.wait_for_order_execution(result.order_id, figi)
         
         return result
     
@@ -510,6 +525,37 @@ class TinkoffAPIClient:
             return await _pf_get_operations(self, from_date, to_date)
         except Exception as e:
             self._logger.error(f"Ошибка получения истории операций: {e}")
+            return None
+    
+    
+    async def get_operations_by_cursor(self, from_date, to_date, cursor=None, limit=100):
+        """Получает историю операций с пагинацией через курсор"""
+        try:
+            if self._sandbox_token:
+                # В sandbox режиме используем обычный метод get_operations
+                # так как get_operations_by_cursor не поддерживается
+                response = await self._services.sandbox.get_sandbox_operations(
+                    account_id=self._account_id,
+                    from_=from_date,
+                    to=to_date
+                )
+                return response
+            else:
+                from tinkoff.invest.schemas import GetOperationsByCursorRequest
+                
+                request = GetOperationsByCursorRequest(
+                    account_id=self._account_id,
+                    from_=from_date,
+                    to=to_date,
+                    cursor=cursor,
+                    limit=limit
+                )
+                
+                response = await self._services.operations.get_operations_by_cursor(request)
+                return response
+            
+        except Exception as e:
+            self._logger.error(f"Ошибка получения операций с курсором: {e}")
             return None
     
     

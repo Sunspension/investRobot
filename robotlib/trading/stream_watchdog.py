@@ -7,7 +7,6 @@ from typing import Optional, Callable
 from robotlib.utils.logger import get_logger
 from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
 
-
 class StreamWatchdog:
     """Класс для мониторинга состояния стрима и автоматического восстановления"""
     
@@ -116,9 +115,11 @@ class StreamWatchdog:
             
             self._logger.warning(f"Watchdog: тишина > {self._stale_seconds}с — перезапуск стрима")
             
-            # Вызываем callback для перезапуска
+            # Вызываем callback для перезапуска с защитой от дублирования
             if self._restart_callback:
                 try:
+                    # Добавляем небольшую задержку для предотвращения частых перезапусков
+                    await asyncio.sleep(1.0)
                     self._restart_callback()
                 except Exception as e:
                     self._logger.error(f"Ошибка при перезапуске стрима: {e}")

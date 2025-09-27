@@ -47,6 +47,7 @@ class OrderExecutionSink(OrderEventSinkable):
                 'reason': execution.reason,
             }
             
+            
             await insert_orders(self._db_path, [order_record])
             
             try:

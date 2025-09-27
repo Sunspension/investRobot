@@ -10,19 +10,14 @@ from tinkoff.invest import Candle, HistoricCandle
 class ShortStrategy(Strategyable):
     def __init__(
             self, 
-            risk_manager: RiskManageable,
-            portfolio_manager: PortfolioManageable,
-            position_sizing_service: PositionSizingManageable
+            position_manager  # PositionManager для FIFO логики (обязательный)
     ):
-            
         self._position = 0
         self._cost_basis = 0.0
         self._income = 0.0
 
         self._positions = []
-        self._risk_manager = risk_manager
-        self._portfolio_manager = portfolio_manager
-        self._position_sizing_service = position_sizing_service
+        self._position_manager = position_manager  # Новый компонент
         self._logger = get_logger(__name__)
 
         self._wait_short_sell_cross = False
@@ -74,7 +69,7 @@ class ShortStrategy(Strategyable):
             self._wait_short_buy_cross = True
 
         # Проверка стоп-лосса
-        stop_loss_orders = self._check_stop_loss(signal.candle)
+        stop_loss_orders = await self._check_stop_loss(signal.candle)
         orders.extend(stop_loss_orders)
 
         hist_abs = abs(signal.histogram)
@@ -112,7 +107,7 @@ class ShortStrategy(Strategyable):
 
         # Открыть short: ждём peak и пересечения вниз; увелечение шорта при тренде
         if (self._wait_short_sell_cross and is_crossed_down) or (self._position > 0 and is_trending_down):
-            items = await self._items_to_sell_short(signal)
+            items = self._items_to_sell_short(signal)
             if items > 0:
                 orders.append(
                     OrderIntent(
@@ -183,84 +178,65 @@ class ShortStrategy(Strategyable):
         else:
             return None
 
-    async def _items_to_sell_short(self, signal: Signal, figi: str = "FUTIMOEXF000"):
-        return await self._position_sizing_service.calculate_position_size(
-            signal=signal,
-            current_position=self._position,
-            figi=figi
-        )
+    def _items_to_sell_short(self, signal: Signal, figi: str = "FUTIMOEXF000"):
+        # Простая логика расчета размера позиции
+        # В будущем можно добавить более сложную логику
+        return 1
 
     def _items_to_buy_short(self):
         return self._position
     
-    def _process_execution(self, execution: OrderExecution):
+    async def _process_execution(self, execution: OrderExecution):
         """Обрабатывает исполнение ордера"""
         if not execution or (execution.filled_quantity or 0) <= 0:
             return
         if execution.direction == OrderDirection.SELL:
-            # Открываем шорт
-            self._positions.append([execution.price, execution.filled_quantity])
+            # Открываем шорт - добавляем в PositionManager
+            await self._position_manager.add_to_fifo(
+                self._figi, 
+                execution.filled_quantity, 
+                execution.price, 
+                execution.order_id,
+                direction='short'
+            )
             self._position += execution.filled_quantity
             self._cost_basis += execution.price * execution.filled_quantity
         else:
-            # Закрываем шорт
-            commission = execution.commission
-            self._positions, profit, new_pos = self._fifo_buy_short(
-                self._positions, 
-                execution.price, 
-                execution.filled_quantity, 
-                commission
+            # Закрываем шорт - убираем из PositionManager
+            await self._position_manager.remove_from_fifo(
+                self._figi, 
+                execution.filled_quantity
             )
-            self._position = new_pos
-            self._income += profit
+            await self._position_manager.update_position_after_trade(
+                self._figi, 
+                -execution.filled_quantity, 
+                execution.price
+            )
+            self._position -= execution.filled_quantity
 
-    def _fifo_buy_short(self, positions, price, qty_to_buy, commission=0.0):
-        if qty_to_buy <= 0:
-            new_position_qty = sum(qty for _, qty in positions)
-            return positions, 0.0, new_position_qty
-        remaining = qty_to_buy
-        total_cost = 0.0
-        new_positions = []
-        for lot_price, lot_qty in positions:
-            if remaining == 0:
-                new_positions.append([lot_price, lot_qty])
-                continue
-            buy_qty = min(lot_qty, remaining)
-            # Для шорт-стратегии: считаем стоимость открытия (lot_price) для расчета прибыли
-            total_cost += lot_price * buy_qty
-            remaining -= buy_qty
-            if lot_qty > buy_qty:
-                new_positions.append([lot_price, lot_qty - buy_qty])
 
-        # Средняя цена открытия шорт-позиций
-        avg_open_price = total_cost / qty_to_buy
-        # Прибыль = цена открытия - цена закрытия (для шорта)
-        price_diff = avg_open_price - price
-        # Используем кэшированные значения
-        point_value = self._point_value
-        contracts_per_lot = self._contracts_per_lot
-        gross_profit = price_diff * point_value * contracts_per_lot * qty_to_buy
-        # Вычитаем комиссию из прибыли
-        net_profit = gross_profit - commission
-        new_position_qty = sum(qty for _, qty in new_positions)
-        return new_positions, net_profit, new_position_qty
-
-    def _check_stop_loss(self, candle: Candle | HistoricCandle) -> list[OrderIntent]:
+    async def _check_stop_loss(self, candle: Candle | HistoricCandle) -> list[OrderIntent]:
+        """Проверяет стоп-лосс для шорт позиций"""
+        from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
+        from robotlib.utils.money import Money
+        
         orders = []
         current_price = Money(candle.close).to_float()
-        lots_to_cover = []
-        for lot_price, lot_qty in self._positions:
-            unrealized_loss = current_price - lot_price
-            if unrealized_loss >= self._risk_manager.risk_limits.stop_loss_threshold:
-                lots_to_cover.append([lot_price, lot_qty])
-        if lots_to_cover:
-            total_qty = sum(qty for _, qty in lots_to_cover)
-            orders.append(
-                OrderIntent(
-                    direction=OrderDirection.BUY,  # покрываем шорт при стоп-лоссе
-                    quantity=total_qty,
-                    order_type=OrderType.MARKET,
-                    figi=self._figi
-                )
-            )
+        
+        # Получаем убыточные позиции от PositionManager
+        loss_positions = await self._position_manager.get_loss_positions(
+            self._figi, 
+            current_price
+        )
+        
+        if loss_positions:
+            total_qty = sum(pos.quantity for pos in loss_positions)
+            orders.append(OrderIntent(
+                direction=OrderDirection.BUY,  # покрываем шорт при стоп-лоссе
+                quantity=total_qty,
+                order_type=OrderType.MARKET,
+                figi=self._figi,
+                strategy="stop_loss"
+            ))
+        
         return orders

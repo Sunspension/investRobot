@@ -251,8 +251,8 @@ class UIComponents:
         items: List[html.Div] = []
         if orders_data:
             for order in orders_data[-10:]:
-                order_type = str(order.get('type', 'N/A')).upper()
-                is_buy = order.get('type') in ['buy', 'short_buy', 'stop_loss_short_cover']
+                order_direction = str(order.get('direction', 'N/A')).upper()
+                is_buy = order.get('direction') in ['buy', 'short_buy', 'stop_loss_short_cover']
                 order_color = '#28a745' if is_buy else '#dc3545'
                 t = order.get('time')
                 time_text = t.strftime('%H:%M:%S') if hasattr(t, 'strftime') else str(t)
@@ -261,7 +261,7 @@ class UIComponents:
                         html.Span(time_text, style={'color': '#666', 'fontSize': '0.9em'}),
                         html.Br(),
                         html.Span(f"{float(order.get('price', 0.0)):.2f} ₽", style={'color': '#2E86AB', 'fontWeight': 'bold'}),
-                        html.Span(f" {order_type}", style={'color': order_color, 'fontWeight': 'bold', 'marginLeft': '10px'})
+                        html.Span(f" {order_direction}", style={'color': order_color, 'fontWeight': 'bold', 'marginLeft': '10px'})
                     ], style={'padding': '5px', 'borderBottom': '1px solid #eee'})
                 )
         else:
@@ -273,7 +273,7 @@ class UIComponents:
         blocks: List[html.Div] = []
         if orders_data:
             for order in orders_data[-5:]:
-                is_buy = order.get('type') in ['buy', 'short_buy', 'stop_loss_short_cover']
+                is_buy = order.get('direction') in ['buy', 'short_buy', 'stop_loss_short_cover']
                 color = '#00ff88' if is_buy else '#ff4444'
                 icon = '🟢' if is_buy else '🔴'
                 t = order.get('time')
@@ -282,7 +282,7 @@ class UIComponents:
                     html.Div([
                         html.Div([
                             html.Span(icon, style={'fontSize': '1.2em', 'marginRight': '8px'}),
-                            html.Span(str(order.get('type', 'N/A')).upper(), style={'color': color, 'fontWeight': 'bold', 'fontSize': '0.9em'})
+                            html.Span(str(order.get('direction', 'N/A')).upper(), style={'color': color, 'fontWeight': 'bold', 'fontSize': '0.9em'})
                         ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '5px'}),
                         html.Div([
                             html.Span(f"Цена: {float(order.get('price', 0.0)):.2f} ₽", style={'color': '#2E86AB', 'fontSize': '0.8em'}),

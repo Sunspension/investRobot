@@ -124,6 +124,7 @@ class TestModelDataIntegrity:
         event_sink = Mock()
         
         # Создаем TradingDependencies
+        position_manager = Mock()
         dependencies = TradingDependencies(
             api_client=mock_api_client,
             session_stats=session_stats,
@@ -133,7 +134,8 @@ class TestModelDataIntegrity:
             market_data_stream=market_data_stream,
             signal_manager=signal_manager,
             strategy_manager=strategy_manager,
-            event_sink=event_sink
+            event_sink=event_sink,
+            position_manager=position_manager
         )
         
         # Проверяем целостность

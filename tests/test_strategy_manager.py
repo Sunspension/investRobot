@@ -14,6 +14,7 @@ from robotlib.signal_manager import Signal
 from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
 from robotlib.strategies.long import LongStrategy
 from tests.mocks import MockRiskManager, MockPortfolioManager
+from tinkoff.invest import Quotation
 
 
 class TestStrategyManager(unittest.TestCase):
@@ -35,6 +36,14 @@ class TestStrategyManager(unittest.TestCase):
             strategy.execute = AsyncMock(return_value=[])
             strategy.close_position = Mock(return_value=None)
             strategy.income = 0.0
+            strategy._figi = "FUTIMOEXF000"
+            strategy._position_manager = Mock()
+            strategy._position_manager.get_loss_positions = AsyncMock(return_value=[])
+        
+        # Создаем мок PositionManager
+        self.mock_position_manager = Mock()
+        self.mock_position_manager.get_stop_loss_positions = AsyncMock(return_value={})
+        self.mock_position_manager.get_position_direction = Mock(return_value='long')
         
         self.strategy_manager = StrategyManager(
             signal_manager=self.mock_signal_manager,
@@ -44,6 +53,7 @@ class TestStrategyManager(unittest.TestCase):
             intent_arbiter=SimpleIntentArbiter(),
             order_executor=Mock(),
             signal_dispatcher=NullSignalDispatcher(),
+            position_manager=self.mock_position_manager,
         )
     
     def test_init(self):
@@ -63,7 +73,7 @@ class TestStrategyManager(unittest.TestCase):
         """Тест обработки свечи без сигнала"""
         # Создаем мок свечи
         mock_candle = Mock()
-        mock_candle.close = 100.0
+        mock_candle.close = Quotation(units=100, nano=0)
         mock_candle.time = datetime.now()
         
         # Мокаем signal_manager, чтобы он не возвращал сигнал
@@ -81,7 +91,7 @@ class TestStrategyManager(unittest.TestCase):
         """Тест обработки свечи с сигналом"""
         # Создаем мок свечи
         mock_candle = Mock()
-        mock_candle.close = 100.0
+        mock_candle.close = Quotation(units=100, nano=0)
         mock_candle.time = datetime.now()
         
         # Создаем мок сигнала
@@ -122,7 +132,7 @@ class TestStrategyManager(unittest.TestCase):
         """Тест закрытия позиций"""
         # Создаем мок свечи
         mock_candle = Mock()
-        mock_candle.close = 100.0
+        mock_candle.close = Quotation(units=100, nano=0)
         
         # Мокаем стратегии, чтобы они возвращали заказы на закрытие
         mock_order = OrderIntent(
@@ -264,9 +274,7 @@ class TestStrategyManager(unittest.TestCase):
         mock_candle = Mock()
         mock_candle.time = fixed_time
         # Для совместимости попытки получения цены
-        mock_candle.close = Mock()
-        mock_candle.close.units = 1000
-        mock_candle.close.nano = 0
+        mock_candle.close = Quotation(units=1000, nano=0)
 
         # Сигнал менеджер возвращает сигналы (чтобы пройти ветку обработки)
         dummy_signal = Mock()

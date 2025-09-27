@@ -13,6 +13,69 @@ from robotlib.trading.risk_manager import RiskLimits, RiskCheck
 from tinkoff.invest import Candle, HistoricCandle
 from robotlib.trading_interfaces import TradingEventSinkable
 
+
+@runtime_checkable
+class PositionManageable(Protocol):
+    """Интерфейс для PositionManager - управление позициями и FIFO логикой"""
+    
+    def get_position(self, figi: str) -> Optional[Position]:
+        """Получение позиции из кэша"""
+        pass
+    
+    async def get_current_fifo_queue(self, figi: str) -> List[Any]:
+        """Получение текущей FIFO очереди для позиции"""
+        pass
+    
+    async def get_loss_positions(
+        self, 
+        figi: str, 
+        current_price: float, 
+        loss_threshold: float
+    ) -> List[Any]:
+        """Получение убыточных позиций по FIFO"""
+        pass
+    
+    async def get_profit_positions(
+        self, 
+        figi: str, 
+        current_price: float
+    ) -> List[Any]:
+        """Получение прибыльных позиций по FIFO"""
+        pass
+    
+    async def add_to_fifo(
+        self, 
+        figi: str, 
+        quantity: int, 
+        price: float, 
+        order_id: str,
+        direction: str = 'long'
+    ):
+        """Добавление позиции в FIFO очередь"""
+        pass
+    
+    async def remove_from_fifo(
+        self, 
+        figi: str, 
+        quantity: int
+    ):
+        """Удаление позиций из FIFO очереди по принципу FIFO"""
+        pass
+    
+    async def update_position_after_trade(
+        self, 
+        figi: str, 
+        quantity_delta: int, 
+        price: float
+    ):
+        """Обновление позиции после сделки"""
+        pass
+    
+    async def sync_on_startup(self, max_retries: int = 3) -> Dict[str, Position]:
+        """Синхронизация позиций при старте системы"""
+        pass
+
+
 class APIClientable(Protocol):
     """Интерфейс для API клиента"""
     
@@ -281,6 +344,7 @@ class TradingDependencies:
         market_data_stream: MarketDataStreamable,
         session_stats: SessionStatsable,
         event_sink: TradingEventSinkable,
+        position_manager: PositionManageable,  # PositionManager (обязательный)
         data_manager: VisualizationDataStoreable | None = None
     ):
         self.api_client = api_client
@@ -292,4 +356,5 @@ class TradingDependencies:
         self.market_data_stream = market_data_stream
         self.session_stats = session_stats
         self.event_sink = event_sink
+        self.position_manager = position_manager
         self.data_manager = data_manager

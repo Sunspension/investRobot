@@ -132,10 +132,10 @@ class VisualizationDataStore:
             self.total_volume += order_data.get('quantity', 1)
             
             # Подсчитываем ордера по типам
-            order_type = order_data.get('type', '').lower()
-            if order_type == 'buy':
+            order_direction = order_data.get('direction', '').lower()
+            if order_direction == 'buy':
                 self.buy_orders_count += 1
-            elif order_type == 'sell':
+            elif order_direction == 'sell':
                 self.sell_orders_count += 1
             
             # Ограничиваем количество ордеров
@@ -153,10 +153,10 @@ class VisualizationDataStore:
             self.buy_orders_count = 0
             self.sell_orders_count = 0
             for order in orders_data:
-                order_type = order.get('type', '').lower()
-                if order_type == 'buy':
+                order_direction = order.get('direction', '').lower()
+                if order_direction == 'buy':
                     self.buy_orders_count += 1
-                elif order_type == 'sell':
+                elif order_direction == 'sell':
                     self.sell_orders_count += 1
             
             # Ограничиваем количество ордеров
@@ -312,24 +312,28 @@ class VisualizationDataStore:
         """Загружает ордера за текущий день для FIGI по единой схеме orders.
 
         Ожидаемая схема:
-          time TEXT (ISO8601 UTC), figi TEXT, type TEXT ('buy'|'sell'), price REAL, quantity INTEGER, reason TEXT, strategy TEXT
+          time TEXT (ISO8601 UTC), figi TEXT, direction TEXT ('buy'|'sell'), price REAL, quantity INTEGER, reason TEXT, strategy TEXT
         """
         try:
             with sqlite3.connect(db_path) as conn:
+                # Используем новую схему с direction
                 query_today = (
-                    "SELECT time, figi, type, price, quantity, reason, strategy "
+                    "SELECT time, figi, direction, price, quantity, reason, strategy "
                     "FROM orders WHERE figi = ? AND date(replace(time, 'T', ' '), 'localtime') = date('now','localtime') "
                     "ORDER BY datetime(replace(time, 'T', ' ')) ASC LIMIT ?"
                 )
+                query_any = (
+                    "SELECT time, figi, direction, price, quantity, reason, strategy "
+                    "FROM orders WHERE figi = ? ORDER BY datetime(replace(time, 'T', ' ')) DESC LIMIT ?"
+                )
+                
                 df = pd.read_sql_query(query_today, conn, params=(figi, limit))
+                self.logger.info(f"Найдено ордеров за сегодня: {len(df)}")
 
                 # Фолбэк: если за текущий день нет записей — берём последние N ордеров без фильтра по дате
                 if df.empty:
-                    query_any = (
-                        "SELECT time, figi, type, price, quantity, reason, strategy "
-                        "FROM orders WHERE figi = ? ORDER BY datetime(replace(time, 'T', ' ')) DESC LIMIT ?"
-                    )
                     df = pd.read_sql_query(query_any, conn, params=(figi, limit))
+                    self.logger.info(f"Найдено ордеров за все время: {len(df)}")
                     # Разворачиваем в возрастающий порядок для стабильного отображения
                     if not df.empty:
                         df = df.iloc[::-1].reset_index(drop=True)
@@ -342,10 +346,18 @@ class VisualizationDataStore:
                         # Если строка времени уже без таймзоны (naive), считаем её локальной и не конвертируем повторно
                         if ('+' in raw_time) or ('Z' in raw_time) or ('z' in raw_time):
                             _dt = to_moscow_time(_dt)
+                        
+                        # Получаем direction из новой схемы
+                        direction = str(row['direction']).lower() if row['direction'] is not None else None
+                        
+                        # Пропускаем ордера без direction
+                        if not direction:
+                            continue
+                            
                         orders.append({
                             'time': _dt,
                             'figi': str(row['figi']),
-                            'direction': str(row['direction']).lower(),
+                            'direction': direction,
                             'price': float(row['price'] or 0.0),
                             'quantity': int(row['quantity'] or 0),
                             'reason': row.get('reason', ''),
@@ -397,7 +409,7 @@ class VisualizationDataStore:
                     CREATE TABLE IF NOT EXISTS orders_new (
                         time TEXT,
                         figi TEXT,
-                        type TEXT,
+                        direction TEXT,
                         price REAL,
                         quantity INTEGER,
                         reason TEXT,
@@ -435,8 +447,8 @@ class VisualizationDataStore:
                 sel_strategy = strategy_col if strategy_col else 'NULL'
 
                 insert_sql = (
-                    "INSERT INTO orders_new(time, figi, type, price, quantity, reason, strategy) "
-                    f"SELECT {sel_time} AS time, figi, {sel_type} AS type, {sel_price} AS price, {sel_qty} AS quantity, {sel_reason} AS reason, {sel_strategy} AS strategy FROM orders"
+                    "INSERT INTO orders_new(time, figi, direction, price, quantity, reason, strategy) "
+                    f"SELECT {sel_time} AS time, figi, {sel_type} AS direction, {sel_price} AS price, {sel_qty} AS quantity, {sel_reason} AS reason, {sel_strategy} AS strategy FROM orders"
                 )
                 cur.execute(insert_sql)
 

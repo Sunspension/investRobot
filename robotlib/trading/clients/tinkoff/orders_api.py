@@ -13,6 +13,7 @@ from tinkoff.invest import (
     CancelOrderRequest,
     OrderState,
 )
+from robotlib.utils.money import money_value_to_float_with_currency
 from tinkoff.invest.schemas import MoneyValue
 from robotlib.utils.money import Money
 
@@ -60,7 +61,10 @@ async def place_order(client, figi: str, direction: OrderDirection, quantity: in
         response = await client._services.orders.post_order(request)  # noqa: SLF001
 
     if getattr(response, "order_id", None):
-        return OrderResult(success=True, order_id=response.order_id, executed_price=price, executed_quantity=quantity)
+        # Для рыночных ордеров не возвращаем цену, так как она будет получена в wait_for_order_execution
+        # Для лимитных ордеров возвращаем переданную цену
+        executed_price = price if order_type == OrderType.ORDER_TYPE_LIMIT else None
+        return OrderResult(success=True, order_id=response.order_id, executed_price=executed_price, executed_quantity=quantity)
     # Если ответа нет или нет order_id, пробуем вытащить сообщение из метаданных/исключения (для песочницы обычно None)
     return OrderResult(success=False, error_message="Не удалось получить ID приказа")
 
@@ -83,7 +87,7 @@ async def get_order_status(client, order_id: str) -> Optional[OrderState]:
         return None
 
 
-async def wait_for_order_execution(client, order_id: str, *, max_wait_time: int = 30, check_interval: float = 1.0) -> OrderResult:
+async def wait_for_order_execution(client, order_id: str, figi: str = None, *, max_wait_time: int = 30, check_interval: float = 1.0) -> OrderResult:
     start = asyncio.get_running_loop().time()
     while asyncio.get_running_loop().time() - start < max_wait_time:
         state = await get_order_status(client, order_id)
@@ -92,12 +96,29 @@ async def wait_for_order_execution(client, order_id: str, *, max_wait_time: int 
             continue
         status = getattr(state, "execution_report_status", "")
         if status == "EXECUTION_REPORT_STATUS_FILL":
+            # Получаем point_value для правильной конвертации валюты
+            point_value = 1.0
+            if figi:
+                try:
+                    margin_info = await client.get_futures_margin(figi)
+                    if margin_info and 'min_price_increment' in margin_info and 'min_price_increment_amount' in margin_info:
+                        min_price_increment = margin_info['min_price_increment']
+                        min_price_increment_amount = margin_info['min_price_increment_amount']
+                        if min_price_increment > 0:
+                            point_value = min_price_increment_amount / min_price_increment
+                except Exception:
+                    point_value = 10.0  # Значение по умолчанию для фьючерса на MOEX
+            
+            # Конвертируем цены с учетом валюты (единый стиль через Money)
+            executed_price = Money(state.executed_order_price).to_float_with_currency(point_value)
+            commission = Money(state.initial_commission).to_float_with_currency(point_value)
+            
             return OrderResult(
                 success=True,
                 order_id=order_id,
-                executed_price=Money(state.executed_order_price).to_float(),
+                executed_price=executed_price,
                 executed_quantity=state.lots_executed,
-                commission=Money(state.initial_commission).to_float(),
+                commission=commission,
                 order_status="FILL",
                 is_executed=True,
             )

@@ -1,14 +1,15 @@
 import pandas as pd
+
 from typing import List
 from dataclasses import asdict
 from pandas import DataFrame
-
 from robotlib.signal_manager import SignalManager
 from robotlib.trading.order_types import OrderIntent
 from robotlib.strategies.strategy_interface import Strategyable
 from robotlib.trading.interfaces import StrategyManageable, OrderExecutable
 from robotlib.strategies.signal_dispatcher import SignalDispatchable
 from robotlib.utils.logger import get_logger
+from robotlib.utils.money import Money
 from tinkoff.invest import Candle, HistoricCandle
 from robotlib.strategies.intent_arbiter_interfaces import IntentArbiterable
 
@@ -72,12 +73,14 @@ class StrategyManager(StrategyManageable):
         intent_arbiter: IntentArbiterable,
         order_executor: OrderExecutable,
         signal_dispatcher: SignalDispatchable,
+        position_manager,  # PositionManager для проверки стоп-лоссов
     ):
         self._signal_manager = signal_manager
         self._risk_manager = risk_manager
         self._portfolio_manager = portfolio_manager
         self._order_executor = order_executor
         self._signal_dispatcher = signal_dispatcher
+        self._position_manager = position_manager
         self._orders = []
         self._logger = get_logger(__name__)
         self._last_processed_bar_time = None
@@ -114,7 +117,7 @@ class StrategyManager(StrategyManageable):
             return
         # Отправляем сигнал в диспетчер
         try:
-            price = float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9)
+            price = Money(candle.close).to_float()
         except Exception:
             price = 0.0
         await self._signal_dispatcher.dispatch_signal(signal, getattr(candle, 'figi', 'unknown'), price)
@@ -127,6 +130,16 @@ class StrategyManager(StrategyManageable):
             order_intents: list[OrderIntent] = await strategy.execute(signal)
             self._logger.debug(f"execute: {strategy.__class__.__name__} вернул {len(order_intents)} намерений")
             intents_bucket.extend(order_intents)
+        
+        # Каждая стратегия проверяет свои стоп-лоссы
+        for strategy in self._strategies:
+            if hasattr(strategy, '_check_stop_loss'):
+                try:
+                    stop_loss_orders = await strategy._check_stop_loss(candle)
+                    intents_bucket.extend(stop_loss_orders)
+                except Exception as e:
+                    self._logger.error(f"Ошибка проверки стоп-лосса в {strategy.__class__.__name__}: {e}")
+        
         self._intent_arbiter.add_intents(intents_bucket)
         netted_intents = self._intent_arbiter.flush()
 
@@ -139,7 +152,7 @@ class StrategyManager(StrategyManageable):
                 for strategy in self._strategies:
                     if hasattr(strategy, '_process_execution'):
                         try:
-                            strategy._process_execution(execution)
+                            await strategy._process_execution(execution)
                         except Exception:
                             pass
                 self._logger.info(f"Ордер выполнен: {execution}")
@@ -197,7 +210,7 @@ class StrategyManager(StrategyManageable):
                             
                             # Передаем результат исполнения в стратегию
                             if hasattr(strategy, '_process_execution'):
-                                strategy._process_execution(execution)
+                                await strategy._process_execution(execution)
                             
                             self._logger.info(f"Позиция закрыта в стратегии {strategy.__class__.__name__}: {execution}")
                             
@@ -230,4 +243,6 @@ class StrategyManager(StrategyManageable):
             if isinstance(strategy, strategy_class):
                 return strategy.position
         return 0
+    
+    
     

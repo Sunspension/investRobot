@@ -10,10 +10,13 @@ from robotlib.trading.candle_cache import CandleCache
 from robotlib.trading.historical_data_loader import HistoricalDataLoader
 from robotlib.trading.stream_watchdog import StreamWatchdog
 from robotlib.ingestion.candle_data_sink import CandleDataSink
-from robotlib.utils.logger import get_logger
+from robotlib.utils.logger import get_logger, setup_logging
 from robotlib.utils.backoff import compute_backoff_delay
+import logging
 
 
+# Настраиваем логирование с датой
+setup_logging(level=logging.INFO, log_file='data/logs/market_ingestor.log')
 logger = get_logger(__name__)
 
 

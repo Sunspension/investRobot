@@ -110,7 +110,7 @@ async def run_trading_system(
     
     # Инициализируем логирование максимально рано
     try:
-        setup_logging(level=logging.INFO, log_file='data/logs/debug.log')
+        setup_logging(level=logging.DEBUG, log_file='data/logs/debug.log')
     except Exception:
         # Не блокируем запуск при ошибке файлового логгера
         pass

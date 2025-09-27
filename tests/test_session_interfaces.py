@@ -241,22 +241,6 @@ class TestInterfaceCompatibility(unittest.TestCase):
         stats = SessionStats()
         self.assertIsInstance(stats, SessionStatsable)
     
-    def test_session_initializer_implements_interface(self):
-        """Тест что SessionInitializer реализует ISessionInitializer"""
-        from robotlib.trading.session_initializer import SessionInitializer
-        from robotlib.trading.interfaces import TradingDependencies
-        from robotlib.trading.trading_config import TradingConfig
-        
-        # Создаем моки для зависимостей
-        mock_deps = MagicMock(spec=TradingDependencies)
-        mock_deps.session_stats = MagicMock()
-        mock_deps.session_initializer = MagicMock()
-        mock_deps.strategy_manager = MagicMock()
-        mock_config = MagicMock(spec=TradingConfig)
-        
-        initializer = SessionInitializer(mock_config, mock_deps)
-        self.assertIsInstance(initializer, SessionInitializable)
-    
     def test_session_controller_implements_interface(self):
         """Тест что SessionController реализует ISessionController"""
         from robotlib.trading.session_controller import SessionController

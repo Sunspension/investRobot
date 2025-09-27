@@ -31,6 +31,13 @@ class DummyDispatcher:
         self.dispatched += 1
 
 
+class DummyPositionManager:
+    async def get_position(self, figi: str):
+        return None
+    async def add_to_fifo(self, figi: str, quantity: int, price: float, order_id: str):
+        pass
+
+
 def test_warmup_no_dispatch_no_orders():
     sm = SignalManager()
     dispatcher = DummyDispatcher()
@@ -47,6 +54,7 @@ def test_warmup_no_dispatch_no_orders():
         strategies=strategies,
         signal_dispatcher=NullSignalDispatcher(),
         intent_arbiter=SimpleIntentArbiter(),
+        position_manager=DummyPositionManager(),
     )
 
     # 50 баров

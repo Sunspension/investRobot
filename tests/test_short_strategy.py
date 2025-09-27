@@ -9,6 +9,7 @@ from robotlib.strategies.short import ShortStrategy
 from tests.mocks.position_sizer_dummy import DummySizer
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
+from robotlib.trading.interfaces import PositionManageable
 from robotlib.utils.money import Money
 from tinkoff.invest import Candle, Quotation
 
@@ -28,6 +29,52 @@ class MockPortfolioManager:
     
     def __init__(self, deposit=100000.0, guarantee_deposit=1000.0):
         self._deposit = deposit
+
+
+class MockPositionManager(PositionManageable):
+    """Мок для PositionManager"""
+    
+    def __init__(self, risk_manager=None):
+        self._positions_cache = {}
+        self._risk_manager = risk_manager or MockRiskManager()
+    
+    def get_position(self, figi: str):
+        """Получение позиции из кэша"""
+        return self._positions_cache.get(figi)
+    
+    async def add_to_fifo(self, figi: str, quantity: int, price: float, order_id: str, direction: str = 'long'):
+        """Добавление позиции в FIFO очередь"""
+        pass
+    
+    async def remove_from_fifo(self, figi: str, quantity: int):
+        """Удаление позиций из FIFO очереди"""
+        pass
+    
+    async def update_position_after_trade(self, figi: str, quantity_delta: int, price: float):
+        """Обновление позиции после сделки"""
+        pass
+    
+    async def get_loss_positions(self, figi: str, current_price: float, loss_threshold: float = None):
+        """Получение убыточных позиций"""
+        if loss_threshold is None:
+            loss_threshold = self._risk_manager.risk_limits.stop_loss_threshold
+        
+        # Для тестов возвращаем убыточные позиции, если убыток превышает порог в пунктах
+        # Создаем тестовые позиции с ценой 100, если текущая цена выросла достаточно
+        if current_price >= 100.0 + loss_threshold:  # Если цена выросла на loss_threshold пунктов
+            from robotlib.trading.position_manager import FIFOEntry, LossPosition
+            fifo_entry = FIFOEntry(quantity=2, price=100.0, timestamp=datetime.now(), order_id="test", direction="short")
+            loss_percent = (current_price - 100.0) / 100.0
+            return [LossPosition(quantity=2, price=100.0, loss_percent=loss_percent, order_id="test")]
+        return []
+    
+    async def get_profit_positions(self, figi: str, current_price: float):
+        """Получение прибыльных позиций"""
+        return []
+    
+    async def sync_on_startup(self, max_retries: int = 3):
+        """Синхронизация позиций при старте"""
+        return {}
         self._guarantee_deposit = guarantee_deposit
     
     async def get_deposit(self) -> float:
@@ -91,7 +138,8 @@ class TestShortStrategy:
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
         
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         assert strategy._position == 0
         assert strategy._cost_basis == 0.0
@@ -106,7 +154,8 @@ class TestShortStrategy:
         """Тест инициализации с параметрами"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         strategy.initialize(
             figi="TEST_FIGI",
@@ -123,7 +172,8 @@ class TestShortStrategy:
         """Тест инициализации с значениями по умолчанию"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         strategy.initialize(point_value=10.0, contracts_per_lot=10)
         
@@ -136,7 +186,8 @@ class TestShortStrategy:
         """Тест выполнения без сигналов"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         signal = create_signal(
             macd=0.1,
@@ -157,7 +208,8 @@ class TestShortStrategy:
         """Тест обнаружения пика (сигнал на шорт)"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         signal = create_signal(peak_detected=True)
         
@@ -171,7 +223,8 @@ class TestShortStrategy:
         """Тест обнаружения впадины (сигнал на закрытие шорта)"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         signal = create_signal(trough_detected=True)
         
@@ -185,7 +238,8 @@ class TestShortStrategy:
         """Тест сигнала на открытие шорта"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         # Устанавливаем ожидание открытия шорта
         strategy._wait_short_sell_cross = True
@@ -214,7 +268,8 @@ class TestShortStrategy:
         """Тест сигнала на закрытие шорта"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         # Устанавливаем позицию и ожидание закрытия шорта
         strategy._position = 5
@@ -244,7 +299,8 @@ class TestShortStrategy:
         """Тест дозакупки при нисходящем тренде"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         # Устанавливаем позицию
         strategy._position = 2
@@ -267,7 +323,8 @@ class TestShortStrategy:
         """Тест закрытия позиции когда есть позиция"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         strategy._position = 3
         candle = create_mock_candle(100.0)
@@ -285,7 +342,8 @@ class TestShortStrategy:
         """Тест закрытия позиции когда позиции нет"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         strategy._position = 0
         candle = create_mock_candle(100.0)
@@ -298,18 +356,21 @@ class TestShortStrategy:
         """Тест расчета количества для закрытия шорта"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         strategy._position = 5
         result = strategy._items_to_buy_short()
         
         assert result == 5
     
-    def test_process_execution_sell(self):
+    @pytest.mark.asyncio
+    async def test_process_execution_sell(self):
         """Тест обработки исполнения продажи (открытие шорта)"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         execution = OrderExecution(
             order_id="test_order_1",
@@ -324,11 +385,10 @@ class TestShortStrategy:
             reason="Test short sell order"
         )
         
-        strategy._process_execution(execution)
+        await strategy._process_execution(execution)
         
         assert strategy._position == 2
-        assert len(strategy._positions) == 1
-        assert strategy._positions[0] == [100.0, 2]
+        # _positions теперь управляется PositionManager
         assert strategy._cost_basis == 200.0
     
     @pytest.mark.asyncio
@@ -336,7 +396,8 @@ class TestShortStrategy:
         """Тест обработки исполнения покупки (закрытие шорта)"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         # Инициализируем стратегию
         strategy.initialize(point_value=10.0, contracts_per_lot=10)
@@ -359,74 +420,22 @@ class TestShortStrategy:
             reason="Test short cover order"
         )
         
-        strategy._process_execution(execution)
+        await strategy._process_execution(execution)
         
         assert strategy._position == 1
-        assert len(strategy._positions) == 1
-        assert strategy._positions[0] == [100.0, 1]
-        assert strategy._income > 0  # Должна быть прибыль (продали по 100, купили по 90)
+        # _positions теперь управляется PositionManager
+        # _income теперь управляется PositionManager
     
-    @pytest.mark.asyncio
-    async def test_fifo_buy_short(self):
-        """Тест FIFO покупки для закрытия шорта"""
-        risk_manager = MockRiskManager()
-        portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
-        
-        # Инициализируем стратегию
-        strategy.initialize(point_value=10.0, contracts_per_lot=10)
-        
-        positions = [[100.0, 2], [105.0, 3]]
-        price = 90.0  # Покрываем по более низкой цене
-        qty_to_buy = 3
-        commission = 10.0
-        
-        new_positions, profit, new_pos = strategy._fifo_buy_short(
-            positions, price, qty_to_buy, commission
-        )
-        
-        assert len(new_positions) == 1
-        assert new_positions[0] == [105.0, 2]  # Остался один лот
-        assert new_pos == 2
-        assert profit > 0  # Должна быть прибыль (продали по 100, купили по 90)
     
-    def test_check_stop_loss_no_loss(self):
-        """Тест проверки стоп-лосса без убытка"""
-        risk_manager = MockRiskManager(stop_loss_threshold=50.0)
-        portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
-        
-        # Позиция с небольшой потерей
-        strategy._positions = [[100.0, 2]]
-        candle = create_mock_candle(105.0)  # Потеря 5 пунктов для шорта
-        
-        orders = strategy._check_stop_loss(candle)
-        
-        assert orders == []
-    
-    def test_check_stop_loss_with_loss(self):
-        """Тест проверки стоп-лосса с убытком"""
-        risk_manager = MockRiskManager(stop_loss_threshold=50.0)
-        portfolio_manager = MockPortfolioManager()
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
-        
-        # Позиция с большой потерей
-        strategy._positions = [[100.0, 2]]
-        candle = create_mock_candle(160.0)  # Потеря 60 пунктов для шорта
-        
-        orders = strategy._check_stop_loss(candle)
-        
-        assert len(orders) == 1
-        assert orders[0].direction == OrderDirection.BUY  # Покрываем шорт
-        assert orders[0].quantity == 2
-        assert orders[0].order_type == OrderType.MARKET
+    # Тесты _check_stop_loss удалены - логика перенесена в StrategyManager
     
     @pytest.mark.asyncio
     async def test_items_to_sell_short_calculation(self):
         """Тест расчета количества для открытия шорта"""
         risk_manager = MockRiskManager(percent_from_deposit=20, items_per_trade=10)
         portfolio_manager = MockPortfolioManager(deposit=100000.0, guarantee_deposit=2000.0)
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         # Без позиций
         mock_signal = Mock(spec=Signal)
@@ -434,7 +443,7 @@ class TestShortStrategy:
         mock_signal.atr = None
         mock_signal.candle = Mock()
         mock_signal.candle.close = Quotation(units=2500, nano=0)
-        items = await strategy._items_to_sell_short(mock_signal)
+        items = strategy._items_to_sell_short(mock_signal)
         
         # 20% от 100000 = 20000, на 2000 за контракт = 10 контрактов
         # Но лимит items_per_trade = 10, поэтому должно быть 10
@@ -442,7 +451,7 @@ class TestShortStrategy:
         
         # С существующей позицией
         strategy._position = 3
-        items = await strategy._items_to_sell_short(mock_signal)
+        items = strategy._items_to_sell_short(mock_signal)
         
         # При DummySizer размер позиции фиксирован
         assert items == 1
@@ -452,13 +461,14 @@ class TestShortStrategy:
         """Тест расчета количества при нулевом гарантийном обеспечении"""
         risk_manager = MockRiskManager()
         portfolio_manager = MockPortfolioManager(guarantee_deposit=0.0)
-        strategy = ShortStrategy(risk_manager, portfolio_manager, position_sizing_service=DummySizer())
+        position_manager = MockPositionManager()
+        strategy = ShortStrategy(position_manager=position_manager)
         
         mock_signal = Mock(spec=Signal)
         mock_signal.histogram = 0.2
         mock_signal.atr = None
         mock_signal.candle = Mock()
         mock_signal.candle.close = Quotation(units=2500, nano=0)
-        items = await strategy._items_to_sell_short(mock_signal)
+        items = strategy._items_to_sell_short(mock_signal)
         
         assert items == 1  # DummySizer returns 1 regardless of guarantee deposit in this test

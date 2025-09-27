@@ -47,8 +47,9 @@ class _ColorFormatter(logging.Formatter):
 
 def _ensure_color_console_handler(level=logging.INFO) -> logging.Handler:
     handler = logging.StreamHandler()
+    date_format = "%Y-%m-%d %H:%M:%S"
     fmt = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    handler.setFormatter(_ColorFormatter(fmt))
+    handler.setFormatter(_ColorFormatter(fmt, datefmt=date_format))
     handler.setLevel(level)
     root = logging.getLogger()
     # Избегаем дублирования хендлеров при повторных вызовах

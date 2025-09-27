@@ -28,7 +28,7 @@ After=network-online.target
 
 [Service]
 WorkingDirectory=$ROOT_DIR
-ExecStart=$PY_BIN $ROOT_DIR/run_market_ingestor.py --figi $FIGI --db $DB_PATH --seconds 0
+ExecStart=$PY_BIN $ROOT_DIR/run_candle_sink.py --figi $FIGI --db $DB_PATH --seconds 0
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1
@@ -71,7 +71,7 @@ After=network-online.target
 [Service]
 WorkingDirectory=$ROOT_DIR
 EnvironmentFile=%h/.config/investrobot/%i.env
-ExecStart=$PY_BIN $ROOT_DIR/run_market_ingestor.py --figi $FIGI --db $DB_PATH --seconds 0
+ExecStart=$PY_BIN $ROOT_DIR/run_candle_sink.py --figi $FIGI --db $DB_PATH --seconds 0
 Restart=on-failure
 RestartSec=3
 Environment=PYTHONUNBUFFERED=1

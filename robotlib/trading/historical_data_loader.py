@@ -62,7 +62,7 @@ class HistoricalDataLoader:
                 
                 return candles_response.candles
             else:
-                self._logger.warning(f"Не удалось загрузить исторические данные. Ответ: {candles_response}")
+                self._logger.debug(f"Пустой ответ от API (возможно, рынок закрыт или нет данных). Ответ: {candles_response}")
                 return []
                 
         except Exception as e:
@@ -108,7 +108,8 @@ class HistoricalDataLoader:
                 for candle in candles:
                     try:
                         # Расчет цены как в stream-пути
-                        price = float(getattr(candle.close, 'units', 0) + getattr(candle.close, 'nano', 0) / 1e9)
+                        from robotlib.utils.money import Money
+                        price = Money(candle.close).to_float()
                     except Exception:
                         try:
                             price = Money(candle.close).to_float()

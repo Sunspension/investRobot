@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient, OrderResult
-from robotlib.utils.money import Money
+from robotlib.utils.money import Money, money_value_to_float_with_currency
 from robotlib.utils.logger import get_logger
 from config_data.config import load_config
 from tinkoff.invest.schemas import Operation
@@ -357,10 +357,10 @@ class PortfolioManager:
             Position или None
         """
         try:
-            # Получаем данные из PortfolioPosition
-            current_price = Money(position_data.current_price).to_float()
-            average_price = Money(position_data.average_position_price).to_float()
-            quantity = Money(position_data.quantity).to_float()
+            # Получаем данные из PortfolioPosition (единый стиль через Money)
+            current_price = Money(position_data.current_price).to_float_with_currency(point_value=1.0)
+            average_price = Money(position_data.average_position_price).to_float_with_currency(point_value=1.0)
+            quantity = Money(position_data.quantity).to_float()  # quantity обычно в штуках, не в валюте
             
             # Рассчитываем unrealized PnL
             unrealized_pnl = 0.0

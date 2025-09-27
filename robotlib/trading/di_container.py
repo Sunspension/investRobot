@@ -6,7 +6,6 @@ from robotlib.utils.logger import get_logger
 from robotlib.trading.trading_config import TradingConfig
 from robotlib.trading.interfaces import TradingDependencies
 from robotlib.trading.session_controller import SessionController
-from robotlib.trading.session_initializer import SessionInitializer
 from robotlib.trading.session_stats import SessionStats
 from robotlib.trading.portfolio_manager import PortfolioManager
 from robotlib.trading.risk_manager import RiskManager, RiskLimits
@@ -18,8 +17,11 @@ from robotlib.trading.candle_cache_interfaces import CandleCacheable
 from robotlib.trading.stream_watchdog import StreamWatchdog
 from robotlib.trading.historical_data_loader import HistoricalDataLoader
 from robotlib.trading.historical_data_loader_interfaces import HistoricalDataLoaderable
+from robotlib.trading.stream_registry import get_stream_registry
 from robotlib.trading.position_sizing_service import PositionSizingService
 from robotlib.trading.position_sizing_config import PositionSizingConfig
+from robotlib.trading.position_manager import PositionManager
+from robotlib.trading.position_manager_factory import PositionManagerFactory
 from robotlib.strategies.long import LongStrategy
 from robotlib.strategies.short import ShortStrategy
 from robotlib.trading.api_client_factory import APIClientFactory
@@ -37,6 +39,7 @@ from visualization.ui_components import UIComponents
 from visualization.channels.ws import WebSocketHub
 from visualization.services.market_status_service import MarketStatusService
 from robotlib.trading_interfaces import MarketStatusSinkable
+from robotlib.trading.position_restoration_service import PositionRestorationService
 
 class TradingSystemContainer:
     """DI контейнер для торговой системы"""
@@ -86,17 +89,16 @@ class TradingSystemContainer:
             config=cfg,
         )
         
+        # Получаем PositionManager для стратегий
+        position_manager = await self.get_position_manager()
+        
         # Создаем стратегии
         strategies = [
             LongStrategy(
-                risk_manager=await self.get_risk_manager(),
-                portfolio_manager=await self.get_portfolio_manager(),
-                position_sizing_service=position_sizing_service
+                position_manager=position_manager
             ),
             ShortStrategy(
-                risk_manager=await self.get_risk_manager(),
-                portfolio_manager=await self.get_portfolio_manager(),
-                position_sizing_service=position_sizing_service
+                position_manager=position_manager
             )
         ]
         
@@ -148,7 +150,11 @@ class TradingSystemContainer:
                     max_open_positions=None,
                 )
             )
+            
+            # Лимиты риска проверяются в SessionController при старте сессии
+                
         return self._instances['risk_manager']
+    
     
     async def get_order_executor(self) -> OrderExecutor:
         """Получает исполнитель ордеров"""
@@ -208,6 +214,7 @@ class TradingSystemContainer:
                 strategies=strategies,
                 signal_dispatcher=dispatcher,
                 intent_arbiter=SimpleIntentArbiter(),
+                position_manager=await self.get_position_manager(),
             )
             
             self._instances['strategy_manager'] = strategy_manager
@@ -252,8 +259,18 @@ class TradingSystemContainer:
             return None
     
     async def get_market_data_stream(self) -> MarketDataStream:
-        """Получает стрим рыночных данных"""
+        """Получает стрим рыночных данных с переиспользованием"""
         if 'market_data_stream' not in self._instances:
+            # Проверяем реестр стримов
+            registry = get_stream_registry()
+            existing_stream = registry.get_stream(self._config.figi)
+            
+            if existing_stream:
+                self._logger.info(f"Переиспользуем существующий стрим для {self._config.figi}")
+                self._instances['market_data_stream'] = existing_stream
+                return existing_stream
+            
+            # Создаем новый стрим
             api_client = await self.get_api_client()
             
             # Собираем StreamConfig. Если у TradingConfig в будущем появится ссылка,
@@ -277,13 +294,24 @@ class TradingSystemContainer:
                 require_open_market=stream_cfg.watchdog_require_open_market
             ) if stream_cfg.watchdog_enabled else None
             
-            self._instances['market_data_stream'] = MarketDataStream(
+            new_stream = MarketDataStream(
                 api_client=api_client,
                 figi=self._config.figi,
                 candle_cache=candle_cache,
                 historical_loader=historical_loader,
                 watchdog=watchdog,
             )
+            
+            # Регистрируем стрим в реестре
+            subscriber_id = f"trading_system_{id(self)}"
+            registered_stream = registry.register_stream(
+                self._config.figi, 
+                new_stream, 
+                subscriber_id
+            )
+            
+            self._instances['market_data_stream'] = registered_stream
+            
             # Создаем TradingToUIBridge как основной sink
             bridge = self._create_trading_bridge()
             if bridge is not None:
@@ -305,7 +333,36 @@ class TradingSystemContainer:
             except Exception:
                 # Если стратегий нет, продолжаем только с визуализатором
                 pass
+            
+            # Автозапуск потока данных (раньше это делал SessionInitializer)
+            try:
+                await self._instances['market_data_stream'].start()
+                self._logger.info("✅ Поток рыночных данных запущен автоматически")
+            except Exception as e:
+                self._logger.warning(f"⚠️ Не удалось запустить поток данных: {e}")
+                
         return self._instances['market_data_stream']
+    
+    async def get_position_manager(self) -> PositionManager:
+        """Получает PositionManager"""
+        if 'position_manager' not in self._instances:
+            risk_manager = await self.get_risk_manager()
+            sync_service = await self.get_sync_service()
+            self._instances['position_manager'] = await PositionManagerFactory.create_and_sync_position_manager(
+                db_path=self._config.db_path,
+                risk_manager=risk_manager,
+                sync_service=sync_service
+            )
+        return self._instances['position_manager']
+    
+    async def get_sync_service(self):
+        """Получает сервис синхронизации позиций"""
+        if 'sync_service' not in self._instances:
+            from robotlib.trading.position_sync_service import PositionSyncService
+            api_client = await self.get_api_client()
+            restoration_service = PositionRestorationService(api_client, point_value=10.0)
+            self._instances['sync_service'] = PositionSyncService(self._config.db_path, api_client, restoration_service)
+        return self._instances['sync_service']
     
     async def get_trading_dependencies(self) -> TradingDependencies:
         """Получает зависимости торговой системы"""
@@ -320,48 +377,21 @@ class TradingSystemContainer:
                 signal_manager=self.get_signal_manager(),
                 strategy_manager=await self.get_strategy_manager(),
                 event_sink=self._create_trading_bridge(),
+                position_manager=await self.get_position_manager(),
                 data_manager=self.get_data_manager()
             )
         return self._instances['trading_dependencies']
     
-    async def get_session_initializer(self) -> SessionInitializer:
-        """Получает инициализатор сессии"""
-        if 'session_initializer' not in self._instances:
-            # Получаем готовые TradingDependencies
-            dependencies = await self.get_trading_dependencies()
-            # Создаем SessionInitializer с готовыми dependencies
-            self._instances['session_initializer'] = SessionInitializer(
-                config=self._config,
-                dependencies=dependencies
-            )
-        return self._instances['session_initializer']
     
     async def get_session_controller(self) -> SessionController:
         """Получает контроллер сессии"""
         if 'session_controller' not in self._instances:
-            # Получаем зависимости и session_initializer отдельно
+            # Получаем зависимости (SessionInitializer больше не нужен)
             dependencies = await self.get_trading_dependencies()
-            session_initializer = await self.get_session_initializer()
-            
-            # Создаем TradingDependencies с session_initializer для SessionController
-            controller_dependencies = TradingDependencies(
-                api_client=dependencies.api_client,
-                session_stats=dependencies.session_stats,
-                portfolio_manager=dependencies.portfolio_manager,
-                risk_manager=dependencies.risk_manager,
-                order_executor=dependencies.order_executor,
-                market_data_stream=dependencies.market_data_stream,
-                signal_manager=dependencies.signal_manager,
-                strategy_manager=dependencies.strategy_manager,
-                event_sink=dependencies.event_sink,
-                data_manager=dependencies.data_manager,
-            )
-            # Добавляем session_initializer как атрибут
-            controller_dependencies.session_initializer = session_initializer
             
             self._instances['session_controller'] = SessionController(
                 config=self._config,
-                dependencies=controller_dependencies,
+                dependencies=dependencies,
                 force_start=True,
                 visualizer=self.get_visualizer(host="127.0.0.1", port=8050, start_server=True)
             )

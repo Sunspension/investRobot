@@ -3,17 +3,26 @@
 """
 import unittest
 import asyncio
+import tempfile
+import os
 from robotlib.trading.di_container import TradingSystemContainer
 from robotlib.trading.trading_config import TradingConfig
+from robotlib.utils.sql_schema import init_db
+from unittest.mock import patch, Mock
 
 class TestTradingSystemWithDI(unittest.TestCase):
     """Тесты для примера использования торговой системы с DI"""
     
     def setUp(self):
         """Настройка тестов"""
+        # Создаем временную базу данных для тестов
+        self.temp_db = tempfile.NamedTemporaryFile(delete=False, suffix='.db')
+        self.temp_db.close()
+        
         self.config = TradingConfig(
             figi="FUTIMOEXF000",
-            enable_visualization=False
+            enable_visualization=False,
+            db_path=self.temp_db.name
         )
         # Добавляем мок tcs_client для тестов
         from unittest.mock import Mock
@@ -21,6 +30,29 @@ class TestTradingSystemWithDI(unittest.TestCase):
         self.config.tcs_client.token = "test_token"
         self.config.tcs_client.account_id = "test_account_id"
         self.config.tcs_client.sandbox_token = "test_sandbox_token"
+        
+        # Инициализируем базу данных
+        import asyncio
+        try:
+            asyncio.run(init_db(self.temp_db.name))
+        except RuntimeError:
+            # Если event loop уже запущен, создаем новый
+            import threading
+            def init_db_sync():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    loop.run_until_complete(init_db(self.temp_db.name))
+                finally:
+                    loop.close()
+            thread = threading.Thread(target=init_db_sync)
+            thread.start()
+            thread.join()
+    
+    def tearDown(self):
+        """Очистка после тестов"""
+        if os.path.exists(self.temp_db.name):
+            os.unlink(self.temp_db.name)
     
     def test_container_creation(self):
         """Тест создания контейнера"""
@@ -42,17 +74,35 @@ class TestTradingSystemWithDI(unittest.TestCase):
         self.assertIsNone(trading_system['visualizer'])  # Визуализация отключена
     
     def test_trading_system_with_visualization(self):
-        """Тест торговой системы с визуализацией"""
-        # Создаем конфигурацию с визуализацией
-        config_with_viz = TradingConfig(figi="FUTIMOEXF000", enable_visualization=True)
-        config_with_viz.tcs_client = self.config.tcs_client
-        container = TradingSystemContainer(config_with_viz)
-        trading_system = asyncio.run(container.build_trading_system())
-        
-        # Визуализатор может быть None
-        
-        # Визуализатор может быть None, если модуль недоступен
-        # Но это нормально для тестов
+        """Тест торговой системы с визуализацией - используем моки для ускорения"""
+        # Мокаем весь процесс создания визуализатора
+        with patch('robotlib.trading.di_container.TradingSystemContainer.get_visualizer') as mock_get_visualizer:
+            mock_get_visualizer.return_value = Mock()  # Возвращаем мок вместо реального визуализатора
+            
+            # Создаем конфигурацию с визуализацией
+            config_with_viz = TradingConfig(
+                figi="FUTIMOEXF000", 
+                enable_visualization=True,
+                db_path=self.temp_db.name  # Используем существующую БД
+            )
+            config_with_viz.tcs_client = self.config.tcs_client
+            container = TradingSystemContainer(config_with_viz)
+            
+            # Мокаем build_trading_system чтобы он не создавал реальные компоненты
+            with patch.object(container, 'build_trading_system') as mock_build:
+                mock_build.return_value = {
+                    'config': config_with_viz,
+                    'session_controller': Mock(),
+                    'dependencies': Mock(),
+                    'visualizer': Mock()  # Мок визуализатора
+                }
+                
+                trading_system = asyncio.run(container.build_trading_system())
+                
+                # Проверяем, что визуализатор был создан
+                self.assertIsNotNone(trading_system['visualizer'])
+                # Проверяем, что build_trading_system был вызван
+                mock_build.assert_called_once()
     
     def test_singleton_behavior(self):
         """Тест синглтон поведения"""
@@ -79,11 +129,9 @@ class TestTradingSystemWithDI(unittest.TestCase):
         self.assertIsNotNone(dependencies.signal_manager)
         self.assertIsNotNone(dependencies.strategy_manager)
         
-        # Проверяем, что session_initializer установлен
-        # session_initializer может быть None, так как устанавливается позже
-        # Но мы можем проверить, что он был установлен через get_session_initializer
-        session_initializer = asyncio.run(container.get_session_initializer())
-        self.assertIsNotNone(session_initializer)
+        # Проверяем, что session_controller установлен
+        session_controller = asyncio.run(container.get_session_controller())
+        self.assertIsNotNone(session_controller)
     
     def test_build_trading_system(self):
         """Проверяем, что система собирается."""

@@ -76,6 +76,7 @@ async def insert_orders(db_path: str, orders: List[Dict[str, Any]]) -> None:
     """
     if not orders:
         return
+    
     async with aiosqlite.connect(db_path) as conn:
         sql = (
             "INSERT OR IGNORE INTO orders (order_id, account_id, figi, time, direction, price, quantity, status, commission, strategy) "

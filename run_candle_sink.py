@@ -6,11 +6,18 @@ from typing import Optional
 from config_data.config import load_config
 from robotlib.trading.tinkoff_api_client import TinkoffAPIClient
 from robotlib.trading.market_data_stream import MarketDataStream
+from robotlib.trading.candle_cache import CandleCache
+from robotlib.trading.historical_data_loader import HistoricalDataLoader
+from robotlib.trading.stream_watchdog import StreamWatchdog
+from robotlib.trading.stream_registry import get_stream_registry
 from robotlib.ingestion.candle_data_sink import CandleDataSink
-from robotlib.utils.logger import get_logger
+from robotlib.utils.logger import get_logger, setup_logging
 from robotlib.utils.backoff import compute_backoff_delay
+import logging
 
 
+# Настраиваем логирование с датой
+setup_logging(level=logging.INFO, log_file='data/logs/candle_sink.log')
 logger = get_logger(__name__)
 
 
@@ -26,13 +33,38 @@ async def _run_candle_sink(figi: str, db_path: str, run_seconds: Optional[int]) 
         account_id=cfg.tcs_client.account_id,
         sandbox_token=cfg.tcs_client.sandbox_token,
     ) as api_client:
-        stream = MarketDataStream(
-            api_client=api_client,
-            figi=figi,
-            watchdog_enabled=cfg.watchdog_enabled,
-            watchdog_stale_seconds=cfg.watchdog_stale_seconds,
-            watchdog_require_open_market=cfg.watchdog_require_open_market,
-        )
+        # Проверяем реестр стримов для переиспользования
+        registry = get_stream_registry()
+        existing_stream = registry.get_stream(figi)
+        
+        if existing_stream:
+            logger.info(f"Переиспользуем существующий стрим для {figi}")
+            stream = existing_stream
+        else:
+            # Создаем компоненты для MarketDataStream
+            candle_cache = CandleCache(cache_size=100)
+            historical_loader = HistoricalDataLoader(api_client, figi)
+            watchdog = (
+                StreamWatchdog(
+                    stale_seconds=cfg.watchdog_stale_seconds,
+                    require_open_market=cfg.watchdog_require_open_market,
+                    check_interval=getattr(cfg, 'watchdog_check_interval', 30),
+                )
+                if getattr(cfg, 'watchdog_enabled', True)
+                else None
+            )
+            
+            stream = MarketDataStream(
+                api_client=api_client,
+                figi=figi,
+                candle_cache=candle_cache,
+                historical_loader=historical_loader,
+                watchdog=watchdog,
+            )
+            
+            # Регистрируем стрим в реестре
+            subscriber_id = f"candle_sink_{id(stream)}"
+            stream = registry.register_stream(figi, stream, subscriber_id)
 
         candle_sink = CandleDataSink(db_path=db_path, figi=figi)
         stream.set_event_sink(candle_sink)
@@ -68,6 +100,14 @@ async def _run_candle_sink(figi: str, db_path: str, run_seconds: Optional[int]) 
                     ok = False
 
                 if not ok:
+                    # Принудительно останавливаем стрим перед повторной попыткой
+                    try:
+                        await stream.stop()
+                        # Дополнительная задержка для корректного закрытия соединения
+                        await asyncio.sleep(2.0)
+                    except Exception as e:
+                        logger.warning(f"Ошибка остановки стрима: {e}")
+                    
                     delay = compute_backoff_delay(retries, base_seconds=0.5, max_seconds=30.0, jitter="full")
                     logger.info(f"Повторный запуск через {delay:.2f}с (попытка {retries+1})")
                     await asyncio.sleep(delay)
@@ -80,6 +120,13 @@ async def _run_candle_sink(figi: str, db_path: str, run_seconds: Optional[int]) 
                     await asyncio.sleep(5)
                     if not stream.is_running:
                         logger.warning("Стрим остановился — перезапускаем")
+                        # Принудительно останавливаем стрим перед перезапуском
+                        try:
+                            await stream.stop()
+                            # Дополнительная задержка для корректного закрытия соединения
+                            await asyncio.sleep(2.0)
+                        except Exception as e:
+                            logger.warning(f"Ошибка остановки стрима при перезапуске: {e}")
                         break
 
             # Вышли из внешнего цикла — остановка
@@ -87,7 +134,7 @@ async def _run_candle_sink(figi: str, db_path: str, run_seconds: Optional[int]) 
             try:
                 await stream.stop()
             finally:
-                await sink.close()
+                await candle_sink.close()
                 if timeout_task:
                     timeout_task.cancel()
 

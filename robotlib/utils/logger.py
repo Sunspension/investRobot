@@ -49,9 +49,16 @@ def setup_logging(level: int = logging.INFO, log_file: Optional[str] = None) -> 
     # Очищаем существующие обработчики
     logger.handlers.clear()
     
-    # Настраиваем форматы
-    plain_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    color_formatter = ColorFormatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # Настраиваем форматы с детальной датой
+    date_format = "%Y-%m-%d %H:%M:%S"
+    plain_formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt=date_format
+    )
+    color_formatter = ColorFormatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt=date_format
+    )
     
     # Консольный обработчик
     console_handler = logging.StreamHandler(sys.stdout)
@@ -70,6 +77,7 @@ def setup_logging(level: int = logging.INFO, log_file: Optional[str] = None) -> 
         file_handler.setLevel(level)
         file_handler.setFormatter(plain_formatter)
         logger.addHandler(file_handler)
+    
     
     # Подавляем логи от внешних библиотек
     _suppress_external_logs()

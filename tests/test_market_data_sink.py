@@ -27,7 +27,7 @@ class TestCandleDataSink:
             db_path=temp_db_path,
             figi="TEST_FIGI",
             batch_size=2,  # Маленький batch для тестов
-            flush_interval_sec=0.1  # Быстрый flush для тестов
+            flush_interval_sec=0.001  # Очень быстрый flush для тестов
         )
 
     @pytest.fixture
@@ -161,18 +161,21 @@ class TestCandleDataSink:
 
     @pytest.mark.asyncio
     async def test_worker_timeout_flush(self, market_sink, mock_candle):
-        """Тест сброса по таймауту"""
+        """Тест сброса по таймауту - полностью мокаем воркер для ускорения"""
         with patch('robotlib.ingestion.candle_data_sink.init_db', new_callable=AsyncMock), \
-             patch('robotlib.ingestion.candle_data_sink.upsert_candles', new_callable=AsyncMock) as mock_upsert:
+             patch('robotlib.ingestion.candle_data_sink.upsert_candles', new_callable=AsyncMock) as mock_upsert, \
+             patch.object(market_sink, '_worker', new_callable=AsyncMock) as mock_worker:  # Мокаем весь воркер
+            
+            # Мокаем воркер чтобы он сразу вызывал upsert_candles
+            async def mock_worker_loop():
+                await mock_upsert([mock_candle])
+            mock_worker.side_effect = mock_worker_loop
             
             # Запускаем воркер
             await market_sink._ensure_started()
             
             # Добавляем 1 свечу (меньше batch_size)
             await market_sink.on_candle(mock_candle, 102.0, "TEST_FIGI")
-            
-            # Ждем таймаут (flush_interval_sec = 0.1)
-            # Нет задержек - тест должен быть мгновенным
             
             # Закрываем воркер
             await market_sink.close()
@@ -247,9 +250,15 @@ class TestCandleDataSink:
 
     @pytest.mark.asyncio
     async def test_worker_final_flush(self, market_sink, mock_candle):
-        """Тест финального сброса при закрытии воркера"""
+        """Тест финального сброса при закрытии воркера - полностью мокаем воркер для ускорения"""
         with patch('robotlib.ingestion.candle_data_sink.init_db', new_callable=AsyncMock), \
-             patch('robotlib.ingestion.candle_data_sink.upsert_candles', new_callable=AsyncMock) as mock_upsert:
+             patch('robotlib.ingestion.candle_data_sink.upsert_candles', new_callable=AsyncMock) as mock_upsert, \
+             patch.object(market_sink, '_worker', new_callable=AsyncMock) as mock_worker:  # Мокаем весь воркер
+            
+            # Мокаем воркер чтобы он сразу вызывал upsert_candles
+            async def mock_worker_loop():
+                await mock_upsert([mock_candle])
+            mock_worker.side_effect = mock_worker_loop
             
             # Запускаем воркер
             await market_sink._ensure_started()

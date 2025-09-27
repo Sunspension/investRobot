@@ -62,9 +62,8 @@ class TradingDataMapper(TradingDataMapperable):
         try:
             order_data = {
                 'time': to_moscow_time(execution.timestamp),
-                # Единое поле стороны для UI/БД
                 'direction': 'buy' if getattr(intent, 'direction', None) and str(getattr(intent, 'direction').value).lower() == 'buy' else 'sell',
-                'price': float(getattr(execution, 'executed_price', 0) or getattr(execution, 'price', 0)),
+                'price': float(execution.price) if getattr(execution, 'price', None) is not None else 0.0,
                 'quantity': getattr(intent, 'quantity', 0),
                 'strategy': getattr(intent, 'strategy', None),
                 'reason': getattr(execution, 'reason', None),
@@ -72,6 +71,8 @@ class TradingDataMapper(TradingDataMapperable):
                 'order_id': getattr(execution, 'order_id', None),
                 'figi': getattr(intent, 'figi', 'unknown'),
             }
+            
+            self._logger.info(f"TradingDataMapper.add_order: {order_data}")
             self._data_manager.add_order(order_data)
         except Exception as e:
             self._logger.error(f"Ошибка TradingDataMapper.add_order: {e}")
@@ -285,7 +286,11 @@ class TradingToUIBridge(TradingEventSinkable):
             self._logger.error(f"Ошибка TradingToUIBridge.on_order_execution: {e}")
 
         # Отправляем полный снэпшот через WebSocket
-        self._ws.emit_snapshot(self._data.get_data_snapshot())
+        try:
+            snapshot = self._data.get_data_snapshot()
+            self._ws.emit_snapshot(snapshot)
+        except Exception as e:
+            self._logger.error(f"Ошибка отправки снэпшота: {e}")
 
     async def start_periodic_snapshots(self) -> None:
         """Запускает периодические снэпшоты для синхронизации"""

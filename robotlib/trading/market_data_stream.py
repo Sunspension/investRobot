@@ -40,7 +40,11 @@ class TinkoffStreamAdapter:
     
     def stop(self) -> None:
         """Останавливает стрим (синхронный метод)"""
-        self._stream_manager.stop()
+        try:
+            self._stream_manager.stop()
+            self._logger.debug("Стрим менеджер остановлен")
+        except Exception as e:
+            self._logger.warning(f"Ошибка остановки стрим менеджера: {e}")
     
     def __aiter__(self):
         """Асинхронный итератор для получения данных"""
@@ -180,9 +184,13 @@ class MarketDataStream(MarketDataStreamable):
             
             # Запускаем watchdog, если он включен
             if self._watchdog:
-                # Устанавливаем callback для перезапуска
-                self._watchdog.set_restart_callback(self._restart_stream)
-                asyncio.create_task(self._watchdog.start_monitoring())
+                # Проверяем, что watchdog еще не запущен
+                if not self._watchdog.is_running:
+                    # Устанавливаем callback для перезапуска
+                    self._watchdog.set_restart_callback(self._restart_stream)
+                    asyncio.create_task(self._watchdog.start_monitoring())
+                else:
+                    self._logger.debug("Watchdog уже запущен, пропускаем повторный запуск")
             
             self._logger.info("Стрим рыночных данных запущен")
             return True
@@ -222,6 +230,11 @@ class MarketDataStream(MarketDataStreamable):
     def _restart_stream(self) -> None:
         """Перезапускает стрим (используется watchdog'ом)"""
         try:
+            # Проверяем, что стрим действительно запущен и нуждается в перезапуске
+            if not self._is_running:
+                self._logger.debug("Стрим уже остановлен, перезапуск не нужен")
+                return
+                
             self._logger.info("Перезапуск стрима по требованию watchdog")
             if self._stream_adapter is not None:
                 self._stream_adapter.stop()
@@ -243,10 +256,41 @@ class MarketDataStream(MarketDataStreamable):
         """Сбрасывает флаг остановки для возможности перезапуска"""
         self._is_running = False
     
+    async def _emit_market_status(self) -> None:
+        """Эмитирует текущий статус рынка через sink"""
+        if self._sink and hasattr(self._sink, 'on_market_status'):
+            try:
+                from robotlib.utils.market_hours_enhanced import get_market_status_enhanced
+                market_status = await get_market_status_enhanced()
+                
+                # Серилизуем время в ISO-строку для безопасной передачи по WS
+                dt = market_status.get('current_time')
+                dt_serialized = None
+                try:
+                    if dt is not None:
+                        dt_serialized = dt.isoformat()
+                except Exception:
+                    dt_serialized = None
+                
+                status_payload = {
+                    'is_trading': market_status.get('is_trading', False),
+                    'session_type': market_status.get('session_type', 'unknown'),
+                    'current_time': dt_serialized,
+                    'next_session': market_status.get('next_session'),
+                    'time_until_next': market_status.get('time_until_next')
+                }
+                
+                await self._sink.on_market_status(status_payload)
+                self._logger.debug(f"MarketDataStream: статус рынка отправлен: session_type={status_payload.get('session_type')}")
+            except Exception as e:
+                self._logger.warning(f"Ошибка отправки статуса рынка из MarketDataStream: {e}")
     
     async def _process_stream(self) -> None:
         """Обрабатывает данные из стрима"""
         try:
+            # Отправляем начальный статус рынка
+            await self._emit_market_status()
+            
             while self._is_running and self._stream_adapter:
                 try:
                     # Получаем данные из стрима
@@ -336,7 +380,7 @@ class MarketDataStream(MarketDataStreamable):
             # Логируем получение свечи
             figi_info = getattr(candle, 'figi', self._figi)
             current_price = self._candle_cache.get_current_price()
-            self._logger.debug(f"Получена свеча: {candle.time} - {current_price} (FIGI: {figi_info})")
+            # self._logger.debug(f"Получена свеча: {candle.time} - {current_price} (FIGI: {figi_info})")
             
             # Публикуем свечу в приемник
             try:

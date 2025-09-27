@@ -96,13 +96,17 @@ class OrderExecutor:
 
             exec_reason = f"{dir_text} {order_intent.quantity} шт."
 
+            # Конвертируем price в float, если это Quotation
+            from robotlib.utils.money import Money
+            executed_price = Money(result.executed_price or 0.0).to_float()
+            
             execution = OrderExecution(
                 order_id=order_id,
                 figi=order_intent.figi,
                 direction=order_intent.direction,
                 quantity=order_intent.quantity,
                 filled_quantity=result.executed_quantity or 0,
-                price=result.executed_price or 0.0,
+                price=executed_price,
                 status=OrderStatus.FILLED if result.success else OrderStatus.REJECTED,
                 timestamp=datetime.now(),
                 error_message=None if result.success else getattr(result, 'error_message', None),

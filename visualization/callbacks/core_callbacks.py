@@ -74,10 +74,6 @@ def register_core_callbacks(
         try:
             logger.debug(f"Callback вызван по WebSocket сообщению: {type(ws_message)} - {ws_message}")
             
-            # Логируем текущее состояние UI
-            current_state = _ui_state_manager.get_state()
-            logger.debug(f"Текущее состояние UI: candles={len(current_state.get('candles_data', []))}, orders={len(current_state.get('orders_data', []))}")
-            
             # Извлекаем данные из WebSocket сообщения
             if isinstance(ws_message, dict) and 'data' in ws_message:
                 # WebSocket сообщение обернуто в объект с полем 'data'
@@ -98,7 +94,7 @@ def register_core_callbacks(
                 
                 if msg_type in ('snapshot', 'init_snapshot'):
                     # Полный снэпшот - обновляем все данные
-                    snapshot_data = ws_message.get('data', current_state)
+                    snapshot_data = ws_message.get('data', {})
                     logger.debug(f"Получен снэпшот: candles={len(snapshot_data.get('candles_data', []))}, orders={len(snapshot_data.get('orders_data', []))}, market_status={snapshot_data.get('market_status', {})}")
                     _ui_state_manager.update_state(snapshot_data)
                     logger.debug("Обновлен полный снэпшот данных")

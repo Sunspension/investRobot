@@ -133,18 +133,33 @@ class ChartBuilder:
                 red = '#e74c3c'
                 neutral = '#444444'
                 line_col = neutral
-                if 'close' in df.columns and 'open' in df.columns:
+                
+                # Определяем цвет на основе последней свечи и текущей цены
+                if 'close' in df.columns and 'open' in df.columns and not df.empty:
                     try:
                         last_row = df.iloc[-1]
                         last_close = float(last_row['close'])
                         last_open = float(last_row['open'])
-                        is_green = last_close >= last_open
-                        price_up = float(cp) >= last_close
-                        if is_green and price_up:
+                        current_price = float(cp)
+                        
+                        # Свеча зеленая если close >= open
+                        is_green_candle = last_close >= last_open
+                        # Цена растет если текущая цена >= последней close
+                        is_price_up = current_price >= last_close
+                        
+                        # Логика: зеленый если свеча зеленая И цена растет, красный если свеча красная И цена падает
+                        if is_green_candle and is_price_up:
                             line_col = green
-                        elif (not is_green) and (not price_up):
+                        elif not is_green_candle and not is_price_up:
                             line_col = red
-                    except Exception:
+                        else:
+                            line_col = neutral
+                            
+                        # Отладочная информация
+                        self.logger.debug(f"Price color: candle_green={is_green_candle}, price_up={is_price_up}, color={line_col}")
+                        
+                    except Exception as e:
+                        self.logger.debug(f"Error determining price color: {e}")
                         line_col = neutral
 
                 # Одна непрерывная линия (shape) на всю ширину области графика
@@ -159,20 +174,35 @@ class ChartBuilder:
                 except Exception:
                     pass
 
-                # Подпись у левой оси на уровне линии, заливка = цвет линии, текст белый
+                # Подпись прямо на шкале Y: только цена, прямоугольник в цвет линии, текст белый
+                try:
+                    axis_font_size = None
+                    try:
+                        axis_font_size = getattr(getattr(fig.layout, 'yaxis', None), 'tickfont', None)
+                        axis_font_size = getattr(axis_font_size, 'size', None)
+                    except Exception:
+                        axis_font_size = None
+                    if axis_font_size is None:
+                        axis_font_size = getattr(getattr(fig.layout, 'font', None), 'size', None) or 11
+                except Exception:
+                    axis_font_size = 11
+
                 fig.add_annotation(
                     xref="paper",
-                    x=0.0,
+                    x=0.0,  # ровно по линии оси Y
                     yref="y",
                     y=cp,
-                    text=f"<b>Текущая цена: {cp:.2f} ₽</b>",
+                    text=f"<b>{cp:.1f}</b>",
                     showarrow=False,
-                    xanchor="left",
+                    xanchor="right",  # прилипает к оси слева
                     yanchor="middle",
-                    font=dict(color="#ffffff", size=13),
+                    xshift=4,  # смещение вправо на 4px
+                    font=dict(color="#ffffff", size=axis_font_size),
                     bgcolor=line_col,
                     bordercolor=line_col,
                     borderwidth=2,
+                    borderpad=4,
+                    opacity=1.0,
                 )
 
         # Ордера покупки/продажи
@@ -352,7 +382,10 @@ class ChartBuilder:
             autorange=True,
             showgrid=True
         )
-        fig.update_yaxes(autorange=True)
+        fig.update_yaxes(
+            autorange=True,
+            tickformat='.1f'  # метки внутри, т.е. с отступом вправо от оси
+        )
         
         # self.logger.debug("Макет графика настроен")
     

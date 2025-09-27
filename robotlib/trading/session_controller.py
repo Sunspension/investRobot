@@ -35,7 +35,6 @@ class SessionController(SessionControllable):
         self._logger = get_logger(__name__)
         # Компоненты из зависимостей
         self._stats = dependencies.session_stats
-        self._initializer = dependencies.session_initializer
         # Состояние сессии
         self._is_running = False
         self._is_initialized = False
@@ -147,7 +146,12 @@ class SessionController(SessionControllable):
         try:
             if not await self._check_market_status():
                 return False
-            await self._initializer.initialize_components()
+            
+            # Проверяем лимиты риска перед началом сессии
+            await self._check_risk_limits()
+            
+            # Компоненты уже инициализированы в DI контейнере
+            self._logger.info("✅ Компоненты уже инициализированы в DI контейнере")
             self._is_initialized = True
             await self._load_initial_candles()
 
@@ -493,6 +497,34 @@ class SessionController(SessionControllable):
         except Exception as e:
             self._logger.error(f"Ошибка обновления статистики: {e}")
     
+    async def _check_risk_limits(self) -> None:
+        """Проверяет лимиты риска перед началом сессии"""
+        self._logger.debug("Проверка лимитов риска при старте...")
+        
+        try:
+            # Получаем текущий баланс
+            portfolio_manager = self._dependencies.portfolio_manager
+            portfolio = await portfolio_manager.get_portfolio()
+            current_balance = portfolio.total_amount
+            
+            # Проверяем лимиты только если есть средства
+            if current_balance > 0:
+                risk_manager = self._dependencies.risk_manager
+                risk_check = await risk_manager.check_trade_risk(
+                    figi=self._config.figi,
+                    quantity=1,  # Минимальное количество для проверки
+                    direction="buy"
+                )
+                
+                if not risk_check.passed:
+                    self._logger.warning(f"⚠️ Предупреждение по лимитам риска: {risk_check.message}")
+                else:
+                    self._logger.debug("✅ Лимиты риска в порядке")
+            else:
+                self._logger.debug("Портфель пуст, пропускаем проверку лимитов")
+        except Exception as e:
+            self._logger.warning(f"⚠️ Не удалось проверить лимиты риска: {e}")
+
     async def _log_session_info(self) -> None:
         """Логирует информацию о сессии"""
         self._logger.info("=== ИНФОРМАЦИЯ О СЕССИИ ===")
