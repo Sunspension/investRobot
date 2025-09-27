@@ -12,9 +12,23 @@ from robotlib.strategies.intent_arbiter import SimpleIntentArbiter
 from robotlib.strategies.signal_dispatcher import NullSignalDispatcher
 from robotlib.signal_manager import Signal
 from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
+from robotlib.trading.position_sync_interface import PositionContext
 from robotlib.strategies.long import LongStrategy
 from tests.mocks import MockRiskManager, MockPortfolioManager
 from tinkoff.invest import Quotation
+
+
+def create_position_context(figi: str = "FUTIMOEXF000", quantity: int = 0, avg_price: float = 0.0, 
+                           has_position: bool = False, direction: str = '') -> PositionContext:
+    """Создание мока PositionContext для тестов"""
+    return PositionContext(
+        figi=figi,
+        quantity=quantity,
+        avg_price=avg_price,
+        has_position=has_position,
+        direction=direction,
+        last_updated=datetime.now()
+    )
 
 
 class TestStrategyManager(unittest.TestCase):
@@ -34,16 +48,13 @@ class TestStrategyManager(unittest.TestCase):
         self.mock_strategies = [Mock(), Mock()]
         for strategy in self.mock_strategies:
             strategy.execute = AsyncMock(return_value=[])
-            strategy.close_position = Mock(return_value=None)
-            strategy.income = 0.0
             strategy._figi = "FUTIMOEXF000"
-            strategy._position_manager = Mock()
-            strategy._position_manager.get_loss_positions = AsyncMock(return_value=[])
         
         # Создаем мок PositionManager
         self.mock_position_manager = Mock()
         self.mock_position_manager.get_stop_loss_positions = AsyncMock(return_value={})
         self.mock_position_manager.get_position_direction = Mock(return_value='long')
+        self.mock_position_manager.get_position_context = AsyncMock(return_value=create_position_context())
         
         self.strategy_manager = StrategyManager(
             signal_manager=self.mock_signal_manager,
@@ -128,28 +139,6 @@ class TestStrategyManager(unittest.TestCase):
         self.assertIsNotNone(candles)
         self.assertEqual(len(candles), 1)
     
-    def test_close_position(self):
-        """Тест закрытия позиций"""
-        # Создаем мок свечи
-        mock_candle = Mock()
-        mock_candle.close = Quotation(units=100, nano=0)
-        
-        # Мокаем стратегии, чтобы они возвращали заказы на закрытие
-        mock_order = OrderIntent(
-            figi="FUTIMOEXF000",
-            direction=OrderDirection.SELL,
-            order_type=OrderType.MARKET,
-            quantity=1,
-            price=105.0
-        )
-        for strategy in self.strategy_manager._strategies:
-            strategy.close_position = Mock(return_value=mock_order)
-        
-        # Закрываем позиции
-        self.strategy_manager.close_position(mock_candle)
-        
-        # Проверяем, что заказы добавились (2 стратегии * 1 заказ)
-        self.assertEqual(len(self.strategy_manager._orders), 2)
     
     def test_print_trades(self):
         """Тест печати заказов"""
@@ -209,27 +198,6 @@ class TestStrategyManager(unittest.TestCase):
         self.assertIsNotNone(trades)
         self.assertEqual(len(trades), 2)
     
-    def test_income_property(self):
-        """Тест свойства income"""
-        # Мокаем стратегии с доходом
-        for strategy in self.strategy_manager._strategies:
-            strategy.income = 100.0
-        
-        income = self.strategy_manager.income
-        
-        # Проверяем, что доход рассчитан правильно
-        self.assertEqual(income, 200)  # 2 стратегии * 100.0
-    
-    def test_get_strategy_income(self):
-        """Тест получения дохода стратегии"""
-        
-        # Мокаем первую стратегию
-        self.strategy_manager._strategies[0].income = 150.0
-        
-        # Используем тип мок стратегии для поиска
-        income = self.strategy_manager.get_strategy_income(type(self.strategy_manager._strategies[0]))
-        
-        self.assertEqual(income, 150.0)
     
     def test_risk_limits_access(self):
         """Тест доступа к лимитам рисков через мок"""

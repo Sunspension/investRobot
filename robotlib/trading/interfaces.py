@@ -5,7 +5,7 @@ from typing import Protocol, Optional, List, Dict, Any, runtime_checkable
 from visualization.interfaces import VisualizationDataStoreable
 
 from robotlib.signal_types import Signal
-from robotlib.trading.order_types import OrderIntent, OrderExecution
+from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection
 from robotlib.trading.order_executor import OrderResult
 from robotlib.trading.portfolio_manager import Portfolio, Position
 from robotlib.trading.session_interfaces import SessionStatsable
@@ -49,7 +49,7 @@ class PositionManageable(Protocol):
         quantity: int, 
         price: float, 
         order_id: str,
-        direction: str = 'long'
+        direction: OrderDirection
     ):
         """Добавление позиции в FIFO очередь"""
         pass

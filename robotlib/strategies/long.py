@@ -1,52 +1,32 @@
-from typing import Optional
-from robotlib.utils.money import Money
+from typing import List
 from robotlib.utils.logger import get_logger
 from robotlib.signal_types import Signal
-from robotlib.trading.order_types import OrderIntent, OrderExecution, OrderDirection, OrderType, OrderStatus
+from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
 from robotlib.strategies.strategy_interface import Strategyable
-from robotlib.strategies.interfaces import RiskManageable, PortfolioManageable, PositionSizingManageable
-from robotlib.trading.interfaces import PositionManageable
-from tinkoff.invest import Candle, HistoricCandle
+from robotlib.trading.position_sync_interface import PositionContext
+from robotlib.trading.position_sizing_service import PositionSizingService
+from robotlib.trading.enums import OperationType, PositionDirection
 
-# Константы убраны - значения теперь получаются из API и передаются в initialize()
 
 class LongStrategy(Strategyable):
 
-    def __init__(
-            self, 
-            position_manager: PositionManageable
-    ):
-            
-        self._position = 0
-        self._cost_basis = 0.0
-        self._income = 0.0
-
-        self._position_manager = position_manager  # Новый компонент
+    def __init__(self, figi: str, position_sizing_service: PositionSizingService) -> None:
         self._logger = get_logger(__name__)
-
-        self._wait_buy_cross = False
-        self._wait_sell_cross = False
-        
-        # Кэшированные значения
-        self._point_value: Optional[float] = None
-        self._contracts_per_lot: Optional[int] = None
-        self._figi: str = "FUTIMOEXF000"
+        self._wait_buy_cross: bool = False
+        self._wait_sell_cross: bool = False
+        self._figi: str = figi
+        self._position_sizing_service: PositionSizingService = position_sizing_service
 
     @property
     def strategy_name(self) -> str:
         return self.__class__.__name__
-    
-    def get_current_position(self) -> int:
-        """Получение текущей позиции через PositionManager"""
-        position = self._position_manager.get_position(self._figi)
-        return position.quantity if position else 0
     
     def initialize(
         self, 
         point_value: float, 
         contracts_per_lot: int, 
         figi: str = "FUTIMOEXF000"
-    ):
+    ) -> None:
         """
         Инициализирует кэшированные значения при старте торговли
         
@@ -61,7 +41,7 @@ class LongStrategy(Strategyable):
         self._point_value = point_value
         self._contracts_per_lot = contracts_per_lot
     
-    async def execute(self, signal: Signal) -> list[OrderIntent]:
+    async def execute(self, signal: Signal, position_context: PositionContext) -> List[OrderIntent]:
         """
         Получает от manager-а сигнал и решает:
         - открыть лонг
@@ -69,7 +49,7 @@ class LongStrategy(Strategyable):
         - стоп-лосс
         Возвращает список торговых приказов: dict с ключами order/price/qty
         """
-        orders = []
+        orders: List[OrderIntent] = []
 
         # Обновляем ожидания сигналов
         if signal.trough_detected:
@@ -77,14 +57,12 @@ class LongStrategy(Strategyable):
         if signal.peak_detected:
             self._wait_sell_cross = True
 
-        # Проверка стоп-лосса
-        stop_loss_orders = await self._check_stop_loss(signal.candle)
-        orders.extend(stop_loss_orders)
+        # Стоп-лосс логика централизована в PositionManager
 
-        hist_abs = abs(signal.histogram)
+        hist_abs: float = abs(signal.histogram)
         try:
             self._logger.info(
-                f"Long.execute: pos={self._position} macd={getattr(signal,'macd',None):.4f} "
+                f"Long.execute: pos={position_context.quantity} macd={getattr(signal,'macd',None):.4f} "
                 f"sig={getattr(signal,'signal',None):.4f} hist={getattr(signal,'histogram',None):.4f} "
                 f"peak={getattr(signal,'peak_detected',False)} trough={getattr(signal,'trough_detected',False)}"
             )
@@ -92,14 +70,14 @@ class LongStrategy(Strategyable):
             pass
         
         # Анализ тренда для увеличения лонга: если позиция открыта и тренд усиливается (цена растёт)
-        is_trending_up = (
+        is_trending_up: bool = (
             signal.macd_prev is not None
             and signal.signal_prev is not None
             and signal.macd > signal.signal
             and signal.macd_prev < signal.signal_prev
         )
 
-        is_crossed_up = (
+        is_crossed_up: bool = (
             signal.macd_prev is not None
             and signal.signal_prev is not None
             and signal.macd_prev < signal.signal_prev
@@ -107,7 +85,7 @@ class LongStrategy(Strategyable):
             and hist_abs > 0.01
         )
 
-        is_crossed_down = (
+        is_crossed_down: bool = (
             signal.macd_prev is not None
             and signal.signal_prev is not None
             and signal.macd_prev > signal.signal_prev
@@ -116,26 +94,42 @@ class LongStrategy(Strategyable):
         )
 
         # Открыть позицию: ждём trough и пересечения вверх; увелечение лонга при тренде
-        if (self._wait_buy_cross and is_crossed_up) or (self._position > 0 and is_trending_up):
-            items = self._items_to_buy(signal)
-            if items > 0:
+        if (self._wait_buy_cross and is_crossed_up) or (position_context.quantity > 0 and is_trending_up):
+            # Запрашиваем размер позиции у PositionSizingService для открытия лонга
+            quantity: int = await self._position_sizing_service.calculate_position_size(
+                signal=signal,
+                current_position=position_context.quantity,
+                figi=self._figi,
+                direction=OrderDirection.BUY,
+                position_direction=PositionDirection.LONG,
+                operation_type=OperationType.OPEN if position_context.quantity == 0 else OperationType.INCREASE
+            )
+            if quantity > 0:
                 orders.append(
                     OrderIntent(
                         direction=OrderDirection.BUY,
-                        quantity=items,
+                        quantity=quantity,
                         order_type=OrderType.MARKET,
                         figi=self._figi,
                         strategy=self.strategy_name,
                     )
                 )
                 self._wait_buy_cross = False
-                self._logger.info(f"Long: BUY intent qty={items}")
+                self._logger.info(f"Long: BUY intent qty={quantity}")
             else:
                 self._logger.info("Long: qty<=0, пропускаем BUY")
 
         # Закрыть позицию: ждём peak и пересечения вниз
-        if self._wait_sell_cross and is_crossed_down and self._position > 0:
-            items = self._items_to_sell()
+        if self._wait_sell_cross and is_crossed_down and position_context.quantity > 0:
+            # Запрашиваем размер позиции у PositionSizingService для закрытия лонга
+            items: int = await self._position_sizing_service.calculate_position_size(
+                signal=signal,
+                current_position=position_context.quantity,
+                figi=self._figi,
+                direction=OrderDirection.SELL,
+                position_direction=PositionDirection.LONG,
+                operation_type=OperationType.CLOSE
+            )
             if items > 0:
                 orders.append(
                     OrderIntent(
@@ -155,83 +149,4 @@ class LongStrategy(Strategyable):
             self._logger.info("Long: условий для входа/выхода нет")
         return orders
     
-    def close_position(self, candle) -> Optional[OrderIntent]:
-        """
-        Закрывает все открытые лонг-позиции.
-        Возвращает OrderIntent для исполнения через OrderExecutor.
-        """
-        if self._position > 0:
-            return OrderIntent(
-                direction=OrderDirection.SELL,
-                quantity=self._position,
-                order_type=OrderType.MARKET,
-                figi=self._figi,
-                strategy=self.strategy_name,
-            )
-        else:
-            return None
 
-    def _items_to_buy(self, signal: Signal, figi: str = "FUTIMOEXF000"):
-        # Простая логика расчета размера позиции
-        # В будущем можно добавить более сложную логику
-        return 1
-
-    def _items_to_sell(self):
-        return self._position
-
-    async def _process_execution(self, execution: OrderExecution):
-        """Обрабатывает исполнение ордера"""
-        if not execution or (execution.filled_quantity or 0) <= 0:
-            # Нечего учитывать
-            return
-        if execution.direction == OrderDirection.BUY:
-            # Открываем лонг - добавляем в PositionManager
-            await self._position_manager.add_to_fifo(
-                self._figi, 
-                execution.filled_quantity, 
-                execution.price, 
-                execution.order_id,
-                direction='long'
-            )
-            self._position += execution.filled_quantity
-            self._cost_basis += execution.price * execution.filled_quantity
-        else:
-            # Закрываем лонг - убираем из PositionManager
-            await self._position_manager.remove_from_fifo(
-                self._figi, 
-                execution.filled_quantity
-            )
-            # Обновляем позицию через PositionManager
-            await self._position_manager.update_position_after_trade(
-                self._figi, 
-                -execution.filled_quantity, 
-                execution.price
-            )
-            self._position -= execution.filled_quantity
-            # Прибыль рассчитывается в PositionManager
-
-    async def _check_stop_loss(self, candle: Candle | HistoricCandle) -> list[OrderIntent]:
-        """Проверяет стоп-лосс для лонг позиций"""
-        from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
-        from robotlib.utils.money import Money
-        
-        orders = []
-        current_price = Money(candle.close).to_float()
-        
-        # Получаем убыточные позиции от PositionManager
-        loss_positions = await self._position_manager.get_loss_positions(
-            self._figi, 
-            current_price
-        )
-        
-        if loss_positions:
-            total_qty = sum(pos.quantity for pos in loss_positions)
-            orders.append(OrderIntent(
-                direction=OrderDirection.SELL,  # продаем лонг при стоп-лоссе
-                quantity=total_qty,
-                order_type=OrderType.MARKET,
-                figi=self._figi,
-                strategy="stop_loss"
-            ))
-        
-        return orders

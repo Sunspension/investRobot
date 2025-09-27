@@ -371,7 +371,7 @@ class PositionRestorationService(PositionRestorationServiceable):
             self._logger.error(f"Ошибка извлечения цены: {e}")
             return 0.0
     
-    def _determine_operation_direction(self, operation: Operation) -> Optional[str]:
+    def _determine_operation_direction(self, operation: Operation) -> Optional[OrderDirection]:
         """
         Определяет направление операции
         
@@ -387,9 +387,9 @@ class PositionRestorationService(PositionRestorationServiceable):
             
             # Определяем направление на основе типа операции
             if operation_type == 15:  # OPERATION_TYPE_BUY
-                return "buy"
+                return OrderDirection.BUY
             elif operation_type == 22:  # OPERATION_TYPE_SELL
-                return "sell"
+                return OrderDirection.SELL
             else:
                 self._logger.warning(f"Неизвестный тип операции: {operation_type}")
                 return None

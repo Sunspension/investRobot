@@ -132,6 +132,11 @@ class EnhancedMarketHours:
         else:
             dt = dt.astimezone(self._moscow_tz)
         
+        # Вечерняя сессия только в будние дни (понедельник-пятница)
+        weekday = dt.weekday()  # 0=понедельник, 6=воскресенье
+        if weekday >= 5:  # Суббота (5) и воскресенье (6)
+            return False
+        
         # Вечерняя сессия: 19:05 - 23:50 МСК (с учетом клиринга 18:50-19:05)
         evening_start = time(19, 5)
         evening_end = time(23, 50)

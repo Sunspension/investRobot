@@ -10,8 +10,10 @@ from typing import List, Dict, Optional, Any, Union
 from dataclasses import dataclass
 
 from robotlib.trading.interfaces import PositionManageable
-from robotlib.trading.position_sync_interface import PositionSyncServiceable, FIFOEntry, Position
+from robotlib.trading.position_sync_interface import PositionSyncServiceable, FIFOEntry, Position, PositionContext
 from robotlib.utils.logger import get_logger
+from robotlib.trading.enums import PositionDirection
+from robotlib.trading.order_types import OrderDirection
 
 
 @dataclass
@@ -71,14 +73,48 @@ class PositionManager(PositionManageable):
         """Получение позиции из кэша"""
         return self._positions_cache.get(figi)
     
-    async def get_position_direction(self, figi: str) -> Optional[str]:
+    async def get_position_direction(self, figi: str) -> Optional[PositionDirection]:
         """Получение направления позиции для инструмента"""
         fifo_queue = await self.get_current_fifo_queue(figi)
         if not fifo_queue:
             return None
         
         # Возвращаем направление первой записи (все должны быть одинаковыми)
-        return fifo_queue[0].direction
+        direction = fifo_queue[0].direction
+        if direction == OrderDirection.BUY:
+            return PositionDirection.LONG
+        elif direction == OrderDirection.SELL:
+            return PositionDirection.SHORT
+        else:
+            return None
+    
+    async def get_position_context(self, figi: str) -> Optional[PositionContext]:
+        """Получение контекста позиции для передачи в стратегии"""
+        
+        position = self.get_position(figi)
+        if not position:
+            return PositionContext(
+                figi=figi,
+                quantity=0,
+                avg_price=0.0,
+                has_position=False,
+                direction=PositionDirection.LONG,  # По умолчанию LONG для пустой позиции
+                last_updated=datetime.now()
+            )
+        
+        # Определяем направление позиции
+        direction = await self.get_position_direction(figi)
+        if not direction:
+            direction = PositionDirection.LONG if position.quantity > 0 else PositionDirection.SHORT
+        
+        return PositionContext(
+            figi=figi,
+            quantity=position.quantity,
+            avg_price=position.avg_price,
+            has_position=position.quantity != 0,
+            direction=direction,
+            last_updated=position.last_updated
+        )
     
     async def get_current_fifo_queue(self, figi: str) -> List[FIFOEntry]:
         """Получение текущей FIFO очереди для позиции"""
@@ -97,12 +133,22 @@ class PositionManager(PositionManageable):
         
         fifo_queue = []
         for row in rows:
+            # Преобразуем строку из базы данных в OrderDirection
+            direction_str = row[4]
+            if direction_str == 'buy':
+                direction = OrderDirection.BUY
+            elif direction_str == 'sell':
+                direction = OrderDirection.SELL
+            else:
+                self._logger.warning(f"Неизвестное направление в FIFO: {direction_str}, пропускаем запись")
+                continue
+                
             fifo_queue.append(FIFOEntry(
                 quantity=row[0],
                 price=row[1],
                 timestamp=datetime.fromisoformat(row[2]),
                 order_id=row[3],
-                direction=row[4]
+                direction=direction
             ))
         
         self._fifo_cache[figi] = fifo_queue
@@ -204,15 +250,18 @@ class PositionManager(PositionManageable):
         quantity: int, 
         price: float, 
         order_id: str,
-        direction: str = 'long'  # 'long' или 'short'
+        direction: OrderDirection
     ):
         """Добавление позиции в FIFO очередь"""
         # Проверяем, есть ли уже позиции для этого инструмента
         existing_direction = await self.get_position_direction(figi)
-        if existing_direction and existing_direction != direction:
-            self._logger.error(f"❌ Попытка добавить {direction} позицию для {figi}, но уже есть {existing_direction} позиции!")
-            self._logger.error(f"   Для одного инструмента не может быть одновременно лонг и шорт позиций!")
-            raise ValueError(f"Нельзя смешивать {direction} и {existing_direction} позиции для {figi}")
+        if existing_direction:
+            # Преобразуем OrderDirection в PositionDirection для сравнения
+            new_position_direction = PositionDirection.LONG if direction == OrderDirection.BUY else PositionDirection.SHORT
+            if existing_direction != new_position_direction:
+                self._logger.error(f"❌ Попытка добавить {direction} позицию для {figi}, но уже есть {existing_direction} позиции!")
+                self._logger.error(f"   Для одного инструмента не может быть одновременно лонг и шорт позиций!")
+                raise ValueError(f"Нельзя смешивать {new_position_direction} и {existing_direction} позиции для {figi}")
         
         entry = FIFOEntry(
             quantity=quantity,
@@ -232,7 +281,7 @@ class PositionManager(PositionManageable):
             await conn.execute("""
                 INSERT INTO position_fifo (figi, quantity, price, timestamp, order_id, direction)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (figi, quantity, price, entry.timestamp.isoformat(), order_id, "buy"))
+            """, (figi, quantity, price, entry.timestamp.isoformat(), order_id, direction.value))
             await conn.commit()
         
         # Обновляем кэш позиций
@@ -376,7 +425,7 @@ class PositionManager(PositionManageable):
                     VALUES (?, ?, ?, ?, ?, ?)
                 """, (
                     figi, entry.quantity, price_float, 
-                    entry.timestamp.isoformat(), entry.order_id, entry.direction
+                    entry.timestamp.isoformat(), entry.order_id, entry.direction.value
                 ))
             await conn.commit()
     

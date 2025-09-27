@@ -28,6 +28,16 @@ class PositionSyncService(PositionSyncServiceable):
         self._logger = get_logger(__name__)
         self._restoration_service = restoration_service
     
+    def _convert_direction_string_to_enum(self, direction_str: str) -> OrderDirection:
+        """Преобразует строку направления в OrderDirection enum"""
+        if direction_str == "buy":
+            return OrderDirection.BUY
+        elif direction_str == "sell":
+            return OrderDirection.SELL
+        else:
+            self._logger.warning(f"Неизвестное направление: {direction_str}, используем BUY по умолчанию")
+            return OrderDirection.BUY
+    
     async def sync_positions_on_startup(self, max_retries: int = 3) -> Dict[str, Position]:
         """
         Полная синхронизация позиций при старте с восстановлением FIFO
@@ -195,7 +205,7 @@ class PositionSyncService(PositionSyncServiceable):
                     price=price_float,
                     timestamp=datetime.fromisoformat(timestamp),
                     order_id=order_id,
-                    direction=direction or "buy"  # Используем direction из БД или "buy" по умолчанию
+                    direction=self._convert_direction_string_to_enum(direction or "buy")
                 )
                 fifo_cache[figi].append(fifo_entry)
             
@@ -268,7 +278,7 @@ class PositionSyncService(PositionSyncServiceable):
                         """, (
                             entry.timestamp.isoformat(),
                             figi,
-                            entry.direction,
+                            entry.direction.value,  # Преобразуем OrderDirection в строку
                             entry.price,
                             entry.quantity,
                             "Restored from API operations history",  # reason
@@ -310,7 +320,7 @@ class PositionSyncService(PositionSyncServiceable):
                     price=price_float,
                     timestamp=datetime.fromisoformat(timestamp),
                     order_id=order_id,
-                    direction=direction or "buy"  # Используем direction из БД или "buy" по умолчанию
+                    direction=self._convert_direction_string_to_enum(direction or "buy")
                 )
                 fifo_cache[figi].append(fifo_entry)
         
@@ -332,6 +342,7 @@ class PositionSyncService(PositionSyncServiceable):
                         INSERT INTO position_fifo 
                         (figi, quantity, price, timestamp, order_id, direction)
                         VALUES (?, ?, ?, ?, ?, ?)
-                    """, (figi, entry.quantity, price_float, entry.timestamp, entry.order_id, entry.direction))
+                    """, (figi, entry.quantity, price_float, entry.timestamp, entry.order_id, 
+                          entry.direction.value if hasattr(entry.direction, 'value') else entry.direction))
             
             await conn.commit()

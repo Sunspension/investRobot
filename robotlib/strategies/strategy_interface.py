@@ -1,7 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Optional
 from robotlib.signal_types import Signal
 from robotlib.trading.order_types import OrderIntent
+from robotlib.trading.position_sync_interface import PositionContext
 from tinkoff.invest import Candle, HistoricCandle
 
 
@@ -11,38 +12,18 @@ class Strategyable(ABC):
     Все стратегии должны реализовывать этот интерфейс.
     """
     
-    @property
-    def income(self) -> float:
-        """Возвращает текущий доход стратегии"""
-        return getattr(self, '_income', 0.0)
-    
-    @property
-    def position(self) -> int:
-        """Возвращает текущую позицию стратегии"""
-        return getattr(self, '_position', 0)
     
     @abstractmethod
-    def execute(self, signal: Signal) -> List[OrderIntent]:
+    def execute(self, signal: Signal, position_context: PositionContext) -> List[OrderIntent]:
         """
         Выполняет торговую логику на основе сигнала.
         
         Args:
             signal: Торговый сигнал от SignalManager
+            position_context: Контекст позиции для принятия решений
             
         Returns:
             Список намерений на совершение сделок
         """
         pass
     
-    @abstractmethod
-    def close_position(self, candle: Candle | HistoricCandle) -> OrderIntent | None:
-        """
-        Закрывает все открытые позиции.
-        
-        Args:
-            candle: Текущая свеча
-            
-        Returns:
-            Намерение на закрытие позиции или None, если позиций нет
-        """
-        pass

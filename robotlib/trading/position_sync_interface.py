@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List
 from dataclasses import dataclass
 from datetime import datetime
+from robotlib.trading.enums import PositionDirection
+from robotlib.trading.order_types import OrderDirection
 
 
 @dataclass
@@ -15,7 +17,7 @@ class FIFOEntry:
     price: float
     timestamp: datetime
     order_id: str
-    direction: str  # 'buy' или 'sell'
+    direction: OrderDirection  # OrderDirection.BUY или OrderDirection.SELL
 
 
 @dataclass
@@ -24,6 +26,17 @@ class Position:
     figi: str
     quantity: int
     avg_price: float
+    last_updated: datetime
+
+
+@dataclass
+class PositionContext:
+    """Контекст позиции для передачи в стратегии"""
+    figi: str
+    quantity: int
+    avg_price: float
+    has_position: bool
+    direction: PositionDirection  # PositionDirection.LONG или PositionDirection.SHORT
     last_updated: datetime
 
 

@@ -89,17 +89,10 @@ class TradingSystemContainer:
             config=cfg,
         )
         
-        # Получаем PositionManager для стратегий
-        position_manager = await self.get_position_manager()
-        
-        # Создаем стратегии
+        # Создаем стратегии с figi и PositionSizingService
         strategies = [
-            LongStrategy(
-                position_manager=position_manager
-            ),
-            ShortStrategy(
-                position_manager=position_manager
-            )
+            LongStrategy(figi=self._config.figi, position_sizing_service=position_sizing_service),
+            ShortStrategy(figi=self._config.figi, position_sizing_service=position_sizing_service)
         ]
         
         return strategies

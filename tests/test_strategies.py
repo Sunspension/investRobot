@@ -18,7 +18,21 @@ from robotlib.strategies.short import ShortStrategy
 from tests.mocks.position_sizer_dummy import DummySizer
 from robotlib.signal_manager import Signal
 from robotlib.trading.portfolio_manager import Portfolio, Position
+from robotlib.trading.position_sync_interface import PositionContext
 from robotlib.utils.money import Money
+
+
+def create_position_context(figi: str = "FUTIMOEXF000", quantity: int = 0, avg_price: float = 0.0, 
+                           has_position: bool = False, direction: str = '') -> PositionContext:
+    """Создание мока PositionContext для тестов"""
+    return PositionContext(
+        figi=figi,
+        quantity=quantity,
+        avg_price=avg_price,
+        has_position=has_position,
+        direction=direction,
+        last_updated=datetime.now()
+    )
 
 
 class RaisingSizer:
@@ -37,13 +51,12 @@ class TestLongStrategy(unittest.TestCase):
         self.mock_portfolio_manager = AsyncMock()
         self.mock_portfolio_manager.get_loss_positions = AsyncMock(return_value=[])
         self.mock_portfolio_manager.get_profit_positions = AsyncMock(return_value=[])
-        self.strategy = LongStrategy(
-            position_manager=self.mock_portfolio_manager,
-        )
+        mock_position_sizing_service = Mock()
+        mock_position_sizing_service.calculate_position_size = AsyncMock(return_value=1)
+        self.strategy = LongStrategy(figi="FUTIMOEXF000", position_sizing_service=mock_position_sizing_service)
     
     def test_init(self):
         """Тест инициализации"""
-        self.assertEqual(self.strategy._position_manager, self.mock_portfolio_manager)
         self.assertEqual(self.strategy.strategy_name, "LongStrategy")
     
     @pytest.mark.asyncio
@@ -63,7 +76,10 @@ class TestLongStrategy(unittest.TestCase):
         mock_signal.candle = Mock()
         mock_signal.candle.close = 100.0
         
-        result = await self.strategy.execute(mock_signal)
+        # Создаем контекст позиции
+        position_context = create_position_context()
+        
+        result = await self.strategy.execute(mock_signal, position_context)
         
         self.assertEqual(result, [])
     
@@ -88,17 +104,6 @@ class TestLongStrategy(unittest.TestCase):
         mock_signal.candle = mock_candle
         
         
-        with patch.object(self.strategy, '_position_manager') as mock_pm:
-            mock_pm.get_loss_positions = AsyncMock(return_value=[])
-            mock_pm.get_profit_positions = AsyncMock(return_value=[])
-            
-            result = await self.strategy.execute(mock_signal)
-            
-            self.assertIsNotNone(result)
-            self.assertIsInstance(result, list)
-    
-    @pytest.mark.asyncio
-
     
     async def test_execute_sell_signal_success(self):
         """Тест успешного выполнения сигнала на продажу"""
@@ -121,7 +126,10 @@ class TestLongStrategy(unittest.TestCase):
         self.strategy._position = 5
         self.strategy._cost_basis = 95.0
         
-        result = await self.strategy.execute(mock_signal)
+        # Создаем контекст позиции
+        position_context = create_position_context()
+        
+        result = await self.strategy.execute(mock_signal, position_context)
         
         self.assertIsNotNone(result)
         self.assertIsInstance(result, list)
@@ -152,19 +160,6 @@ class TestLongStrategy(unittest.TestCase):
         mock_portfolio.available_amount = 500.0
         mock_portfolio.positions = []
         
-        with patch.object(self.strategy, '_position_manager') as mock_pm:
-            mock_pm.get_loss_positions = AsyncMock(return_value=[])
-            mock_pm.get_profit_positions = AsyncMock(return_value=[])
-            mock_pm.get_deposit = AsyncMock(return_value=1000.0)
-            mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
-            
-            result = await self.strategy.execute(mock_signal)
-            
-            # Должен вернуть пустой список при недостатке средств
-            self.assertEqual(result, [])
-    
-    @pytest.mark.asyncio
-
     
     async def test_execute_no_position_to_sell(self):
         """Тест выполнения сигнала на продажу без позиции"""
@@ -186,26 +181,16 @@ class TestLongStrategy(unittest.TestCase):
         # Устанавливаем нулевую позицию
         self.strategy._position = 0
         
-        result = await self.strategy.execute(mock_signal)
+        # Создаем контекст позиции
+        position_context = create_position_context()
+        
+        result = await self.strategy.execute(mock_signal, position_context)
         
         # Должен вернуть пустой список, так как нет позиции для продажи
         self.assertEqual(result, [])
     
     def test_items_to_buy_calculation(self):
         """Тест расчета количества для покупки"""
-        with patch.object(self.strategy, '_position_manager') as mock_pm:
-            
-            result = self.strategy._items_to_buy(100.0)
-            
-            # Проверяем, что результат больше 0
-            self.assertGreater(result, 0)
-    
-    def test_items_to_buy_api_error(self):
-        """Тест расчета количества при ошибке API"""
-        # В новой архитектуре _items_to_buy просто возвращает 1
-        result = self.strategy._items_to_buy(Mock())
-        self.assertEqual(result, 1)
-
 
 class TestShortStrategy(unittest.TestCase):
     """Тесты для ShortStrategy"""
@@ -218,13 +203,12 @@ class TestShortStrategy(unittest.TestCase):
         self.mock_portfolio_manager = AsyncMock()
         self.mock_portfolio_manager.get_loss_positions = AsyncMock(return_value=[])
         self.mock_portfolio_manager.get_profit_positions = AsyncMock(return_value=[])
-        self.strategy = ShortStrategy(
-            position_manager=self.mock_portfolio_manager,
-        )
+        mock_position_sizing_service = Mock()
+        mock_position_sizing_service.calculate_position_size = AsyncMock(return_value=1)
+        self.strategy = ShortStrategy(figi="FUTIMOEXF000", position_sizing_service=mock_position_sizing_service)
     
     def test_init(self):
         """Тест инициализации"""
-        self.assertEqual(self.strategy._position_manager, self.mock_portfolio_manager)
         self.assertEqual(self.strategy.strategy_name, "ShortStrategy")
     
     @pytest.mark.asyncio
@@ -244,7 +228,10 @@ class TestShortStrategy(unittest.TestCase):
         mock_signal.candle = Mock()
         mock_signal.candle.close = 100.0
         
-        result = await self.strategy.execute(mock_signal)
+        # Создаем контекст позиции
+        position_context = create_position_context()
+        
+        result = await self.strategy.execute(mock_signal, position_context)
         
         self.assertEqual(result, [])
     
@@ -269,17 +256,6 @@ class TestShortStrategy(unittest.TestCase):
         mock_signal.candle = mock_candle
         
         
-        with patch.object(self.strategy, '_position_manager') as mock_pm:
-            mock_pm.get_loss_positions = AsyncMock(return_value=[])
-            mock_pm.get_profit_positions = AsyncMock(return_value=[])
-            
-            result = await self.strategy.execute(mock_signal)
-            
-            self.assertIsNotNone(result)
-            self.assertIsInstance(result, list)
-    
-    @pytest.mark.asyncio
-
     
     async def test_execute_buy_short_signal_success(self):
         """Тест успешного выполнения сигнала на покупку для закрытия шорта"""
@@ -302,7 +278,10 @@ class TestShortStrategy(unittest.TestCase):
         self.strategy._position = -5
         self.strategy._cost_basis = 105.0
         
-        result = await self.strategy.execute(mock_signal)
+        # Создаем контекст позиции
+        position_context = create_position_context()
+        
+        result = await self.strategy.execute(mock_signal, position_context)
         
         self.assertIsNotNone(result)
         self.assertIsInstance(result, list)
@@ -333,19 +312,6 @@ class TestShortStrategy(unittest.TestCase):
         mock_portfolio.available_amount = 500.0
         mock_portfolio.positions = []
         
-        with patch.object(self.strategy, '_position_manager') as mock_pm:
-            mock_pm.get_loss_positions = AsyncMock(return_value=[])
-            mock_pm.get_profit_positions = AsyncMock(return_value=[])
-            mock_pm.get_deposit = AsyncMock(return_value=1000.0)
-            mock_pm.get_guarantee_deposit = AsyncMock(return_value=1700.0)
-            
-            result = await self.strategy.execute(mock_signal)
-            
-            # Должен вернуть пустой список при недостатке средств
-            self.assertEqual(result, [])
-    
-    @pytest.mark.asyncio
-
     
     async def test_execute_no_short_position_to_close(self):
         """Тест выполнения сигнала на закрытие шорта без позиции"""
@@ -367,26 +333,14 @@ class TestShortStrategy(unittest.TestCase):
         # Устанавливаем нулевую позицию
         self.strategy._position = 0
         
-        result = await self.strategy.execute(mock_signal)
+        # Создаем контекст позиции
+        position_context = create_position_context()
+        
+        result = await self.strategy.execute(mock_signal, position_context)
         
         # Должен вернуть пустой список, так как нет позиции для закрытия
         self.assertEqual(result, [])
     
-    def test_items_to_sell_short_calculation(self):
-        """Тест расчета количества для продажи в шорт"""
-        with patch.object(self.strategy, '_position_manager') as mock_pm:
-            
-            result = self.strategy._items_to_sell_short(100.0)
-            
-            # Проверяем, что результат больше 0
-            self.assertGreater(result, 0)
-    
-    def test_items_to_sell_short_api_error(self):
-        """Тест расчета количества при ошибке API"""
-        # В новой архитектуре _items_to_sell_short просто возвращает 1
-        result = self.strategy._items_to_sell_short(Mock())
-        self.assertEqual(result, 1)
-
 
 # Функция для запуска асинхронных тестов
 def async_test(coro):

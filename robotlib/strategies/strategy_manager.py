@@ -28,9 +28,6 @@ class StrategyManager(StrategyManageable):
     def trades(self) -> DataFrame:
         return pd.DataFrame([asdict(order) for order in self._orders])
     
-    @property
-    def income(self) -> float:
-        return sum(strategy.income for strategy in self._strategies)
     
     def get_macd_data(self) -> List[dict]:
         """Возвращает данные MACD для анализа сигналов"""
@@ -125,20 +122,42 @@ class StrategyManager(StrategyManageable):
         # Выполняем все стратегии и собираем intents в арбитр
         intents_bucket: list[OrderIntent] = []
 
+        # Получаем контекст позиции для текущего инструмента
+        figi = getattr(candle, 'figi', 'unknown')
+        position_context = None
+        if self._position_manager and figi != 'unknown':
+            try:
+                position_context = await self._position_manager.get_position_context(figi)
+            except Exception as e:
+                self._logger.warning(f"Не удалось получить контекст позиции для {figi}: {e}")
+        
+        # Если контекст не получен, создаем пустой
+        if position_context is None:
+            from robotlib.trading.position_sync_interface import PositionContext
+            from datetime import datetime
+            position_context = PositionContext(
+                figi=figi,
+                quantity=0,
+                avg_price=0.0,
+                has_position=False,
+                direction='',
+                last_updated=datetime.now()
+            )
+
         for strategy in self._strategies:
             self._logger.debug(f"execute: {strategy.__class__.__name__} processing signal hist={getattr(signal,'histogram',None)}")
-            order_intents: list[OrderIntent] = await strategy.execute(signal)
+            order_intents: list[OrderIntent] = await strategy.execute(signal, position_context)
             self._logger.debug(f"execute: {strategy.__class__.__name__} вернул {len(order_intents)} намерений")
             intents_bucket.extend(order_intents)
         
-        # Каждая стратегия проверяет свои стоп-лоссы
-        for strategy in self._strategies:
-            if hasattr(strategy, '_check_stop_loss'):
-                try:
-                    stop_loss_orders = await strategy._check_stop_loss(candle)
-                    intents_bucket.extend(stop_loss_orders)
-                except Exception as e:
-                    self._logger.error(f"Ошибка проверки стоп-лосса в {strategy.__class__.__name__}: {e}")
+        # Централизованная проверка стоп-лосс через PositionManager
+        if self._position_manager and figi != 'unknown':
+            try:
+                current_price = Money(candle.close).to_float()
+                stop_loss_orders = await self._check_stop_losses(figi, current_price)
+                intents_bucket.extend(stop_loss_orders)
+            except Exception as e:
+                self._logger.error(f"Ошибка проверки стоп-лосса для {figi}: {e}")
         
         self._intent_arbiter.add_intents(intents_bucket)
         netted_intents = self._intent_arbiter.flush()
@@ -148,13 +167,6 @@ class StrategyManager(StrategyManageable):
             try:
                 self._logger.info(f"Arbiter Intent → исполнение: {order_intent}")
                 execution = await self._order_executor.execute_order(order_intent)
-                # Передаём результат во все стратегии (для синхронизации состояния позиций)
-                for strategy in self._strategies:
-                    if hasattr(strategy, '_process_execution'):
-                        try:
-                            await strategy._process_execution(execution)
-                        except Exception:
-                            pass
                 self._logger.info(f"Ордер выполнен: {execution}")
             except Exception as e:
                 self._logger.error(f"Ошибка выполнения ордера {order_intent}: {e}")
@@ -230,19 +242,40 @@ class StrategyManager(StrategyManageable):
         for order_intent in self._orders:
             self._logger.info(str(order_intent))
     
-    def get_strategy_income(self, strategy_class: type) -> float:
-        """Возвращает доход конкретной стратегии по классу"""
-        for strategy in self._strategies:
-            if isinstance(strategy, strategy_class):
-                return strategy.income
-        return 0.0
     
-    def get_strategy_position(self, strategy_class: type) -> int:
-        """Возвращает позицию конкретной стратегии по классу"""
-        for strategy in self._strategies:
-            if isinstance(strategy, strategy_class):
-                return strategy.position
-        return 0
+    
+    async def _check_stop_losses(self, figi: str, current_price: float) -> list[OrderIntent]:
+        """Централизованная проверка стоп-лосс через PositionManager"""
+        from robotlib.trading.order_types import OrderIntent, OrderDirection, OrderType
+        
+        orders = []
+        
+        # Получаем убыточные позиции от PositionManager
+        loss_positions = await self._position_manager.get_loss_positions(figi, current_price)
+        
+        if loss_positions:
+            total_qty = sum(pos.quantity for pos in loss_positions)
+            
+            # Определяем направление закрытия на основе направления позиции
+            position_direction = await self._position_manager.get_position_direction(figi)
+            if position_direction == 'long':
+                # Закрываем лонг - продаем
+                direction = OrderDirection.SELL
+            else:  # short
+                # Закрываем шорт - покупаем
+                direction = OrderDirection.BUY
+            
+            orders.append(OrderIntent(
+                direction=direction,
+                quantity=total_qty,
+                order_type=OrderType.MARKET,
+                figi=figi,
+                strategy="stop_loss"
+            ))
+            
+            self._logger.info(f"🛡️ Стоп-лосс: {direction.value} {total_qty} {figi} при цене {current_price}")
+        
+        return orders
     
     
     
