@@ -22,11 +22,12 @@ class PositionSyncService(PositionSyncServiceable):
     Единый сервис для синхронизации и восстановления позиций
     """
     
-    def __init__(self, db_path: str, api_client: TinkoffAPIClient, restoration_service: PositionRestorationServiceable):
+    def __init__(self, db_path: str, api_client: TinkoffAPIClient, restoration_service: PositionRestorationServiceable, ui_bridge=None):
         self._db_path = db_path
         self._api_client = api_client
         self._logger = get_logger(__name__)
         self._restoration_service = restoration_service
+        self._ui_bridge = ui_bridge  # Мост для уведомления UI
     
     def _convert_direction_string_to_enum(self, direction_str: str) -> OrderDirection:
         """Преобразует строку направления в OrderDirection enum"""
@@ -75,6 +76,9 @@ class PositionSyncService(PositionSyncServiceable):
                 
                 # 7. Сохраняем восстановленный FIFO в базу данных
                 await self.save_fifo_cache(fifo_cache)
+                
+                # 8. Уведомляем UI о новых данных
+                await self._notify_ui_about_new_orders()
                 
                 self._logger.info(f"✅ Синхронизация завершена: {len(api_positions)} позиций")
                 return api_positions
@@ -254,9 +258,11 @@ class PositionSyncService(PositionSyncServiceable):
                 # Фильтруем только недостающие ордеры
                 missing_entries = []
                 for entry in fifo_entries:
+                    # Преобразуем direction в строку для корректного сравнения
+                    direction_str = entry.direction.value if hasattr(entry.direction, 'value') else str(entry.direction)
                     order_key = (
                         entry.timestamp.isoformat(),
-                        entry.direction,
+                        direction_str,
                         entry.price,
                         entry.quantity
                     )
@@ -271,6 +277,9 @@ class PositionSyncService(PositionSyncServiceable):
                 # Сохраняем только недостающие ордеры
                 for entry in missing_entries:
                     try:
+                        # Преобразуем direction в строку для базы данных
+                        direction_str = entry.direction.value if hasattr(entry.direction, 'value') else str(entry.direction)
+                        
                         await conn.execute("""
                             INSERT INTO orders 
                             (time, figi, direction, price, quantity, reason, strategy)
@@ -278,7 +287,7 @@ class PositionSyncService(PositionSyncServiceable):
                         """, (
                             entry.timestamp.isoformat(),
                             figi,
-                            entry.direction.value,  # Преобразуем OrderDirection в строку
+                            direction_str,  # Строка направления
                             entry.price,
                             entry.quantity,
                             "Restored from API operations history",  # reason
@@ -294,6 +303,50 @@ class PositionSyncService(PositionSyncServiceable):
             await conn.commit()
         
         self._logger.info(f"✅ Итого: сохранено {total_saved} новых ордеров, пропущено {total_skipped} существующих")
+    
+    async def _notify_ui_about_new_orders(self):
+        """Уведомляет UI о новых ордерах для обновления кэша"""
+        if not self._ui_bridge:
+            self._logger.debug("UI bridge не настроен, пропускаем уведомление")
+            return
+            
+        try:
+            # Загружаем новые ордеры из базы данных
+            market_db_path = self._db_path.replace('positions.db', 'market.db')
+            import sqlite3
+            import pandas as pd
+            
+            with sqlite3.connect(market_db_path) as conn:
+                # Получаем все ордеры
+                df = pd.read_sql_query("""
+                    SELECT time, figi, direction, price, quantity, reason, strategy 
+                    FROM orders 
+                    ORDER BY datetime(replace(time, 'T', ' ')) DESC 
+                    LIMIT 100
+                """, conn)
+                
+                if not df.empty:
+                    # Конвертируем в формат для UI
+                    orders_data = []
+                    for _, row in df.iterrows():
+                        orders_data.append({
+                            'time': pd.to_datetime(row['time']),
+                            'figi': row['figi'],
+                            'direction': row['direction'],
+                            'price': float(row['price']),
+                            'quantity': int(row['quantity']),
+                            'reason': row['reason'],
+                            'strategy': row['strategy']
+                        })
+                    
+                    # Отправляем уведомление UI через WebSocket
+                    await self._ui_bridge._notify_orders_updated(orders_data)
+                    self._logger.info(f"📡 UI уведомлен о {len(orders_data)} ордерах")
+                else:
+                    self._logger.debug("Нет ордеров для уведомления UI")
+                    
+        except Exception as e:
+            self._logger.error(f"Ошибка уведомления UI: {e}")
     
     async def get_fifo_cache(self) -> Dict[str, List[FIFOEntry]]:
         """Получает FIFO кэш из БД"""

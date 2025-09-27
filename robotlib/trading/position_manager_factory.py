@@ -41,20 +41,20 @@ class PositionManagerFactory:
         max_retries: int = 3
     ) -> PositionManager:
         """
-        Создает PositionManager и синхронизирует позиции при старте
+        Создает PositionManager БЕЗ автоматической синхронизации
         
         Args:
             db_path: Путь к базе данных
             risk_manager: Менеджер рисков
             sync_service: Сервис синхронизации позиций
-            max_retries: Максимальное количество попыток синхронизации
+            max_retries: Максимальное количество попыток синхронизации (не используется)
             
         Returns:
-            PositionManager: Созданный и синхронизированный менеджер позиций
+            PositionManager: Созданный менеджер позиций (синхронизация отложена)
         """
         position_manager = PositionManager(db_path, risk_manager, sync_service)
         
-        # Синхронизируем позиции при старте
-        await position_manager.sync_on_startup(max_retries)
+        # Синхронизация отложена до SessionController.start()
+        # Это предотвращает множественные API вызовы при создании DI контейнера
         
         return position_manager

@@ -308,14 +308,14 @@ class APISyncService:
         # Конвертируем цену в рубли
         price = 0.0
         if hasattr(trade, 'price') and trade.price:
-            price_data = money_value_to_dict(trade.price)
-            price = convert_money_to_rubles(price_data, point_value=10.0)  # Для фьючерсов
+            from robotlib.utils.money import money_value_to_float_with_currency
+            price = money_value_to_float_with_currency(trade.price, point_value=10.0)
         
         # Конвертируем комиссию в рубли
         commission = 0.0
         if hasattr(operation, 'commission') and operation.commission:
-            commission_data = money_value_to_dict(operation.commission)
-            commission = convert_money_to_rubles(commission_data)
+            from robotlib.utils.money import money_value_to_float_with_currency
+            commission = money_value_to_float_with_currency(operation.commission, point_value=1.0)  # Комиссия обычно в рублях
         
         return Order(
             order_id=trade.trade_id,  # Используем ID сделки как ID ордера

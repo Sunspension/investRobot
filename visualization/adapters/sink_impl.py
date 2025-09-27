@@ -292,6 +292,28 @@ class TradingToUIBridge(TradingEventSinkable):
         except Exception as e:
             self._logger.error(f"Ошибка отправки снэпшота: {e}")
 
+    async def _notify_orders_updated(self, orders_data: list) -> None:
+        """Уведомляет UI о обновлении ордеров"""
+        try:
+            # Обновляем данные в VisualizationDataStore
+            self._data.orders_data = orders_data
+            self._data.orders_count = len(orders_data)
+            
+            # Подсчитываем статистику
+            buy_orders = [order for order in orders_data if order.get('direction') == 'buy']
+            sell_orders = [order for order in orders_data if order.get('direction') == 'sell']
+            self._data.buy_orders_count = len(buy_orders)
+            self._data.sell_orders_count = len(sell_orders)
+            
+            # Отправляем обновленный снэпшот
+            snapshot = self._data.get_data_snapshot()
+            self._ws.emit_snapshot(snapshot)
+            
+            self._logger.info(f"📡 UI уведомлен об обновлении ордеров: {len(orders_data)} ордеров")
+            
+        except Exception as e:
+            self._logger.error(f"Ошибка уведомления UI об ордерах: {e}")
+
     async def start_periodic_snapshots(self) -> None:
         """Запускает периодические снэпшоты для синхронизации"""
         if self._snapshot_task is None:

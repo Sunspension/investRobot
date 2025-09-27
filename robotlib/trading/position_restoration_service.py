@@ -44,10 +44,10 @@ class PositionRestorationService(PositionRestorationServiceable):
             # Для обычных чисел
             return int(quantity)
     
-    def __init__(self, api_client: TinkoffAPIClient, point_value: float = 10.0):
-        self._api_client = api_client
+    def __init__(self, api_client: TinkoffAPIClient, point_value: float = 10.0) -> None:
+        self._api_client: TinkoffAPIClient = api_client
         self._logger = get_logger(__name__)
-        self._point_value = point_value  # Кешируем point_value
+        self._point_value: float = point_value  # Кешируем point_value
     
     async def restore_fifo_from_api(
         self, 
@@ -149,7 +149,7 @@ class PositionRestorationService(PositionRestorationServiceable):
             self._logger.error(f"Ошибка получения FIFO для {figi}: {e}")
             return []
     
-    async def _get_all_operations_with_pagination(self, figi: str, days_back: int) -> List:
+    async def _get_all_operations_with_pagination(self, figi: str, days_back: int) -> List[Operation]:
         """
         Получает все операции с пагинацией через курсор
         
@@ -160,18 +160,19 @@ class PositionRestorationService(PositionRestorationServiceable):
         Returns:
             Список всех операций
         """
-        all_operations = []
-        cursor = None
-        page = 1
+        all_operations: List[Operation] = []
+        cursor: Optional[str] = None
+        page: int = 1
+        max_operations: int = 1000  # Защита от бесконечной рекурсии
         
         # Вычисляем даты для запроса - увеличиваем период для sandbox
-        to_date = datetime.now()
-        from_date = to_date - timedelta(days=days_back)
+        to_date: datetime = datetime.now()
+        from_date: datetime = to_date - timedelta(days=days_back)
         
         # В sandbox режиме делаем несколько запросов с разными периодами
         if hasattr(self._api_client, '_sandbox_token') and self._api_client._sandbox_token:
             # Делаем несколько запросов с разными периодами для получения всех операций
-            periods = [
+            periods: List[tuple[datetime, datetime]] = [
                 (to_date - timedelta(days=30), to_date),      # Последние 30 дней
                 (to_date - timedelta(days=60), to_date - timedelta(days=30)),  # 30-60 дней назад
                 (to_date - timedelta(days=90), to_date - timedelta(days=60)), # 60-90 дней назад
@@ -180,7 +181,7 @@ class PositionRestorationService(PositionRestorationServiceable):
                 (to_date - timedelta(days=365), to_date - timedelta(days=180)), # 180-365 дней назад
             ]
             
-            all_operations = []
+            all_operations: List[Operation] = []
             for i, (period_from, period_to) in enumerate(periods):
                 self._logger.info(f"🔄 Запрос {i+1}/{len(periods)}: {period_from.date()} - {period_to.date()}")
                 
@@ -193,12 +194,17 @@ class PositionRestorationService(PositionRestorationServiceable):
                     )
                     
                     if response and hasattr(response, 'operations') and response.operations:
-                        figi_operations = [
+                        figi_operations: List[Operation] = [
                             item for item in response.operations 
                             if hasattr(item, 'figi') and item.figi == figi
                         ]
                         all_operations.extend(figi_operations)
                         self._logger.info(f"✅ Период {i+1}: получено {len(figi_operations)} операций для {figi}")
+                        
+                        # Защита от слишком большого количества операций
+                        if len(all_operations) > max_operations:
+                            self._logger.warning(f"⚠️ Достигнут лимит операций ({max_operations}), прерываем sandbox пагинацию")
+                            break
                     else:
                         self._logger.info(f"📋 Период {i+1}: нет операций")
                         
@@ -207,8 +213,8 @@ class PositionRestorationService(PositionRestorationServiceable):
                     continue
             
             # Подсчитываем итоговый баланс
-            total_buy = 0
-            total_sell = 0
+            total_buy: int = 0
+            total_sell: int = 0
             for op in all_operations:
                 if hasattr(op, 'operation_type') and hasattr(op, 'quantity'):
                     if op.operation_type == 15:  # BUY
@@ -216,7 +222,7 @@ class PositionRestorationService(PositionRestorationServiceable):
                     elif op.operation_type == 22:  # SELL
                         total_sell += self._convert_quotation_to_quantity(op.quantity)
             
-            net_position = total_buy - total_sell
+            net_position: int = total_buy - total_sell
             self._logger.info(f"✅ Sandbox пагинация завершена: получено {len(all_operations)} операций")
             self._logger.info(f"📊 Итоговый баланс: {total_buy} покупок - {total_sell} продаж = {net_position} лотов")
             return all_operations
@@ -242,14 +248,14 @@ class PositionRestorationService(PositionRestorationServiceable):
                 # Обрабатываем разные типы ответов
                 if hasattr(response, 'items'):
                     # Ответ с курсором (production)
-                    operations = response.items
-                    has_next = response.has_next
-                    next_cursor = response.next_cursor
+                    operations: List[Operation] = response.items
+                    has_next: bool = response.has_next
+                    next_cursor: Optional[str] = response.next_cursor
                 elif hasattr(response, 'operations'):
                     # Обычный ответ (sandbox)
-                    operations = response.operations
-                    has_next = False  # В sandbox нет пагинации
-                    next_cursor = None
+                    operations: List[Operation] = response.operations
+                    has_next: bool = False  # В sandbox нет пагинации
+                    next_cursor: Optional[str] = None
                 else:
                     self._logger.debug(f"📋 Неизвестный формат ответа на странице {page}")
                     break
@@ -259,19 +265,24 @@ class PositionRestorationService(PositionRestorationServiceable):
                     break
                 
                 # Фильтруем операции по FIGI
-                figi_operations = [
+                figi_operations: List[Operation] = [
                     item for item in operations 
                     if hasattr(item, 'figi') and item.figi == figi
                 ]
                 
                 # Логируем детали операций
                 if figi_operations:
-                    buy_ops = [op for op in figi_operations if hasattr(op, 'operation_type') and op.operation_type == 15]
-                    sell_ops = [op for op in figi_operations if hasattr(op, 'operation_type') and op.operation_type == 22]
+                    buy_ops: List[Operation] = [op for op in figi_operations if hasattr(op, 'operation_type') and op.operation_type == 15]
+                    sell_ops: List[Operation] = [op for op in figi_operations if hasattr(op, 'operation_type') and op.operation_type == 22]
                     self._logger.debug(f"📊 Страница {page}: {len(buy_ops)} покупок, {len(sell_ops)} продаж для {figi}")
                 
                 all_operations.extend(figi_operations)
                 self._logger.debug(f"✅ Страница {page}: получено {len(figi_operations)} операций для {figi} (всего: {len(all_operations)})")
+                
+                # Защита от слишком большого количества операций
+                if len(all_operations) > max_operations:
+                    self._logger.warning(f"⚠️ Достигнут лимит операций ({max_operations}), прерываем пагинацию")
+                    break
                 
                 # Проверяем, есть ли следующая страница
                 if not has_next:
@@ -291,8 +302,8 @@ class PositionRestorationService(PositionRestorationServiceable):
                 break
         
         # Подсчитываем итоговый баланс операций
-        total_buy = 0
-        total_sell = 0
+        total_buy: int = 0
+        total_sell: int = 0
         for op in all_operations:
             if hasattr(op, 'operation_type') and hasattr(op, 'quantity'):
                 if op.operation_type == 15:  # BUY
@@ -300,7 +311,7 @@ class PositionRestorationService(PositionRestorationServiceable):
                 elif op.operation_type == 22:  # SELL
                     total_sell += self._convert_quotation_to_quantity(op.quantity)
         
-        net_position = total_buy - total_sell
+        net_position: int = total_buy - total_sell
         self._logger.info(f"✅ Пагинация завершена: получено {len(all_operations)} операций за {page-1} страниц")
         self._logger.info(f"📊 Итоговый баланс: {total_buy} покупок - {total_sell} продаж = {net_position} лотов")
         return all_operations
@@ -317,17 +328,17 @@ class PositionRestorationService(PositionRestorationServiceable):
         """
         try:
             # Извлекаем цену из операции
-            price = await self._extract_price_from_operation(operation)
+            price: float = await self._extract_price_from_operation(operation)
             if price <= 0:
                 return None
             
             # Определяем направление операции
-            direction = self._determine_operation_direction(operation)
+            direction: Optional[OrderDirection] = self._determine_operation_direction(operation)
             if not direction:
                 return None
             
             # Создаем FIFO запись
-            fifo_entry = FIFOEntry(
+            fifo_entry: FIFOEntry = FIFOEntry(
                 quantity=self._convert_quotation_to_quantity(operation.quantity),
                 price=price,
                 timestamp=operation.date,
@@ -354,14 +365,18 @@ class PositionRestorationService(PositionRestorationServiceable):
         try:
             # Извлекаем цену из операции (фьючерсы всегда в пунктах)
             # Используем кешированный point_value
-            point_value = self._point_value
+            point_value: float = self._point_value
+            
+            self._logger.debug(f"🔍 Извлечение цены из операции {operation.id}: price={getattr(operation, 'price', None)}, price_units={getattr(operation, 'price_units', None)}, price_nano={getattr(operation, 'price_nano', None)}")
             
             if hasattr(operation, 'price') and operation.price:
-                # Для операций всегда применяем point_value для фьючерсов
-                return Money(operation.price).to_float() * point_value
+                # Для операций НЕ применяем point_value - цена уже в правильных единицах
+                self._logger.debug(f"💰 Используем operation.price: {type(operation.price)}")
+                return Money(operation.price).to_float()
             elif hasattr(operation, 'price_units') and hasattr(operation, 'price_nano'):
-                # Создаем Money из units и nano, умножаем на point_value для фьючерсов
-                return Money(operation.price_units, operation.price_nano).to_float() * point_value
+                # Создаем Money из units и nano, НЕ умножаем на point_value
+                self._logger.debug(f"💰 Используем price_units/nano: {type(operation.price_units)}/{type(operation.price_nano)}")
+                return Money(operation.price_units, operation.price_nano).to_float()
             
             # Если цена не найдена, возвращаем 0
             self._logger.warning(f"Не удалось извлечь цену из операции {operation.id}")
@@ -383,7 +398,7 @@ class PositionRestorationService(PositionRestorationServiceable):
         """
         try:
             # Анализируем тип операции
-            operation_type = getattr(operation, 'operation_type', '')
+            operation_type: int = getattr(operation, 'operation_type', 0)
             
             # Определяем направление на основе типа операции
             if operation_type == 15:  # OPERATION_TYPE_BUY

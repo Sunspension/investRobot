@@ -78,13 +78,25 @@ class SessionController(SessionControllable):
         try:
             dm = self._dependencies.data_manager
             dm.load_recent_candles(
-                db_path="data/market.db",
+                db_path=self._config.market_db_path,
                 figi=self._config.figi,
                 limit=300,
             )
             self._logger.info(f"Начальные свечи загружены: {len(dm.candles_data)} шт.")
         except Exception as e:
             self._logger.warning(f"Не удалось загрузить начальные свечи для визуализатора: {e}")
+
+    async def _load_initial_orders(self) -> None:
+        try:
+            dm = self._dependencies.data_manager
+            dm.load_recent_orders_today(
+                db_path=self._config.market_db_path,
+                figi=self._config.figi,
+                limit=300,
+            )
+            self._logger.info(f"Начальные ордеры загружены: {len(dm.orders_data)} шт.")
+        except Exception as e:
+            self._logger.warning(f"Не удалось загрузить начальные ордеры для визуализатора: {e}")
 
     async def _publish_initial_portfolio(self) -> None:
         try:
@@ -150,10 +162,16 @@ class SessionController(SessionControllable):
             # Проверяем лимиты риска перед началом сессии
             await self._check_risk_limits()
             
+            # Синхронизируем позиции при старте сессии (отложенная синхронизация)
+            await self._sync_positions_on_startup()
+            
             # Компоненты уже инициализированы в DI контейнере
             self._logger.info("✅ Компоненты уже инициализированы в DI контейнере")
             self._is_initialized = True
+            
+            # Загружаем начальные данные для визуализатора
             await self._load_initial_candles()
+            await self._load_initial_orders()
 
             if self._visualizer:
                 await self._visualizer.start()
@@ -542,6 +560,23 @@ class SessionController(SessionControllable):
                 self._logger.info("Статус стратегий обновлен в визуализаторе")
             except Exception as e:
                 self._logger.error(f"Ошибка обновления статуса стратегий: {e}")
+    
+    async def _sync_positions_on_startup(self) -> None:
+        """Синхронизирует позиции при старте сессии"""
+        try:
+            self._logger.info("🔄 Синхронизация позиций при старте сессии...")
+            
+            # Получаем PositionManager из зависимостей
+            position_manager = self._dependencies.position_manager
+            
+            # Синхронизируем позиции
+            await position_manager.sync_on_startup(max_retries=3)
+            
+            self._logger.info("✅ Синхронизация позиций завершена")
+            
+        except Exception as e:
+            self._logger.error(f"Ошибка синхронизации позиций: {e}")
+            # Не прерываем запуск сессии из-за ошибки синхронизации
     
     async def get_session_status(self) -> dict:
         """Возвращает статус сессии"""

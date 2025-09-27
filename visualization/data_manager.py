@@ -322,21 +322,12 @@ class VisualizationDataStore:
                     "FROM orders WHERE figi = ? AND date(replace(time, 'T', ' '), 'localtime') = date('now','localtime') "
                     "ORDER BY datetime(replace(time, 'T', ' ')) ASC LIMIT ?"
                 )
-                query_any = (
-                    "SELECT time, figi, direction, price, quantity, reason, strategy "
-                    "FROM orders WHERE figi = ? ORDER BY datetime(replace(time, 'T', ' ')) DESC LIMIT ?"
-                )
                 
                 df = pd.read_sql_query(query_today, conn, params=(figi, limit))
                 self.logger.info(f"Найдено ордеров за сегодня: {len(df)}")
 
-                # Фолбэк: если за текущий день нет записей — берём последние N ордеров без фильтра по дате
-                if df.empty:
-                    df = pd.read_sql_query(query_any, conn, params=(figi, limit))
-                    self.logger.info(f"Найдено ордеров за все время: {len(df)}")
-                    # Разворачиваем в возрастающий порядок для стабильного отображения
-                    if not df.empty:
-                        df = df.iloc[::-1].reset_index(drop=True)
+                # Убираем fallback - показываем только ордера за сегодня
+                # Исторические ордера должны загружаться отдельно при необходимости
 
                 orders: List[Dict[str, Any]] = []
                 for _, row in df.iterrows():

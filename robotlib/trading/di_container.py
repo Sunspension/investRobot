@@ -13,10 +13,8 @@ from robotlib.trading.order_executor import OrderExecutor
 from robotlib.trading.market_data_stream import MarketDataStream
 from robotlib.trading.stream_config import StreamConfig
 from robotlib.trading.candle_cache import CandleCache
-from robotlib.trading.candle_cache_interfaces import CandleCacheable
 from robotlib.trading.stream_watchdog import StreamWatchdog
 from robotlib.trading.historical_data_loader import HistoricalDataLoader
-from robotlib.trading.historical_data_loader_interfaces import HistoricalDataLoaderable
 from robotlib.trading.stream_registry import get_stream_registry
 from robotlib.trading.position_sizing_service import PositionSizingService
 from robotlib.trading.position_sizing_config import PositionSizingConfig
@@ -38,7 +36,6 @@ from visualization.chart_builder import ChartBuilder
 from visualization.ui_components import UIComponents
 from visualization.channels.ws import WebSocketHub
 from visualization.services.market_status_service import MarketStatusService
-from robotlib.trading_interfaces import MarketStatusSinkable
 from robotlib.trading.position_restoration_service import PositionRestorationService
 
 class TradingSystemContainer:
@@ -337,12 +334,12 @@ class TradingSystemContainer:
         return self._instances['market_data_stream']
     
     async def get_position_manager(self) -> PositionManager:
-        """Получает PositionManager"""
+        """Получает PositionManager БЕЗ автоматической синхронизации"""
         if 'position_manager' not in self._instances:
             risk_manager = await self.get_risk_manager()
             sync_service = await self.get_sync_service()
             self._instances['position_manager'] = await PositionManagerFactory.create_and_sync_position_manager(
-                db_path=self._config.db_path,
+                db_path=self._config.positions_db_path,
                 risk_manager=risk_manager,
                 sync_service=sync_service
             )
@@ -354,7 +351,21 @@ class TradingSystemContainer:
             from robotlib.trading.position_sync_service import PositionSyncService
             api_client = await self.get_api_client()
             restoration_service = PositionRestorationService(api_client, point_value=10.0)
-            self._instances['sync_service'] = PositionSyncService(self._config.db_path, api_client, restoration_service)
+            
+            # Получаем UI bridge для уведомлений
+            ui_bridge = None
+            try:
+                trading_deps = await self.get_trading_dependencies()
+                ui_bridge = trading_deps.event_sink
+            except Exception:
+                pass  # UI bridge может быть недоступен
+                
+            self._instances['sync_service'] = PositionSyncService(
+                self._config.positions_db_path, 
+                api_client, 
+                restoration_service,
+                ui_bridge
+            )
         return self._instances['sync_service']
     
     async def get_trading_dependencies(self) -> TradingDependencies:

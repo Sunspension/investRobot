@@ -93,7 +93,7 @@ class LongStrategy(Strategyable):
             and hist_abs > 0.01
         )
 
-        # Открыть позицию: ждём trough и пересечения вверх; увелечение лонга при тренде
+        # Открыть позицию: ждём trough и пересечения вверх; увеличение лонга при тренде
         if (self._wait_buy_cross and is_crossed_up) or (position_context.quantity > 0 and is_trending_up):
             # Запрашиваем размер позиции у PositionSizingService для открытия лонга
             quantity: int = await self._position_sizing_service.calculate_position_size(

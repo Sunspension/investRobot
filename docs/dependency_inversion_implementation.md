@@ -80,7 +80,7 @@ class TradingSystemContainer:
         # ... получение других зависимостей ...
         restoration_service = await self.get_restoration_service()  # ✅ Инъекция!
         return await PositionManagerFactory.create_and_sync_position_manager(
-            db_path=self._config.db_path,
+            db_path=self._config.positions_db_path,
             api_client=api_client,
             risk_manager=risk_manager,
             restoration_service=restoration_service

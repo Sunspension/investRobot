@@ -22,7 +22,8 @@ class TestTradingSystemWithDI(unittest.TestCase):
         self.config = TradingConfig(
             figi="FUTIMOEXF000",
             enable_visualization=False,
-            db_path=self.temp_db.name
+            positions_db_path=self.temp_db.name,
+            market_db_path=self.temp_db.name
         )
         # Добавляем мок tcs_client для тестов
         from unittest.mock import Mock
@@ -83,7 +84,8 @@ class TestTradingSystemWithDI(unittest.TestCase):
             config_with_viz = TradingConfig(
                 figi="FUTIMOEXF000", 
                 enable_visualization=True,
-                db_path=self.temp_db.name  # Используем существующую БД
+                positions_db_path=self.temp_db.name,  # Используем существующую БД
+                market_db_path=self.temp_db.name
             )
             config_with_viz.tcs_client = self.config.tcs_client
             container = TradingSystemContainer(config_with_viz)

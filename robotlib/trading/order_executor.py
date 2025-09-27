@@ -96,9 +96,8 @@ class OrderExecutor:
 
             exec_reason = f"{dir_text} {order_intent.quantity} шт."
 
-            # Конвертируем price в float, если это Quotation
-            from robotlib.utils.money import Money
-            executed_price = Money(result.executed_price or 0.0).to_float()
+            # executed_price уже конвертирован в float в wait_for_order_execution
+            executed_price = result.executed_price or 0.0
             
             execution = OrderExecution(
                 order_id=order_id,

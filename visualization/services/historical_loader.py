@@ -21,6 +21,12 @@ class HistoricalLoader:
                 self._logger.info(
                     f"✅ Загружено {len(data_manager.candles_data)} исторических свечей"
                 )
+                
+                # Загружаем ордеры из базы данных
+                data_manager.load_recent_orders_today(self._db_path, figi, limit=limit)
+                self._logger.info(
+                    f"✅ Загружено {len(data_manager.orders_data)} исторических ордеров"
+                )
             else:
                 self._logger.warning(f"⚠️ База данных не найдена: {self._db_path}")
         except Exception as e:
